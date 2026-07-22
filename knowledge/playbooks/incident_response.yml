@@ -1,0 +1,7 @@
+name: incident_response
+description: Playbook
+phases:
+  - recon
+  - analysis
+  - execution
+  - reporting

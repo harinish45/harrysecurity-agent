@@ -1,0 +1,7 @@
+name: iot_assessment
+description: Playbook
+phases:
+  - recon
+  - analysis
+  - execution
+  - reporting

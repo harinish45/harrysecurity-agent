@@ -1,0 +1,7 @@
+name: red_team_full
+description: Playbook
+phases:
+  - recon
+  - analysis
+  - execution
+  - reporting

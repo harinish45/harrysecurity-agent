@@ -1,0 +1,3 @@
+escalation_rules:
+  destructive_actions:
+    require_human_approval: true

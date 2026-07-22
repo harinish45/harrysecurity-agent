@@ -1,0 +1,2 @@
+class StrategyEngine:
+    pass

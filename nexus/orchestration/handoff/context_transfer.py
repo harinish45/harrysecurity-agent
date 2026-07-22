@@ -1,0 +1,2 @@
+class ContextTransfer:
+    pass

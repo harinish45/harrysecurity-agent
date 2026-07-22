@@ -1,0 +1,7 @@
+name: purple_team_exercise
+description: Playbook
+phases:
+  - recon
+  - analysis
+  - execution
+  - reporting

@@ -1,0 +1,2 @@
+class HandoffManager:
+    pass

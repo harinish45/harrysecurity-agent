@@ -1,0 +1,2 @@
+class ChainOfThought:
+    pass

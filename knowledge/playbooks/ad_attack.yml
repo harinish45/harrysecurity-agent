@@ -1,0 +1,7 @@
+name: ad_attack
+description: Playbook
+phases:
+  - recon
+  - analysis
+  - execution
+  - reporting

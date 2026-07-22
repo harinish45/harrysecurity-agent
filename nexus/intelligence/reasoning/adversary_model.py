@@ -1,0 +1,2 @@
+class AdversaryModel:
+    pass

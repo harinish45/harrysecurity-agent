@@ -1,0 +1,12 @@
+name: NEXUS-STRIKE
+inputs:
+  target:
+    required: true
+runs:
+  using: docker
+  image: Dockerfile
+  args:
+    - nexus
+    - run
+    --target
+    - ${{ inputs.target }}
