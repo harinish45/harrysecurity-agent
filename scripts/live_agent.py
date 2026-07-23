@@ -268,6 +268,43 @@ def main():
     else:
         print("  [-] No open ports to fingerprint")
 
+    # Phase 6.5: SQLi detection (via tool registry)
+    sep("PHASE 6.5 - SQL Injection Detection (Tool Fabric)")
+    sqli_findings = []
+    if open_ports:
+        # Ensure nexus package is importable
+        _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _project_root not in sys.path:
+            sys.path.insert(0, _project_root)
+        try:
+            from nexus.tools.webapp.sqli import run as sqli_run
+        except ImportError:
+            sqli_run = None
+
+        if sqli_run:
+            http_ports = [p for p in open_ports if p in
+                          (80, 443, 8080, 8000, 8443, 3000, 4000, 5000,
+                           7070, 8888, 9000, 9090, 9200)]
+            for port in http_ports[:3]:
+                scheme = "https" if port in (443, 8443) else "http"
+                test_url = f"{scheme}://{TARGET}:{port}/?id=1"
+                print(f"  [*] Testing {test_url} for SQLi...")
+                try:
+                    result = sqli_run(target=test_url)
+                    if result.get("findings"):
+                        sqli_findings.extend(result["findings"])
+                        for f in result["findings"]:
+                            print(f"  [!] {f}")
+                    else:
+                        print(f"  [+] No SQLi detected on port {port}")
+                except Exception as exc:
+                    print(f"  [-] SQLi test failed on port {port}: {exc}")
+        else:
+            print("  [-] nexus.tools.webapp.sqli not importable")
+        all_findings.extend(sqli_findings)
+    else:
+        print("  [-] No HTTP ports to test for SQLi")
+
     # Phase 7: SSL inspection
     sep("PHASE 7 - SSL/TLS Inspection")
     ssl_res = tool_ssl_inspect(TARGET, open_ports)
@@ -287,6 +324,7 @@ def main():
             f"{json.dumps(svc['services'], indent=2)}\n\n"
             f"Banners:\n{chr(10).join(bg['findings'])}\n\n"
             f"HTTP results:\n{chr(10).join(http['findings'])}\n\n"
+            f"SQLi results:\n{chr(10).join(sqli_findings) if sqli_findings else 'No SQLi detected'}\n\n"
             "Identify: 1) High-risk services, 2) Attack vectors, 3) Recommended next steps. Be concise.",
         )
     else:
