@@ -297,6 +297,19 @@ def main():
     analysis_blocks.append(port_analysis)
     print(f"\n{port_analysis}\n")
 
+    # Phase 8.5: CVE enrichment (offline knowledge base)
+    sep("PHASE 8.5 - CVE Enrichment (Local KB)")
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+        from cve_enhance import enrich_findings, format_for_llm
+        enriched = enrich_findings(all_findings)
+        cve_text = format_for_llm(enriched)
+        print(cve_text)
+    except Exception as exc:
+        print(f"  [-] CVE enrichment skipped: {exc}")
+        cve_text = "CVE enrichment unavailable."
+        enriched = []
+
     # Phase 9: Final report
     sep("PHASE 9 - Final Pentest Report (Ollama)")
     print("  [*] Generating security report with Ollama...")
@@ -305,7 +318,8 @@ def main():
         f"date {datetime.now().strftime('%Y-%m-%d')}.\n\n"
         f"FINDINGS:\n{chr(10).join(all_findings[:50])}\n\n"
         f"ANALYSIS:\n{chr(10).join(analysis_blocks)}\n\n"
-        "Format: Executive Summary, Scope, Findings (with severity), Recommendations, Conclusion.",
+        f"CVE ENRICHMENT:\n{cve_text}\n\n"
+        "Format: Executive Summary, Scope, Findings (with severity and CVE IDs), Recommendations, Conclusion.",
         system="You are a senior penetration tester writing a professional security report.",
     )
     print(f"\n{report}\n")
