@@ -4,7 +4,15 @@ NEXUS-STRIKE Command Line Interface
 Rich CLI with commands for running missions, managing tools/agents, and configuring providers.
 """
 import asyncio
+import sys
 import typer
+
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -18,11 +26,16 @@ from nexus.intelligence.llm.router import LLMRouter
 
 app = typer.Typer(
     name="nexus",
-    help="🏴‍☠️ NEXUS-STRIKE: The Ultimate AI-Powered Cybersecurity Platform",
+    help="NEXUS-STRIKE: The Ultimate AI-Powered Cybersecurity Platform",
     add_completion=False,
     rich_markup_mode="rich",
 )
-console = Console()
+
+console = Console(
+    legacy_windows=False,
+    emoji=sys.platform != "win32",
+    force_terminal=True,
+)
 
 @app.command()
 def run(

@@ -23,8 +23,12 @@ try:
         openrouter_model: str = "openai/gpt-4-turbo"
         openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
-        ollama_base_url: str = "http://localhost:11434"
-        ollama_model: str = "llama3.2"
+        ollama_base_url: str = "http://localhost:11434/v1"
+        ollama_model: str = "qwen2.5-coder:latest"
+
+        nvidia_api_key: Optional[str] = None
+        nvidia_model: str = "meta/llama-3.1-8b-instruct"
+        nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
 
         azure_openai_api_key: Optional[str] = None
         azure_openai_endpoint: Optional[str] = None
@@ -48,7 +52,7 @@ try:
         custom_api_type: str = "openai"  # openai, anthropic, or custom
 
         # Default LLM provider to use
-        llm_provider: str = "openai"
+        llm_provider: str = "ollama"
         llm_temperature: float = 0.7
         llm_max_tokens: int = 4096
 
@@ -85,8 +89,11 @@ except ImportError:
             self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
             self.openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4-turbo")
             self.openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-            self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-            self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
+            self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+            self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:latest")
+            self.nvidia_api_key = os.getenv("NVIDIA_API_KEY")
+            self.nvidia_model = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct")
+            self.nvidia_base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
             self.azure_openai_api_key = os.getenv("AZURE_OPENAI_API_KEY")
             self.azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
             self.azure_openai_model = os.getenv("AZURE_OPENAI_MODEL", "gpt-4")
@@ -103,7 +110,7 @@ except ImportError:
             self.custom_model = os.getenv("CUSTOM_MODEL", "custom-model")
             self.custom_base_url = os.getenv("CUSTOM_BASE_URL")
             self.custom_api_type = os.getenv("CUSTOM_API_TYPE", "openai")
-            self.llm_provider = os.getenv("LLM_PROVIDER", "openai")
+            self.llm_provider = os.getenv("LLM_PROVIDER", "ollama")
             self.llm_temperature = float(os.getenv("LLM_TEMPERATURE", "0.7"))
             self.llm_max_tokens = int(os.getenv("LLM_MAX_TOKENS", "4096"))
             self.nexus_mode = os.getenv("NEXUS_MODE", "guided")

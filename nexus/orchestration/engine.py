@@ -87,7 +87,7 @@ Format: [{{"agent": "recon_agent", "task": "description", "domain": "reconnaissa
             plan = json_mod.loads(response)
             if isinstance(plan, list) and len(plan) > 0:
                 return plan
-        except (json.JSONDecodeError, TypeError):
+        except (json_mod.JSONDecodeError, TypeError):
             pass
 
         # Default plan if LLM fails

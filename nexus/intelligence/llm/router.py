@@ -37,8 +37,14 @@ class LLMRouter:
         },
         "ollama": {
             "env_key": None,
-            "default_model": "llama3.2",
+            "default_model": "qwen2.5-coder:latest",
             "base_url_key": "ollama_base_url",
+            "api_type": "openai",
+        },
+        "nvidia": {
+            "env_key": "nvidia_api_key",
+            "default_model": "meta/llama-3.1-8b-instruct",
+            "base_url_key": "nvidia_base_url",
             "api_type": "openai",
         },
         "azure": {
@@ -129,7 +135,7 @@ class LLMRouter:
             # OpenAI-compatible (OpenAI, OpenRouter, Ollama, Groq, DeepSeek, Omniroute, Custom)
             base_url = getattr(config, cfg["base_url_key"]) if cfg["base_url_key"] else None
             self._client = OpenAICompatibleProvider(
-                api_key=getattr(config, cfg["env_key"]) if cfg["env_key"] else "",
+                api_key=getattr(config, cfg["env_key"]) if cfg["env_key"] else "ollama",
                 base_url=base_url,
                 model=getattr(config, f"{self.provider}_model", cfg["default_model"]),
             )
