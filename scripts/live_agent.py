@@ -196,7 +196,10 @@ def sep(title="", width=68):
         print("=" * width)
 
 
-def main():
+def main(target: str = "127.0.0.1", host: str = "localhost"):
+    global TARGET, TARGET_HOST
+    TARGET = target
+    TARGET_HOST = host
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print("\n" + "=" * 68)
     print(f"  NEXUS-STRIKE  Live AI Cybersecurity Agent")

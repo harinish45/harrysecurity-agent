@@ -65,7 +65,7 @@ try:
         nexus_tool_timeout: int = 300
 
         # === GUARDRAILS ===
-        nexus_allowed_targets: str = "localhost,127.0.0.1,example.com"
+        nexus_allowed_targets: str = "localhost,127.0.0.1,::1"
         nexus_legal_ack: str = ""
         nexus_rate_limit_calls: int = 100
         nexus_rate_limit_window: int = 60
@@ -119,7 +119,7 @@ except ImportError:
             self.nexus_auto_approve = os.getenv("NEXUS_AUTO_APPROVE", "false").lower() in ("1","true","yes")
             self.nexus_max_concurrent_tools = int(os.getenv("NEXUS_MAX_CONCURRENT_TOOLS", "5"))
             self.nexus_tool_timeout = int(os.getenv("NEXUS_TOOL_TIMEOUT", "300"))
-            self.nexus_allowed_targets = os.getenv("NEXUS_ALLOWED_TARGETS", "localhost,127.0.0.1,example.com")
+            self.nexus_allowed_targets = os.getenv("NEXUS_ALLOWED_TARGETS", "localhost,127.0.0.1,::1")
             self.nexus_legal_ack = os.getenv("NEXUS_LEGAL_ACK", "")
             self.nexus_rate_limit_calls = int(os.getenv("NEXUS_RATE_LIMIT_CALLS", "100"))
             self.nexus_rate_limit_window = int(os.getenv("NEXUS_RATE_LIMIT_WINDOW", "60"))

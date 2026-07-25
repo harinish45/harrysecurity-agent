@@ -4,9 +4,6 @@ Central registry for all 500+ security tools across 29 domains.
 Supports registration, lookup, domain filtering, and metadata.
 """
 from typing import Callable, Dict, Any, List, Optional
-from rich.console import Console
-
-console = Console()
 
 
 class ToolRegistry:
@@ -24,7 +21,6 @@ class ToolRegistry:
             "domain": name.split(".")[0] if "." in name else "unknown",
             "status": "stub",
         }
-        console.print(f"  [dim]Tool registered: {name}[/]")
 
     def get(self, name: str) -> Callable:
         """Get a tool function by name."""

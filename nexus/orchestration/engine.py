@@ -3,11 +3,14 @@ NEXUS-STRIKE Orchestration Engine
 Core mission execution engine with LLM-powered planning, agent delegation, and state management.
 """
 from rich.console import Console
+import json as json_mod
 from nexus.agents.base_agent import AgentContext
 from nexus.foundation.guardrails import LegalGuard, ScopeGuard, EscalationGuard
 from nexus.intelligence.llm.router import LLMRouter
 from nexus.foundation.logging import logger
 from nexus.tools.registry import tool_registry
+from nexus.tools.executor import ToolExecutor
+from nexus.reporting.generator import ReportGenerator
 
 console = Console()
 
@@ -17,9 +20,11 @@ class OrchestrationEngine:
     def __init__(self, llm_provider: str = None):
         self.llm = LLMRouter(provider=llm_provider)
         self.mission_context = None
+        self.tool_executor = ToolExecutor()
 
     async def run_mission(self, target: str, mission_id: str = "mission-001",
-                          mode: str = "guided", objective: str = "full_assessment") -> dict:
+                          mode: str = "guided", objective: str = "full_assessment",
+                          engagement: dict | None = None) -> dict:
         """Execute a complete security assessment mission."""
         console.print(f"[bold green]OrchestrationEngine: Starting mission {mission_id} on {target}[/]")
         logger.info(f"Mission {mission_id} started: target={target}, mode={mode}")
@@ -27,7 +32,7 @@ class OrchestrationEngine:
         # Phase 1: Validate
         try:
             ScopeGuard.validate(target)
-            LegalGuard.validate(mission_id, target)
+            LegalGuard.validate(target=target)
             EscalationGuard.validate(f"mission_{mission_id}", "execute")
         except Exception as e:
             logger.error(f"Guardrail validation failed: {e}")
@@ -50,7 +55,7 @@ class OrchestrationEngine:
                     self.mission_context.add_finding(f)
 
         # Phase 5: Generate report
-        report = await self._generate_report(self.mission_context.findings)
+        report, report_path = await self._generate_report(self.mission_context.findings, engagement)
 
         return {
             "mission_id": mission_id,
@@ -61,6 +66,7 @@ class OrchestrationEngine:
             "results": results,
             "findings": self.mission_context.findings,
             "report": report,
+            "report_path": report_path,
             "llm_provider": self.llm.get_provider_info(),
             "status": "completed",
         }
@@ -81,9 +87,8 @@ Format: [{{"agent": "recon_agent", "task": "description", "domain": "reconnaissa
         response = self.llm.complete(prompt, system="You are a cybersecurity mission planner. Return only valid JSON.")
         logger.debug(f"LLM plan response: {response[:200]}...")
 
-        # Parse or use default plan
+        import json as json_mod
         try:
-            import json as json_mod
             plan = json_mod.loads(response)
             if isinstance(plan, list) and len(plan) > 0:
                 return plan
@@ -115,8 +120,10 @@ Format: [{{"agent": "recon_agent", "task": "description", "domain": "reconnaissa
         # Run first few tools from the domain
         for tool_name in domain_tools[:3]:
             try:
-                tool = tool_registry.get(tool_name)
-                result = tool(target=self.mission_context.target if self.mission_context else "")
+                result = self.tool_executor.run(
+                    tool_name,
+                    target=self.mission_context.target if self.mission_context else "",
+                )
                 if result.get("findings"):
                     findings.extend(result["findings"])
             except Exception as e:
@@ -130,14 +137,18 @@ Format: [{{"agent": "recon_agent", "task": "description", "domain": "reconnaissa
             "status": "completed",
         }
 
-    async def _generate_report(self, findings: list) -> str:
-        """Generate a summary report using LLM."""
-        prompt = f"Generate a penetration test summary report for {len(findings)} findings."
+    async def _generate_report(self, findings: list, engagement: dict | None = None) -> tuple[str, str]:
+        """Generate a deterministic report and retain it as assessment evidence."""
+        from pathlib import Path
+        import re
 
-        try:
-            return self.llm.complete(prompt, system="You are a security report writer.")
-        except Exception:
-            return f"# Mission Report\n\nTotal findings: {len(findings)}\n\nNo LLM available for detailed report."
+        generator = ReportGenerator()
+        mission_id = self.mission_context.mission_id if self.mission_context else "assessment"
+        target = self.mission_context.target if self.mission_context else ""
+        report = generator.generate(findings, target=target, mission_id=mission_id, engagement=engagement)
+        safe_mission = re.sub(r"[^A-Za-z0-9_.-]+", "-", mission_id).strip(".-") or "assessment"
+        report_path = generator.write(report, Path("reports") / f"{safe_mission}.md")
+        return report, str(report_path)
 
     def get_mission_status(self) -> dict:
         """Get current mission status."""

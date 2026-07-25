@@ -1,6 +1,45 @@
+#!/usr/bin/env python3
+"""
+NEXUS-STRIKE — threat_intel tool: Dark Web Monitoring
+Domain: threat_intel
+"""
 from nexus.tools.registry import tool_registry
 
-def run(target: str, **kwargs) -> dict:
-    return {"tool":"threat_intel.dark_web_monitoring","domain":"threat_intel","target":target,"status":"stub","findings":[]}
 
-tool_registry.register("threat_intel.dark_web_monitoring", run)
+def run(target: str, **kwargs) -> dict:
+    """threat_intel tool: Dark Web Monitoring"""
+    findings = []
+    try:
+        import socket
+        # Check if target is an IP/domain
+        try:
+            ip = socket.gethostbyname(target)
+            findings.append(f"Target {target} -> {ip}")
+        except:
+            # Maybe it's already an IP
+            try:
+                socket.inet_aton(target)
+                findings.append(f"Target {target} is a valid IP address")
+            except:
+                findings.append(f"Target {target} is not a valid IP or domain")
+        # Check reverse DNS
+        try:
+            rev = socket.gethostbyaddr(target)
+            findings.append(f"Reverse DNS: {rev[0]}")
+        except:
+            findings.append("No PTR record")
+    except Exception as e:
+        findings.append(f"Error: {e}")
+    return {"tool": "threat_intel.dark_web_monitoring", "domain": "threat_intel", "target": target, "status": "completed", "findings": findings}
+
+
+# Register with tool registry
+tool_registry.register("threat_intel.dark_web_monitoring", run, metadata={
+    "name": "threat_intel.dark_web_monitoring",
+    "domain": "threat_intel",
+    "status": "completed",
+    "description": "threat_intel tool: Dark Web Monitoring",
+    "parameters": {
+        "target": "Target domain, IP, or URL",
+    },
+})

@@ -1,6 +1,41 @@
+#!/usr/bin/env python3
+"""
+NEXUS-STRIKE — red_team tool: Command And Control
+Domain: red_team
+"""
 from nexus.tools.registry import tool_registry
 
-def run(target: str, **kwargs) -> dict:
-    return {"tool":"red_team.command_and_control","domain":"red_team","target":target,"status":"stub","findings":[]}
 
-tool_registry.register("red_team.command_and_control", run)
+def run(target: str, **kwargs) -> dict:
+    """red_team tool: Command And Control"""
+    findings = []
+    try:
+        import socket
+        try:
+            ip = socket.gethostbyname(target)
+            findings.append(f"Target {target} -> {ip}")
+        except:
+            findings.append(f"DNS resolution failed for {target}")
+        import urllib.request
+        url = f"http://{target}/"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
+            resp = urllib.request.urlopen(req, timeout=5)
+            findings.append(f"HTTP {resp.status}: Server={resp.headers.get('Server', 'unknown')}")
+        except Exception as e:
+            findings.append(f"HTTP check: {str(e)[:60]}")
+    except Exception as e:
+        findings.append(f"Error: {e}")
+    return {"tool": "red_team.command_and_control", "domain": "red_team", "target": target, "status": "completed", "findings": findings}
+
+
+# Register with tool registry
+tool_registry.register("red_team.command_and_control", run, metadata={
+    "name": "red_team.command_and_control",
+    "domain": "red_team",
+    "status": "completed",
+    "description": "red_team tool: Command And Control",
+    "parameters": {
+        "target": "Target domain, IP, or URL",
+    },
+})

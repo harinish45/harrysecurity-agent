@@ -1,20 +1,79 @@
-import re, time, json, os, threading, ipaddress
+"""Target allow-list enforcement for authorised engagements."""
+from __future__ import annotations
+
+import ipaddress
+import socket
+from fnmatch import fnmatchcase
 from urllib.parse import urlparse
-from rich.console import Console
+
 from nexus.foundation.config import config
 
-console = Console()
 
-class ScopeGuardError(Exception):
+class ScopeGuardError(ValueError):
     pass
 
+
 class ScopeGuard:
-    "Layer 2: Enforces authorized target ranges ONLY."
+    """Reject targets that are not explicitly included in the engagement scope."""
+
+    @staticmethod
+    def _hostname(target: str) -> str:
+        parsed = urlparse(target if "://" in target else f"//{target}", scheme="")
+        hostname = parsed.hostname
+        if not hostname:
+            raise ScopeGuardError("Target must be a host, IP address, or URL")
+        return hostname.rstrip(".").lower()
+
+    @staticmethod
+    def _entries() -> list[str]:
+        value = str(config.nexus_allowed_targets or "")
+        entries = [item.strip().lower().rstrip(".") for item in value.split(",") if item.strip()]
+        if not entries:
+            raise ScopeGuardError("No allowed targets configured; set NEXUS_ALLOWED_TARGETS")
+        return entries
 
     @classmethod
-    def validate(cls, *args, **kwargs) -> bool:
-        return True
+    def validate(cls, target: str, mode: str = "scan") -> bool:
+        if not isinstance(target, str) or not target.strip():
+            raise ScopeGuardError("A non-empty target is required")
+        hostname = cls._hostname(target)
+        entries = cls._entries()
+
+        try:
+            address = ipaddress.ip_address(hostname)
+        except ValueError:
+            address = None
+
+        for entry in entries:
+            if entry == hostname or fnmatchcase(hostname, entry):
+                return True
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                continue
+            if address is not None and address in network:
+                return True
+
+        # A hostname may be approved through a CIDR scope. Resolve it once and
+        # compare every answer; failing resolution must not silently allow it.
+        if address is None:
+            try:
+                resolved = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, None)}
+            except socket.gaierror as exc:
+                raise ScopeGuardError(f"Cannot resolve target {hostname}: {exc}") from exc
+            for entry in entries:
+                try:
+                    network = ipaddress.ip_network(entry, strict=False)
+                except ValueError:
+                    continue
+                if resolved and all(item in network for item in resolved):
+                    return True
+
+        raise ScopeGuardError(
+            f"Target {hostname!r} is outside the configured scope. "
+            "Set NEXUS_ALLOWED_TARGETS to an explicit hostname, wildcard, IP, or CIDR."
+        )
 
     @classmethod
-    def log(cls, *args, **kwargs):
-        pass
+    def log(cls, message: str, level: str = "info") -> None:
+        return None

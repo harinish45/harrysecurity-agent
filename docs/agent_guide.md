@@ -1,2 +1,2 @@
 # Agent Guide
-54 agents across 6 tiers.
+50 agents across 6 tiers.
