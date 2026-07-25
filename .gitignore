@@ -11,4 +11,10 @@ build/
 engagements/*
 !engagements/.gitkeep
 logs/
+nexus_audit.log
+upgrade_pentest_tools.py
+generate_guardrails.py
+generate_tools.py
+check_stubs.py
+test_tools.py
 
