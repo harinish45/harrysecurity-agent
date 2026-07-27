@@ -1,64 +1,34 @@
 from nexus.agents.base_agent import BaseAgent
 from nexus.tools.registry import tool_registry
-from nexus.foundation.schema import STATUS_COMPLETED, STATUS_NO_FINDINGS, STATUS_FAILED, tool_result
-
 
 class VulnAnalystAgent(BaseAgent):
     name = "vuln_analyst_agent"
-    description = "analysis agent for vulnerability analysis — triages and prioritizes findings"
+    description = "Vulnerability analysis agent that correlates findings and identifies risk patterns"
 
-    async def run(self, task: str, target: str = "", findings: list = None, **kwargs) -> dict:
-        if not target:
-            return tool_result(self.name, target or "unknown", status=STATUS_FAILED, error="No target specified")
+    async def run(self, task: str, **kwargs) -> dict:
+        target = kwargs.get("target", "")
+        findings = kwargs.get("findings", [])
+        findings_out = []
+        
+        # Run vulnerability assessment tools
+        for tool_name in ["vuln_assessment.vuln_scan", "vuln_assessment.cve_lookup"]:
+            try:
+                tool_fn = tool_registry.get(tool_name)
+                result = tool_fn(target=target)
+                if result.get("findings"):
+                    findings_out.extend(result["findings"])
+            except (KeyError, Exception) as e:
+                findings_out.append(f"[{tool_name}] skipped: {e}")
+        
+        # Analyze existing findings for risk patterns
+        if findings:
+            high_risk = [f for f in findings if "critical" in str(f).lower() or "high" in str(f).lower()]
+            if high_risk:
+                findings_out.append(f"Risk analysis: {len(high_risk)} high/critical severity findings identified")
+            findings_out.append(f"Total findings analyzed: {len(findings)}")
+        
+        if not findings_out:
+            findings_out.append(f"Vulnerability analysis completed for {target}: no specific vulnerabilities identified")
 
-        findings = findings or []
-        analysis = []
-
-        # Prioritize findings by severity
-        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-        sorted_findings = sorted(
-            findings,
-            key=lambda f: severity_order.get(f.get("severity", "info"), 4),
-        )
-
-        # Generate analysis for each finding
-        for f in sorted_findings:
-            sev = f.get("severity", "info")
-            title = f.get("title", "Untitled")
-            evidence = f.get("evidence", "")
-            remediation = f.get("remediation", "")
-            confidence = f.get("confidence", "medium")
-
-            analysis.append({
-                "id": f.get("id", "F-???"),
-                "title": title,
-                "severity": sev,
-                "confidence": confidence,
-                "priority": "P1" if sev in ("critical", "high") else ("P2" if sev == "medium" else "P3"),
-                "evidence": evidence,
-                "remediation": remediation,
-                "affected_asset": f.get("affected_asset", target),
-            })
-
-        # Generate summary statistics
-        counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-        for f in findings:
-            sev = f.get("severity", "info")
-            counts[sev] = counts.get(sev, 0) + 1
-
-        risk_score = min(10.0, round(
-            (counts["critical"] * 10 + counts["high"] * 7 + counts["medium"] * 4 + counts["low"] * 1) / max(1, len(findings)) * 2.5, 1
-        ))
-
-        return tool_result(
-            self.name, target,
-            status=STATUS_COMPLETED,
-            findings=[],
-            summary=f"Vulnerability analysis for {target}: {len(findings)} findings, risk score {risk_score}/10",
-            metadata={
-                "analysis": analysis,
-                "severity_counts": counts,
-                "risk_score": risk_score,
-                "total_findings": len(findings),
-            },
-        )
+        return {"agent": self.name, "task": task, "tier": "analysis", 
+                "status": "completed", "findings": findings_out}

@@ -1,114 +1,132 @@
 # Architecture
 
-NEXUS-STRIKE is a modular cybersecurity platform with 7 layers.
+## Overview
 
-## Layer 1: Foundation
-
-Core utilities that every component depends on:
-
-- **Config** (`nexus/foundation/config.py`): Environment-based configuration for LLM providers, targets, rate limits, and legal acknowledgement
-- **Schema** (`nexus/foundation/schema.py`): Unified `Finding` dataclass and `tool_result()` builder — every tool MUST use this
-- **Guardrails** (`nexus/foundation/guardrails/`): Input validation, scope enforcement, legal checks, rate limiting, audit logging, output sanitization
-- **Logging** (`nexus/foundation/logging.py`): Structured logging with console and file output
-- **Auth** (`nexus/foundation/auth.py`): Access control manager
-- **Secrets** (`nexus/foundation/secrets.py`): Secret management interface
-
-## Layer 2: Tool Fabric
-
-264 registered tools across 29 domains. Each tool:
-
-1. Accepts `target: str` and `**kwargs`
-2. Returns a `dict` with `status`, `findings`, `summary`, `error`, `metadata`
-3. Uses `Finding` dataclass for all findings
-4. Returns truthful statuses: `completed`, `no_findings`, `failed`, `unavailable`, `out_of_scope`, `requires_credentials`, `requires_hardware`, `not_implemented`
-
-### Tool Registration
-
-```python
-from nexus.tools.registry import tool_registry
-from nexus.foundation.schema import Finding, STATUS_COMPLETED, tool_result
-
-def run(target: str, **kwargs) -> dict:
-    findings = [Finding(title="Example", severity="info", ...)]
-    return tool_result("domain.tool_name", target, findings=findings, status=STATUS_COMPLETED)
-
-tool_registry.register("domain.tool_name", run, metadata={...})
-```
-
-### Domain Structure
+NEXUS-STRIKE is built on a modular, layered architecture designed for extensibility, safety, and AI-powered security automation. The system comprises 7 core layers.
 
 ```
-nexus/tools/
-├── network/          Port scan, service enum, host discovery, OS fingerprint, banner grab
-├── webapp/           SQLi, XSS, SSRF, LFI, RFI, command injection, directory enumeration, SSL test, crawler
-├── reconnaissance/   Subdomain enum, DNS recon, tech fingerprint
-├── cloud/            AWS review, Azure assessment, GCP review, IAM audit
-├── forensics/        Log analysis, timeline, registry, memory, disk, browser
-├── appsec/           Secret scanning, SAST, dependency analysis, IaC checks
-├── malware/          YARA rules, PE analysis, sandbox, behavior analysis
-├── reverse_engineering/  Symbol recovery, binary patching, debugging
-├── exploit_dev/      Shellcode, ROP chains, heap exploitation
-├── wireless/         WPA, WPS, Bluetooth, NFC, rogue AP
-├── mobile/           Android/iOS security
-├── hardware/         Firmware, JTAG, UART
-├── active_directory/ AD attacks, LDAP, Kerberos, GPO
-├── iam/              IAM audit, policy analysis
-├── threat_intel/     IOC collection, threat feeds, campaign analysis
-├── soc/              SIEM monitoring, alert investigation, SOAR
-├── purple_team/      Detection testing, rule improvement
-├── ai_security/      LLM prompt injection, model extraction, adversarial ML
-└── ... (29 domains total)
+┌─────────────────────────────────────────────────────────────┐
+│                      Interface Layer                          │
+│  CLI (nexus run/live/tools/agents/providers) | MCP Server    │
+├─────────────────────────────────────────────────────────────┤
+│                    Orchestration Layer                        │
+│  Mission Planner | Agent Router | Phase Executor | Reporter  │
+├─────────────────────────────────────────────────────────────┤
+│                       Agent Mesh                             │
+│  Offensive │ Defensive │ Analysis │ Orchestrator │ Specialized│
+├─────────────────────────────────────────────────────────────┤
+│                      Tool Fabric                              │
+│  29 domains, 260+ tools (network, webapp, recon, cloud, ...) │
+├─────────────────────────────────────────────────────────────┤
+│                    Intelligence Layer                         │
+│  LLM Router │ 10 Provider Adapters (OpenAI, Anthropic, ...)  │
+├─────────────────────────────────────────────────────────────┤
+│                      Runtime Layer                            │
+│  Tool Executor │ Guardrails │ Schema │ Audit │ Sandbox       │
+├─────────────────────────────────────────────────────────────┤
+│                      Foundation Layer                         │
+│  Config │ Logging │ Pydantic Models │ Environment            │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Layer 3: Agents
+## Layer Details
 
-56 agents organized into 6 tiers:
+### 1. Foundation Layer
+The bedrock of the platform providing configuration management, structured logging, and data models.
 
-- **Orchestrator**: MissionCommander, TaskPlanner, AgentRouter, PatternSelector, QualityAssessor
-- **Offensive**: Recon, Network, WebApp, Exploit, AD, Cloud, Mobile, Wireless, RedTeam, SocialEng, Phishing, APIAttacker
-- **Defensive**: SOC, IR, ThreatHunt, DetectionEngineer, BlueTeam, Hardening, Deception
-- **Analysis**: Malware, Forensics, ReverseEng, ThreatIntel, Crypto, CodeReview, OSINT, VulnAnalyst, SupplyChain
-- **Support**: Searcher, Coder, Installer, Reporter, Validator, Debugger, DocWriter, HITLLiaison
-- **Specialized**: IoT, OT/ICS, Automotive, Hardware, RF/SDR, AI Security, Compliance, Embedded
+- **Config** (`nexus/foundation/config.py`): Pydantic-based settings with `.env` file support, covering LLM providers, execution parameters, guardrails, and infrastructure connections.
+- **Logging** (`nexus/foundation/logging.py`): Structured logging to console and rotating files.
+- **Schema** (`nexus/foundation/schema.py`): Canonical `Finding` dataclass, status constants, and `tool_result()` result builder used by every tool.
 
-Each agent implements `BaseAgent.run(task, **kwargs) -> dict`.
+### 2. Runtime Layer
+Enforces safety, auditability, and contract compliance.
 
-## Layer 4: Orchestration Engine
+- **Guardrails** (`nexus/foundation/guardrails/`):
+  - **ScopeGuard**: Target allow-list enforcement using hostnames, wildcards, IPs, and CIDR notation
+  - **LegalGuard**: Requires written authorization acknowledgement before scanning
+  - **RateGuard**: Sliding-window rate limiting per target
+  - **InputGuard**: Blocks prompt injection, command injection, and path traversal in inputs
+  - **EscalationGuard**: Requires human approval for destructive actions (exploit, RCE, SQLi, etc.)
+  - **OutputGuard**: Prevents secret leakage (passwords, API keys, private keys) in tool output
+  - **AuditGuard**: Append-only JSON audit log of every tool execution for forensic traceability
+- **Tool Executor** (`nexus/tools/executor.py`): Unified execution wrapper that validates tool contracts, normalizes findings, enforces all guardrails, and provides consistent error handling.
 
-The `OrchestrationEngine` coordinates missions:
+### 3. Intelligence Layer
+Multi-provider LLM abstraction for AI-powered security analysis.
 
-1. **Validate** — Scope, legal, escalation guardrails
-2. **Plan** — LLM decomposes mission into phases
-3. **Execute** — Runs domain-specific tools via ToolExecutor
-4. **Report** — Generates Markdown report with normalized findings
+- **LLM Router** (`nexus/intelligence/llm/router.py`): Auto-selects active provider, provides failover.
+- **10 Providers**: OpenAI, Anthropic, OpenRouter, Ollama, Azure, Groq, DeepSeek, Omniroute, NVIDIA NIM, Custom.
 
-## Layer 5: Reporting
+### 4. Tool Fabric
+All 260+ security tools across 29 domains.
 
-- **Markdown** — Human-readable reports with executive summary, severity heatmap, asset inventory, findings, remediation priorities
-- **JSON** — Machine-parseable findings export
-- **CSV** — Spreadsheet-compatible findings
-- **HTML** — Styled HTML report
-- **SARIF** — Static Analysis Results Interchange Format for CI/CD integration
+| Domain | Example Tools | Status |
+|--------|--------------|--------|
+| reconnaissance | dns_recon, subdomain_enum, cert_transparency, whois_lookup | ✅ Real |
+| network | port_scan, banner_grab, host_discovery, firewall_detect | ✅ Real |
+| webapp | sqli, xss, lfi, cmdi, ssrf, dir_enum | ✅ Real |
+| cloud | aws_review, azure_assessment, container_scanning, k8s_security | 📝 Stub |
+| active_directory | kerberoast, asrep_roast, bloodhound, pass_the_hash | 📝 Stub |
+| malware | pe_analysis, yara_rules, sandbox_execution, behavior_analysis | 📝 Stub |
+| ... | 29 domains total | Mixed |
 
-## Layer 6: Interface
+Tools self-register via `tool_registry.register("domain.tool_name", run, metadata={...})`.
 
-- **CLI** (`nexus` command via Typer) — Full terminal interface
-- **MCP** (Model Context Protocol) — IDE integration (placeholder)
-- **FastAPI** — REST API service (placeholder for Phase 2)
+### 5. Agent Mesh
+Specialized AI agents that orchestrate tools and interpret results.
 
-## Layer 7: LLM Integration
+- **Offensive**: recon_agent, network_agent, webapp_agent, exploit_agent, ad_agent, cloud_agent, mobile_agent, wireless_agent, redteam_agent, social_eng_agent, api_attacker_agent
+- **Defensive**: soc_agent, ir_agent, threat_hunt_agent, detection_engineer_agent, blue_team_agent, hardening_agent, deception_agent
+- **Analysis**: malware_agent, forensics_agent, reverse_eng_agent, threat_intel_agent, vuln_analyst_agent
+- **Orchestrator**: mission_commander_agent, task_planner_agent, agent_router_agent
+- **Specialized**: iot_agent, ot_ics_agent, automotive_agent, hardware_agent, ai_security_agent, compliance_auditor_agent
+- **Support**: searcher_agent, coder_agent, reporter_agent, validator_agent, debugger_agent, doc_writer_agent
 
-Multi-provider LLM router supporting:
-- OpenAI, Anthropic, OpenRouter, Ollama, Azure, Groq, DeepSeek, Omniroute, Custom
-- Auto-detection of available providers
-- Fallback chain when primary provider fails
-- Offline mock mode when no provider configured
+### 6. Orchestration Layer
+Mission planning and execution engine.
 
-## Key Design Principles
+- **OrchestrationEngine** (`nexus/orchestration/engine.py`): Plans missions using LLM, delegates to agents, collects findings, generates reports.
+- **ReportGenerator** (`nexus/reporting/generator.py`): Produces structured reports with executive summaries, findings, and recommendations.
 
-1. **Truthful statuses** — Tools never return `completed` after failure without showing limitation
-2. **Normalized findings** — Every tool uses the `Finding` dataclass schema
-3. **Guardrails first** — No network action without scope/legal/rate-limit validation
-4. **Engagement required** — Non-local targets require an engagement record
-5. **Evidence-based** — Every finding includes machine-parseable evidence
-6. **Cross-platform** — Windows and Linux compatible Python CLI
+### 7. Interface Layer
+Multiple access points for interacting with the platform.
+
+- **CLI** (`nexus/cli.py`): Rich Typer-based command-line interface with 12+ commands
+- **MCP Server**: Model Context Protocol server for IDE integration (Claude Desktop, Cursor, etc.)
+
+## Execution Flow
+
+### `nexus live --target X` (Direct Pipeline)
+
+```
+CLI → scripts/live_agent.py → Tool Functions → Consolidated Report
+```
+
+Fastest path to results. Runs real port scanning, banner grabbing, DNS recon, HTTP fingerprinting, SQLi detection, SSL inspection, and AI-powered analysis. Recommended for active assessments.
+
+### `nexus run --target X` (Orchestrated Pipeline)
+
+```
+CLI → OrchestrationEngine → LLM Planner → Agent Delegation → Tool Registry → Findings → Report Generator
+```
+
+Plans the mission via LLM, then delegates to agents. Each agent calls tools from the Tool Fabric. Results are collected, analyzed, and compiled into a structured report.
+
+## Guardrail Flow
+
+Every tool execution passes through the Guardrail Pipeline:
+
+```
+Input → InputGuard → ScopeGuard → LegalGuard → EscalationGuard → RateGuard → AuditGuard → Tool Run → OutputGuard → Result
+```
+
+If any guardrail rejects the execution, the tool is blocked with a descriptive error message.
+
+## Security Considerations
+
+- All guardrails are enforced server-side; they cannot be bypassed from the client
+- ScopeGuard requires explicit target allow-listing via `NEXUS_ALLOWED_TARGETS`
+- LegalGuard enforces written authorization acknowledgement (`NEXUS_LEGAL_ACK`)
+- AuditGuard creates tamper-evident audit trails of all tool executions
+- RateGuard prevents accidental DoS on targets
+- EscalationGuard blocks destructive actions without human approval

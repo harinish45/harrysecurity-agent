@@ -1,74 +1,39 @@
 from nexus.agents.base_agent import BaseAgent
 from nexus.tools.registry import tool_registry
-from nexus.foundation.schema import STATUS_COMPLETED, STATUS_NO_FINDINGS, STATUS_FAILED, tool_result
 
-
-class WebAppAgent(BaseAgent):
+class WebappAgent(BaseAgent):
     name = "webapp_agent"
-    description = "offensive agent for web application testing — SQLi, XSS, SSRF, LFI, command injection"
+    description = "Web application assessment agent that tests for SQLi, XSS, LFI, CMDi, SSRF, and directory enumeration"
 
-    async def run(self, task: str, target: str = "", **kwargs) -> dict:
-        if not target:
-            return tool_result(self.name, target or "unknown", status=STATUS_FAILED, error="No target specified")
-
+    async def run(self, task: str, **kwargs) -> dict:
+        target = kwargs.get("target", "")
         findings = []
-        tools_used = []
+        
+        # Run webapp tools from the registry
+        for tool_name in ["webapp.sqli", "webapp.xss", "webapp.lfi", 
+                          "webapp.cmdi", "webapp.ssrf", "webapp.dir_enum"]:
+            try:
+                tool_fn = tool_registry.get(tool_name)
+                result = tool_fn(target=target)
+                if result.get("findings"):
+                    findings.extend(result["findings"])
+            except (KeyError, Exception) as e:
+                findings.append(f"[{tool_name}] skipped: {e}")
+        
+        if not findings:
+            # Fallback: basic HTTP fingerprint
+            import urllib.request
+            import ssl
+            url = target if "://" in target else f"http://{target}"
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
+                resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+                findings.append(f"HTTP {resp.status}: Server={resp.headers.get('Server', 'unknown')}")
+            except Exception as e:
+                findings.append(f"HTTP check failed: {e}")
 
-        # SQL Injection testing
-        try:
-            sqli = tool_registry.get("webapp.sqli")
-            result = sqli(target=target)
-            tools_used.append("webapp.sqli")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"SQLi test error: {e}", "severity": "low", "confidence": "medium"})
-
-        # XSS testing
-        try:
-            xss = tool_registry.get("webapp.xss")
-            result = xss(target=target)
-            tools_used.append("webapp.xss")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"XSS test error: {e}", "severity": "low", "confidence": "medium"})
-
-        # SSRF testing
-        try:
-            ssrf = tool_registry.get("webapp.ssrf")
-            result = ssrf(target=target)
-            tools_used.append("webapp.ssrf")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"SSRF test error: {e}", "severity": "low", "confidence": "medium"})
-
-        # LFI testing
-        try:
-            lfi = tool_registry.get("webapp.lfi")
-            result = lfi(target=target)
-            tools_used.append("webapp.lfi")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"LFI test error: {e}", "severity": "low", "confidence": "medium"})
-
-        # Command injection testing
-        try:
-            cmdi = tool_registry.get("webapp.cmdi")
-            result = cmdi(target=target)
-            tools_used.append("webapp.cmdi")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"CMDi test error: {e}", "severity": "low", "confidence": "medium"})
-
-        status = STATUS_COMPLETED if findings else STATUS_NO_FINDINGS
-        return tool_result(
-            self.name, target,
-            status=status,
-            findings=findings,
-            summary=f"Web app testing completed for {target} using {len(tools_used)} tools, {len(findings)} findings",
-            metadata={"tools_used": tools_used},
-        )
+        return {"agent": self.name, "task": task, "tier": "offensive", 
+                "status": "completed", "findings": findings}

@@ -463,12 +463,10 @@ def live(
 ):
     """🚀 Run the live AI cybersecurity agent against a target."""
     import sys
-    _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    import os as _os
+    _project_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
-    scripts_dir = os.path.join(os.path.dirname(_project_root), "scripts")
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
 
     if ports:
         try:
@@ -479,6 +477,7 @@ def live(
     else:
         custom_ports = None
 
+    # Import and run the live agent
     from scripts.live_agent import main as live_main
     live_main(target=target, host=host)
 

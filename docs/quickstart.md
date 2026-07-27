@@ -1,110 +1,118 @@
-# Quick Start Guide
+# Quick Start
 
-NEXUS-STRIKE is an AI-powered cybersecurity platform for penetration testing, bug bounty, and security assessments.
+## Prerequisites
+
+- Python 3.10+
+- pip
 
 ## Installation
 
 ```bash
-git clone https://github.com/nexus-strike/nexus-strike.git
+# Clone the repository
+git clone https://github.com/your-org/nexus-strike.git
 cd nexus-strike
+
+# Install in development mode
 pip install -e .
+
+# Copy and configure environment
+cp .env.example .env
 ```
 
-## Prerequisites
+## Configuration
 
-1. **Python 3.10+** installed and on PATH
-2. **Legal authorization** — set `NEXUS_LEGAL_ACK=I_HAVE_WRITTEN_AUTHORIZATION` in your environment
-3. **Target scope** — set `NEXUS_ALLOWED_TARGETS` to approved targets
-4. **LLM provider** — optionally configure Ollama for AI-powered planning
-
-## Basic Usage
-
-### 1. Create an engagement record
+Edit `.env` to set your LLM provider:
 
 ```bash
-nexus engage \
-  --client "Acme Corp" \
-  --scope "example.com,api.example.com" \
-  --authorization-reference "TICKET-1234" \
-  --asset-owner "security@acme.com" \
-  --emergency-stop "1-800-SECURITY"
+# For local LLM (Ollama)
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen2.5-coder:latest
+
+# For OpenAI
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+
+# For OmniRoute
+LLM_PROVIDER=custom
+CUSTOM_BASE_URL=http://127.0.0.1:20128
+CUSTOM_MODEL=gpt-4
 ```
 
-### 2. Run a security assessment
+## Running Your First Assessment
 
-```bash
-# Scan a single target
-nexus run --target example.com --engagement engagements/engagement-*.json
-
-# Quick scan
-nexus run --target example.com --objective quick_scan
-
-# Full assessment with autonomous mode
-nexus run --target example.com --mode autonomous --objective full_assessment
-```
-
-### 3. Live AI Agent (standalone)
+### Using `nexus live` (real tools, recommended)
 
 ```bash
 # Scan localhost
+nexus live --target 127.0.0.1
+
+# Scan a remote target
+nexus live --target 192.168.1.1 --host example.com
+
+# With custom ports
+nexus live --target 10.0.0.1 --ports 80,443,8080,8443
+
+# With custom LLM
+nexus live --target scanme.nmap.org --llm-url http://localhost:11434/v1 --llm-model llama3
+```
+
+### Using `nexus run` (orchestration engine)
+
+```bash
+# Run a guided assessment
+nexus run --target example.com
+
+# With engagement record for authorized testing
+nexus engage --client "Client Name" --scope "example.com,192.168.1.0/24" --authorization-reference "TICKET-123"
+nexus run --target example.com --engagement engagements/engagement-*.json
+```
+
+### Using the standalone script
+
+```bash
+# Default: scan localhost
 python scripts/live_agent.py
 
-# Scan a specific target
-python scripts/live_agent.py --target 192.168.1.1 --host target.example.com
+# Scan specific target
+python scripts/live_agent.py --target 192.168.1.1 --host example.com
 
-# Custom ports
-python scripts/live_agent.py --target 10.0.0.1 --ports "22,80,443,8080"
+# Show help
+python scripts/live_agent.py --help
 ```
 
-### 4. Check readiness
+## What Happens During a Scan
 
-```bash
-nexus preflight --strict
-```
+The live agent runs these phases automatically:
 
-### 5. Export findings
-
-```bash
-nexus export-report findings.json --format html --output report.html
-nexus export-report findings.json --format sarif --output report.sarif
-nexus export-report findings.json --format csv --output report.csv
-```
+1. **AI Mission Planning** — LLM plans the assessment strategy
+2. **TCP Port Scan** — 39 common ports scanned concurrently
+3. **Service Identification** — Maps ports to known services
+4. **Banner Grabbing** — Extracts service banners for fingerprinting
+5. **DNS Reconnaissance** — Forward/reverse DNS resolution
+6. **HTTP Fingerprinting** — Web server detection and header analysis
+7. **SQL Injection Detection** — Tests HTTP endpoints for SQLi
+8. **SSL/TLS Inspection** — Certificate and cipher analysis
+9. **AI Risk Analysis** — LLM analyzes findings for risks
+10. **CVE Enrichment** — Local knowledge base enrichment
+11. **Final Report** — AI-generated pentest report
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `nexus run` | Launch a security assessment mission |
-| `nexus engage` | Create an engagement record |
-| `nexus preflight` | Check local readiness |
-| `nexus live` | Run the live AI cybersecurity agent |
-| `nexus tools` | List registered tools |
-| `nexus agents` | List registered agents |
+| `nexus live --target X` | Run live agent with real tools |
+| `nexus run --target X` | Run orchestration engine |
+| `nexus engage` | Create authorized engagement record |
+| `nexus preflight` | Check environment readiness |
+| `nexus tools` | List all registered tools |
+| `nexus agents` | List all registered agents |
 | `nexus providers` | Show LLM provider status |
-| `nexus verify` | Offline integrity check |
-| `nexus export-report` | Export findings to file |
-| `nexus config` | Show configuration |
-| `nexus version` | Show version info |
+| `nexus config-show` | Show current configuration |
+| `nexus verify` | Verify all tools import correctly |
+| `nexus export-report` | Export findings to JSON/CSV/HTML/SARIF |
 
-## Configuration
+## Next Steps
 
-Set environment variables in `.env`:
-
-```bash
-NEXUS_LEGAL_ACK=I_HAVE_WRITTEN_AUTHORIZATION
-NEXUS_ALLOWED_TARGETS=example.com,api.example.com
-NEXUS_LLM_PROVIDER=ollama
-NEXUS_OLLAMA_BASE_URL=http://localhost:11434/v1
-```
-
-## What Gets Scanned
-
-NEXUS-STRIKE covers 29 security domains with 264 tools:
-
-- **Network**: Port scanning, service enumeration, OS fingerprinting, banner grabbing
-- **Web/API**: SQL injection, XSS, SSRF, LFI, RFI, command injection, directory enumeration
-- **Reconnaissance**: Subdomain enumeration, DNS reconnaissance, technology fingerprinting
-- **Cloud**: AWS/Azure/GCP configuration review
-- **Forensics**: Log analysis, IOC matching, timeline correlation
-- **AppSec**: Secret scanning, dependency analysis, SAST
-- **Wireless, Mobile, Malware, Reverse Engineering** and more
+- Read [Architecture](architecture.md) for system design
+- Read [API Reference](api_reference.md) for programmatic usage
+- Read [Tool Development](tool_development.md) to create custom tools

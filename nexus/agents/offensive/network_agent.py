@@ -1,74 +1,43 @@
 from nexus.agents.base_agent import BaseAgent
 from nexus.tools.registry import tool_registry
-from nexus.foundation.schema import STATUS_COMPLETED, STATUS_NO_FINDINGS, STATUS_FAILED, tool_result
-
 
 class NetworkAgent(BaseAgent):
     name = "network_agent"
-    description = "offensive agent for network testing — port scan, service enum, host discovery, OS fingerprint"
+    description = "Network assessment agent that performs port scanning, service detection, and banner grabbing"
 
-    async def run(self, task: str, target: str = "", **kwargs) -> dict:
-        if not target:
-            return tool_result(self.name, target or "unknown", status=STATUS_FAILED, error="No target specified")
-
+    async def run(self, task: str, **kwargs) -> dict:
+        target = kwargs.get("target", "")
         findings = []
-        tools_used = []
+        
+        # Run network tools from the registry
+        for tool_name in ["network.port_scan", "network.banner_grab", 
+                          "network.host_discovery", "network.firewall_detect"]:
+            try:
+                tool_fn = tool_registry.get(tool_name)
+                result = tool_fn(target=target)
+                if result.get("findings"):
+                    findings.extend(result["findings"])
+            except (KeyError, Exception) as e:
+                findings.append(f"[{tool_name}] skipped: {e}")
+        
+        if not findings:
+            # Fallback: basic port scan
+            import socket
+            import concurrent.futures
+            common_ports = [22, 80, 443, 8080, 3306, 3389, 5432, 6379]
+            def probe(port):
+                try:
+                    with socket.create_connection((target, port), timeout=1):
+                        return port
+                except:
+                    return None
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
+                results = list(ex.map(probe, common_ports))
+            open_ports = sorted(p for p in results if p is not None)
+            if open_ports:
+                findings.append(f"Open ports on {target}: {open_ports}")
+            else:
+                findings.append(f"No open ports found on {target} among {len(common_ports)} common ports")
 
-        # Host discovery
-        try:
-            host_disc = tool_registry.get("network.host_discovery")
-            result = host_disc(target=target)
-            tools_used.append("network.host_discovery")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"Host discovery error: {e}", "severity": "low", "confidence": "medium"})
-
-        # Port scanning
-        try:
-            port_scan = tool_registry.get("network.port_scan")
-            result = port_scan(target=target)
-            tools_used.append("network.port_scan")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"Port scan error: {e}", "severity": "low", "confidence": "medium"})
-
-        # Service enumeration
-        try:
-            svc_enum = tool_registry.get("network.service_enum")
-            result = svc_enum(target=target)
-            tools_used.append("network.service_enum")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"Service enum error: {e}", "severity": "low", "confidence": "medium"})
-
-        # Banner grabbing
-        try:
-            banner = tool_registry.get("network.banner_grab")
-            result = banner(target=target)
-            tools_used.append("network.banner_grab")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"Banner grab error: {e}", "severity": "low", "confidence": "medium"})
-
-        # OS fingerprinting
-        try:
-            os_fp = tool_registry.get("network.os_fingerprint")
-            result = os_fp(target=target)
-            tools_used.append("network.os_fingerprint")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"OS fingerprint error: {e}", "severity": "low", "confidence": "medium"})
-
-        status = STATUS_COMPLETED if findings else STATUS_NO_FINDINGS
-        return tool_result(
-            self.name, target,
-            status=status,
-            findings=findings,
-            summary=f"Network testing completed for {target} using {len(tools_used)} tools, {len(findings)} findings",
-            metadata={"tools_used": tools_used},
-        )
+        return {"agent": self.name, "task": task, "tier": "offensive", 
+                "status": "completed", "findings": findings}

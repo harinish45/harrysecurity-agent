@@ -5,9 +5,9 @@ NEXUS-STRIKE Live Cybersecurity Agent — OmniRoute Edition
 Uses OmniRoute (http://127.0.0.1:20128) as the AI gateway,
 auto-routing to the best available free model.
 Executes REAL tools: port scan, banner grab, DNS, HTTP fingerprint, SSL inspect.
-Target: localhost (127.0.0.1)
+Supports --target / -t CLI argument for target specification.
 """
-
+import argparse
 import sys
 import os
 import socket
@@ -196,30 +196,26 @@ def sep(title="", width=68):
         print("=" * width)
 
 
-def main(target: str = "127.0.0.1", host: str = "localhost"):
+def run_assessment(target_ip: str, target_host: str = None) -> dict:
+    """Run a full assessment against the target. Returns all findings and data."""
     global TARGET, TARGET_HOST
-    TARGET = target
-    TARGET_HOST = host
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print("\n" + "=" * 68)
-    print(f"  NEXUS-STRIKE  Live AI Cybersecurity Agent")
-    print(f"  LLM Gateway : OmniRoute -> {LLM_URL}")
-    print(f"  LLM Model   : {LLM_MODEL}")
-    print(f"  Target    : {TARGET_HOST} ({TARGET})")
-    print(f"  Started   : {ts}")
-    print("=" * 68)
-
+    TARGET = target_ip
+    TARGET_HOST = target_host or target_ip
+    
     all_findings = []
     analysis_blocks = []
+    llm_calls = 0
 
     # Phase 1: AI planning
     sep("PHASE 1 - AI Mission Planning")
     print("  [*] Asking Ollama to plan the assessment...")
+    target_desc = f"{TARGET_HOST} ({TARGET})" if TARGET_HOST != TARGET else TARGET
     plan = llm(
-        "I am about to run a security assessment on localhost (127.0.0.1). "
+        f"I am about to run a security assessment on {target_desc}. "
         "What are the 5 most important things to check? List them briefly, numbered.",
         system="You are a penetration tester. Be brief and technical.",
     )
+    llm_calls += 1
     print(f"\n{plan}\n")
 
     # Phase 2: Port scan
@@ -275,7 +271,6 @@ def main(target: str = "127.0.0.1", host: str = "localhost"):
     sep("PHASE 6.5 - SQL Injection Detection (Tool Fabric)")
     sqli_findings = []
     if open_ports:
-        # Ensure nexus package is importable
         _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if _project_root not in sys.path:
             sys.path.insert(0, _project_root)
@@ -323,7 +318,7 @@ def main(target: str = "127.0.0.1", host: str = "localhost"):
     print("  [*] Analysing findings with Ollama...")
     if open_ports:
         port_analysis = llm(
-            f"Penetration test on localhost found these open ports and services:\n"
+            f"Penetration test on {target_desc} found these open ports and services:\n"
             f"{json.dumps(svc['services'], indent=2)}\n\n"
             f"Banners:\n{chr(10).join(bg['findings'])}\n\n"
             f"HTTP results:\n{chr(10).join(http['findings'])}\n\n"
@@ -332,9 +327,10 @@ def main(target: str = "127.0.0.1", host: str = "localhost"):
         )
     else:
         port_analysis = llm(
-            "A port scan on localhost found NO open ports. "
+            f"A port scan on {target_desc} found NO open ports. "
             "What could be causing this? What should we try next?",
         )
+    llm_calls += 1
     analysis_blocks.append(port_analysis)
     print(f"\n{port_analysis}\n")
 
@@ -355,7 +351,7 @@ def main(target: str = "127.0.0.1", host: str = "localhost"):
     sep("PHASE 9 - Final Pentest Report (Ollama)")
     print("  [*] Generating security report with Ollama...")
     report = llm(
-        f"Write a professional penetration test report for localhost (127.0.0.1), "
+        f"Write a professional penetration test report for {target_desc}, "
         f"date {datetime.now().strftime('%Y-%m-%d')}.\n\n"
         f"FINDINGS:\n{chr(10).join(all_findings[:50])}\n\n"
         f"ANALYSIS:\n{chr(10).join(analysis_blocks)}\n\n"
@@ -363,6 +359,7 @@ def main(target: str = "127.0.0.1", host: str = "localhost"):
         "Format: Executive Summary, Scope, Findings (with severity and CVE IDs), Recommendations, Conclusion.",
         system="You are a senior penetration tester writing a professional security report.",
     )
+    llm_calls += 1
     print(f"\n{report}\n")
 
     # Summary
@@ -370,9 +367,36 @@ def main(target: str = "127.0.0.1", host: str = "localhost"):
     print(f"  Total findings : {len(all_findings)}")
     print(f"  Open ports     : {open_ports or 'none detected'}")
     print(f"  LLM provider   : OmniRoute ({LLM_MODEL})")
+    print(f"  LLM calls      : {llm_calls}")
     print(f"  Completed at   : {datetime.now().strftime('%H:%M:%S')}")
     sep()
 
+    return {
+        "findings": all_findings,
+        "open_ports": open_ports,
+        "services": svc["services"],
+        "report": report,
+        "llm_calls": llm_calls,
+    }
+
+
+def main(target: str = "127.0.0.1", host: str = "localhost"):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print("\n" + "=" * 68)
+    print(f"  NEXUS-STRIKE  Live AI Cybersecurity Agent")
+    print(f"  LLM Gateway : OmniRoute -> {LLM_URL}")
+    print(f"  LLM Model   : {LLM_MODEL}")
+    print(f"  Target    : {host} ({target})")
+    print(f"  Started   : {ts}")
+    print("=" * 68)
+
+    result = run_assessment(target, host)
+    return result
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="NEXUS-STRIKE Live AI Cybersecurity Agent")
+    parser.add_argument("--target", "-t", default="127.0.0.1", help="Target IP address to scan")
+    parser.add_argument("--host", default="localhost", help="Target hostname")
+    args = parser.parse_args()
+    main(target=args.target, host=args.host)
