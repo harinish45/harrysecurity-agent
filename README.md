@@ -1,105 +1,186 @@
 # 🏴‍☠️ NEXUS-STRIKE
 
-**Autonomous AI Cybersecurity Agent Framework & Real-Time Security Testing**
+**Autonomous AI Cybersecurity Agent — Real Pentest, Real Findings, Real CVE Reports**
 
-NEXUS-STRIKE is an open-source, multi-agent AI cybersecurity assessment framework designed to perform automated security reconnaissance, port scanning, service mapping, banner grabbing, and LLM-assisted risk analysis.
+NEXUS-STRIKE is an open-source multi-agent cybersecurity assessment platform. It performs live port scanning, service fingerprinting, web vulnerability detection (SQLi, XSS, LFI, CMDi, SSRF), and CVE-enriched risk analysis — all orchestrated by a locally-running or cloud LLM.
 
-Supports **100% free & local LLMs** (via [Ollama](https://ollama.com) or [OmniRoute](https://github.com/diegosouzapw/OmniRoute)) as well as cloud providers (NVIDIA NIM, OpenRouter, Groq, OpenAI, Anthropic).
+Supports **100 % free & local LLMs** (via [Ollama](https://ollama.com)) as well as cloud providers (OpenAI, Anthropic, Groq, OpenRouter, NVIDIA NIM, DeepSeek).
+
+> **Legal notice** — NEXUS-STRIKE is intended **only** for legal, authorised security testing and educational research. You must obtain written permission from the system owner before scanning any target you do not own. The developers assume no liability for misuse.
 
 ---
 
-## ⚡ Quick Start (Cloning & Setup)
+## ⚡ Quick Start
 
-### 1. Clone the Repository
+### 1. Clone & Install
+
 ```bash
 git clone https://github.com/harinish45/harrysecurity-agent.git
-cd harrysecurity-agent
-```
-
-### 2. Install Dependencies
-```bash
-pip install -r requirements.txt
-# OR editable install
+cd nexus-strike
 pip install -e .
 ```
 
-### 3. Configure Environment
+### 2. Configure
+
 ```bash
 cp .env.example .env
-```
-Edit `.env` to select your preferred LLM provider.
-
----
-
-## 🤖 LLM Provider Setup Options
-
-### Option A: Local Ollama (100% Free & Private)
-1. Install [Ollama](https://ollama.com) and pull a coding model:
-   ```bash
-   ollama pull qwen2.5-coder:latest
-   ```
-2. Set in `.env`:
-   ```ini
-   LLM_PROVIDER=ollama
-   OLLAMA_BASE_URL=http://localhost:11434/v1
-   OLLAMA_MODEL=qwen2.5-coder:latest
-   ```
-
-### Option B: OmniRoute Gateway (Auto-routing Free Models)
-1. Set up [OmniRoute](https://github.com/diegosouzapw/OmniRoute) on port `20128`.
-2. Generate an API key in OmniRoute dashboard (`http://127.0.0.1:20128`).
-3. Set in `.env`:
-   ```ini
-   LLM_PROVIDER=custom
-   CUSTOM_BASE_URL=http://127.0.0.1:20128/v1
-   CUSTOM_MODEL=auto/best-coding
-   CUSTOM_API_KEY=sk-your-omniroute-key
-   ```
-
-### Option C: Free Cloud APIs (OpenRouter / NVIDIA / Groq)
-Set your API key in `.env` and set `LLM_PROVIDER` accordingly (e.g. `LLM_PROVIDER=openrouter`).
-
----
-
-## 🚀 Running the Agent
-
-### 1. Run Live Security Assessment Script
-Execute a real-time security assessment on localhost/authorized targets:
-```bash
-python scripts/live_agent.py
+# Edit .env to set your LLM provider
 ```
 
-What it does:
-- ⚡ Multi-threaded TCP Port Scanning
-- 🏷️ Service Mapping & Banner Grabbing
-- 🌐 Reverse DNS & HTTP Fingerprinting
-- 🔐 SSL/TLS Inspection
-- 🤖 AI Risk Analysis & Automated Pentest Report Generation
+### 3. Run a Live Assessment
 
-### 2. Test Available Free LLM Providers
-Test latency and availability of your configured LLM backends:
 ```bash
-python scripts/test_free_llms.py
-```
+# Scan localhost (safe for testing)
+nexus live --target 127.0.0.1
 
-### 3. Run via CLI
-```bash
-nexus run --target localhost
-nexus tools
-nexus agents
-nexus providers
+# Scan an authorised target with a specific model
+nexus live --target 192.168.1.10 --llm-model qwen2.5-coder:latest
+
+# Full mission-style assessment
+nexus run --target example.internal --mode autonomous --objective full_assessment
 ```
 
 ---
 
-## ⚖️ Legal & Ethical Disclaimer
+## 🤖 LLM Provider Setup
 
-NEXUS-STRIKE is intended **ONLY** for legal, authorized security testing, educational research, and defensive security auditing. 
+### Option A — Local Ollama (Free & Private, Recommended)
 
-Users must obtain explicit written permission from system owners prior to running scans or security tests against any external target. The developers assume no liability for misuse or damage caused by this program.
+```bash
+ollama pull qwen2.5-coder:latest
+```
+
+```ini
+# .env
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=qwen2.5-coder:latest
+```
+
+### Option B — Cloud APIs (OpenAI / Anthropic / Groq / OpenRouter)
+
+```ini
+# .env — pick one
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+
+# or
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+
+# or
+LLM_PROVIDER=groq
+GROQ_API_KEY=gsk_...
+```
+
+### Option C — Custom OpenAI-Compatible Endpoint
+
+```ini
+LLM_PROVIDER=custom
+CUSTOM_BASE_URL=http://127.0.0.1:20128/v1
+CUSTOM_MODEL=auto/best-coding
+CUSTOM_API_KEY=sk-your-key
+```
+
+---
+
+## 🚀 CLI Reference
+
+```
+nexus COMMAND [OPTIONS]
+
+Commands:
+  live          Run the live AI agent (port scan + web vuln + AI report)
+  run           Launch a full security assessment mission
+  engage        Create an authorised-engagement record before scanning
+  preflight     Verify host readiness and security controls
+  tools         List all 266 registered security tools across 29 domains
+  agents        List all registered AI agents
+  providers     Show LLM provider configuration status
+  export-report Export findings to a portable report file
+  config-show   Show current NEXUS-STRIKE configuration
+  verify        Offline integrity check for all bundled tools
+  version       Show version information
+  mcp           Start the MCP server for IDE integration (Claude Desktop, Cursor)
+
+# Common flags:
+nexus live --target <ip>                  # Quick scan
+nexus live --target <ip> --ports 80,443,8080  # Custom ports
+nexus run  --target <ip> --mode autonomous --objective vuln_scan
+nexus run  --target <ip> --engagement ./my_engagement.json
+nexus preflight --strict
+```
+
+---
+
+## 🔐 Authorization & Safety
+
+NEXUS-STRIKE enforces **7 built-in guardrails** on every tool execution:
+
+| Guardrail | What it does |
+|-----------|-------------|
+| `InputGuard` | Blocks prompt injection, command injection, path traversal |
+| `ScopeGuard` | Validates target against `NEXUS_ALLOWED_TARGETS` allow-list |
+| `LegalGuard` | Requires `NEXUS_LEGAL_ACK=I_HAVE_WRITTEN_AUTHORIZATION` |
+| `EscalationGuard` | Human approval required for destructive actions (RCE, SQLi) |
+| `RateGuard` | Sliding-window rate limiting prevents accidental DoS |
+| `AuditGuard` | Append-only JSON audit log of every execution |
+| `OutputGuard` | Redacts API keys, passwords, and private keys from output |
+
+```bash
+# Before scanning any authorised target, create an engagement record:
+nexus engage
+
+# Set scope in .env:
+NEXUS_ALLOWED_TARGETS=192.168.1.0/24,example.internal
+NEXUS_LEGAL_ACK=I_HAVE_WRITTEN_AUTHORIZATION
+```
+
+---
+
+## 🧰 Tool Coverage
+
+| Domain | Tools | Examples |
+|--------|-------|---------|
+| `webapp` | 27 | SQLi, XSS, LFI, SSRF, JWT, IDOR, CSRF |
+| `network` | 11 | Port scan, SMB enum, SNMP, banner grab |
+| `reconnaissance` | 12 | Subdomain enum, Shodan, OSINT, WHOIS |
+| `cloud` | 11 | AWS IAM, S3, Azure, GCP, Kubernetes |
+| `malware` | 17 | PE analysis, YARA, sandbox, behavioural |
+| `wireless` | 12 | WPA, BLE, Zigbee, evil twin, deauth |
+| `active_directory` | 11 | Kerberoast, BloodHound, pass-the-hash |
+| … + 22 more | **266 total** | across 29 domains |
+
+```bash
+nexus tools            # list all 266 tools
+nexus tools --domain webapp   # filter by domain
+```
+
+---
+
+## 📄 Report Output
+
+Reports are written to `engagements/<mission-id>/` and include:
+
+- **JSON findings** — structured CVE-enriched results
+- **Markdown report** — human-readable pentest narrative
+- **Audit log** — append-only execution record
+
+---
+
+## 📚 Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [docs/quickstart.md](docs/quickstart.md) | First scan in 5 minutes |
+| [docs/architecture.md](docs/architecture.md) | Agent mesh & tool fabric design |
+| [docs/tool_development.md](docs/tool_development.md) | Write your own tools |
+| [docs/extension_guide.md](docs/extension_guide.md) | Custom agents, providers, guardrails |
+| [docs/security_considerations.md](docs/security_considerations.md) | Hardening & safe deployment |
+| [docs/deployment.md](docs/deployment.md) | Docker, Kubernetes, Terraform |
 
 ---
 
 ## 📜 License
 
-[MIT License](LICENSE) — Feel free to clone, fork, modify, and contribute!
+[MIT License](LICENSE)
