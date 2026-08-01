@@ -1,8 +1,3 @@
-# ============================================================
-# NEXUS-STRIKE — Python Dependencies
-# ============================================================
-
-# ── Core (required for all commands) ────────────────────────
 requests>=2.31.0
 python-dotenv>=1.0.0
 typer[all]>=0.9.0
@@ -11,32 +6,10 @@ pydantic>=2.5.0
 pydantic-settings>=2.1.0
 httpx>=0.26.0
 pyyaml>=6.0.1
-
-# ── Optional: AWS cloud assessment tools ────────────────────
-# Required by: nexus/tools/cloud/aws_review.py
-# Without this, aws_review returns STATUS_UNAVAILABLE (graceful)
 boto3>=1.34.0
 botocore>=1.34.0
-
-# ── Optional: DNS reconnaissance ────────────────────────────
-# Required by: nexus/tools/reconnaissance/dns_recon.py
-# Without this, dns_recon returns STATUS_UNAVAILABLE (graceful)
 dnspython>=2.4.0
-
-# ── Optional: Web crawler HTML parsing ──────────────────────
-# Required by: nexus/tools/webapp/crawler.py
-# Without this, crawler falls back to regex link extraction
 beautifulsoup4>=4.12.0
-
-# ── Optional: PDF report export ─────────────────────────────
-# Required by: nexus export-report (PDF format)
 weasyprint>=60.0
-
-# ── Optional: LLM provider SDKs ─────────────────────────────
-# Uncomment the provider(s) you use.
-# The built-in OpenAI-compatible client works for most providers
-# without these; install only for advanced/native features.
-#
-# openai>=1.0.0
-# anthropic>=0.20.0
-# groq>=0.4.0
+xhtml2pdf>=0.2.11
+pypdf>=3.1.0

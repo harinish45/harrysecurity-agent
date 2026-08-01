@@ -21,9 +21,29 @@ def run(target: str, **kwargs) -> dict:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
             resp = urllib.request.urlopen(req, timeout=5, context=ctx)
-            findings.append(f"HTTP {resp.status}: Server={resp.headers.get('Server', 'unknown')}, X-Powered-By={resp.headers.get('X-Powered-By', '')}")
+            import re as _re
+            def _title(h):
+                m = _re.search(r'<title[^>]*>([^<]+)</title>', h, _re.IGNORECASE)
+                return m.group(1).strip() if m else ''
+            server = resp.headers.get('Server', 'unknown')
+            powered_by = resp.headers.get('X-Powered-By', '')
+            csp = resp.headers.get('Content-Security-Policy', 'missing')
+            hsts = resp.headers.get('Strict-Transport-Security', 'missing')
+            x_frame = resp.headers.get('X-Frame-Options', 'missing')
             body = resp.read(4096).decode('utf-8', errors='replace')
-            findings.append(f"Response body (first 500 chars): {body[:500]}")
+            title = _title(body)
+            findings.append(
+                f"HTTP {resp.status} {url}: Server={server}"
+                + (f", X-Powered-By={powered_by}" if powered_by else "")
+                + (f", Title='{title}'" if title else "")
+            )
+            findings.append(f"Security headers — CSP={csp}, HSTS={hsts}, X-Frame-Options={x_frame}")
+            if csp == 'missing':
+                findings.append('WARN: Content-Security-Policy header absent')
+            if hsts == 'missing':
+                findings.append('WARN: Strict-Transport-Security header absent')
+            if x_frame == 'missing':
+                findings.append('WARN: X-Frame-Options header absent (potential clickjacking)')
         except urllib.error.HTTPError as e:
             findings.append(f"HTTP {e.code}: {url}")
         except Exception as e:
