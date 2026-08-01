@@ -12,6 +12,7 @@ engagements/*
 !engagements/.gitkeep
 logs/
 reports/
+nexus_test_*/
 nexus_audit.log
 upgrade_pentest_tools.py
 generate_guardrails.py
