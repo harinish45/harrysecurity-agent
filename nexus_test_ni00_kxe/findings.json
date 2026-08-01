@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "exported_at": "2026-08-01T09:37:21Z",
+  "finding_count": 1,
+  "findings": [
+    {
+      "id": "",
+      "title": "<unsafe markup>",
+      "severity": "high",
+      "confidence": "medium",
+      "affected_asset": "",
+      "evidence": "proof",
+      "remediation": "",
+      "references": [],
+      "timestamp": "2026-08-01T09:37:21Z",
+      "tool": "",
+      "tool_version": "",
+      "raw": {}
+    }
+  ]
+}

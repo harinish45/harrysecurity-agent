@@ -1,0 +1,2 @@
+id,title,severity,confidence,affected_asset,evidence,remediation,references,timestamp,tool,tool_version
+,<unsafe markup>,high,medium,,proof,,,2026-08-01T09:35:42Z,,

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "NEXUS-STRIKE",
+          "version": "0.2.0",
+          "informationUri": "https://github.com/nexus-strike/nexus-strike",
+          "rules": [
+            {
+              "id": "",
+              "shortDescription": {
+                "text": "<unsafe markup>"
+              },
+              "properties": {
+                "severity": "high",
+                "confidence": "medium",
+                "remediation": ""
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "",
+          "level": "error",
+          "message": {
+            "text": "<unsafe markup>"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ""
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "high",
+            "confidence": "medium",
+            "evidence": "proof",
+            "remediation": "",
+            "tool": ""
+          }
+        }
+      ]
+    }
+  ]
+}
