@@ -63,10 +63,8 @@ MEDIUM_PORTS = {22, 25, 53, 110, 143, 993, 995, 8080, 8443}
 
 def _infer_severity(finding: dict) -> str:
     text = json.dumps(finding).lower()
-    # Confirmed SQLi
     if "sqli" in text and ("vulnerable" in text or "injection" in text):
         return "high"
-    # Port-based heuristics
     for token in ("port", "open port", "open_ports", "port "):
         if token in text:
             nums = re.findall(r"\b(\d{2,5})\b", text)
@@ -76,7 +74,6 @@ def _infer_severity(finding: dict) -> str:
                     return "high"
                 if p in MEDIUM_PORTS:
                     return "medium"
-    # Explicit severity field
     sev = finding.get("severity", "").lower()
     if sev in SEVERITY_ORDER:
         return sev
@@ -112,7 +109,7 @@ def _normalize_findings(raw: Any) -> list[dict]:
 # ---------------------------------------------------------------------------
 # HTML report builder
 # ---------------------------------------------------------------------------
-CSS = """\
+CSS = """
 @page {
     size: A4;
     margin: 2cm 2cm 2.5cm 2cm;
@@ -171,11 +168,23 @@ tr:nth-child(even) { background: #f9f9f9; }
 .cover .author { font-size: 14pt; font-weight: bold; margin-top: 30pt; }
 .toc a { text-decoration: none; color: #222; }
 .toc td { border: none; padding: 3pt 8pt; }
-.severity-critical { color: #c0392b; font-weight: bold; }
-.severity-high { color: #e74c3c; font-weight: bold; }
-.severity-medium { color: #f39c12; font-weight: bold; }
-.severity-low { color: #3498db; }
-.severity-info { color: #7f8c8d; }
+
+/* 4-Color Severity Badges */
+.badge {
+    display: inline-block;
+    padding: 2pt 6pt;
+    border-radius: 4pt;
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 8.5pt;
+    text-align: center;
+}
+.badge-critical { background-color: #c0392b; }
+.badge-high { background-color: #e74c3c; }
+.badge-medium { background-color: #f39c12; }
+.badge-low { background-color: #3498db; }
+.badge-info { background-color: #95a5a6; }
+
 .section { page-break-before: always; }
 .section:first-of-type { page-break-before: auto; }
 .footer-note { font-size: 8pt; color: #888; margin-top: 30pt; text-align: center; }
@@ -183,47 +192,37 @@ tr:nth-child(even) { background: #f9f9f9; }
 
 
 def _clean_text(text: str) -> str:
-    """Remove non-printable and binary characters, normalize whitespace."""
     if not text:
         return ""
     s = str(text)
-    # Keep only printable ASCII (32-126) + common Unicode letters/digits/punctuation
-    # Strip binary garbage from banners (e.g. MySQL handshake packets)
     cleaned = []
     for ch in s:
         cp = ord(ch)
-        if cp == 10 or cp == 13:  # newline, carriage return
+        if cp == 10 or cp == 13:
             cleaned.append(" ")
-        elif cp == 9:  # tab
+        elif cp == 9:
             cleaned.append(" ")
-        elif 32 <= cp <= 126:  # printable ASCII
+        elif 32 <= cp <= 126:
             cleaned.append(ch)
         elif cp >= 160 and cp <= 1114111:
-            # Allow common Unicode (Latin-1 supplement and beyond) but skip
-            # geometric shapes, box drawing, and other symbols that come from
-            # binary data being decoded as text
-            if 0x2500 <= cp <= 0x25FF:  # Box Drawing, Geometric Shapes
+            if 0x2500 <= cp <= 0x25FF:
                 continue
-            if 0x2600 <= cp <= 0x26FF:  # Miscellaneous Symbols
+            if 0x2600 <= cp <= 0x26FF:
                 continue
             cleaned.append(ch)
-        # Everything else (control chars, C1, binary garbage) is dropped
     result = "".join(cleaned)
-    # Collapse multiple spaces
     result = re.sub(r" +", " ", result).strip()
-    # Remove any remaining non-ASCII for PDF safety
     result = result.encode("ascii", "ignore").decode("ascii")
     return result
 
 
 def _esc(text: str) -> str:
-    """Escape HTML special characters and clean control chars."""
     if not text:
         return ""
     s = _clean_text(text)
-    s = s.replace(chr(38), chr(38) + "amp;")   # & -> &
-    s = s.replace(chr(60), chr(38) + "lt;")    # < -> <
-    s = s.replace(chr(62), chr(38) + "gt;")    # > -> >
+    s = s.replace(chr(38), chr(38) + "amp;")
+    s = s.replace(chr(60), chr(38) + "lt;")
+    s = s.replace(chr(62), chr(38) + "gt;")
     return s
 
 
@@ -237,7 +236,6 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
     total = len(findings)
 
     def _gen_remediation(title: str, sev: str) -> str:
-        """Generate contextual remediation text based on finding title."""
         t = title.lower()
         if "open port" in t or "port" in t:
             return "Restrict access using firewall rules. Close unused ports. Allow only from trusted sources."
@@ -268,9 +266,10 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
             title = f.get('title', '—')
             desc = f.get('evidence', f.get('description', title))
             rem = f.get('remediation') or _gen_remediation(title, sev)
+            badge = f'<span class="badge badge-{sev}">{SEVERITY_LABELS[sev]}</span>'
             rows.append(f"""
             <tr>
-                <td>{_esc(title)}</td>
+                <td>{badge} {_esc(title)}</td>
                 <td>{_esc(f.get('affected_asset', target))}</td>
                 <td>{_esc(desc)[:200]}</td>
                 <td>{_esc(rem)[:150]}</td>
@@ -282,37 +281,32 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
             {''.join(rows)}
         </table>"""
 
-    # Group findings by severity
     grouped = {s: [] for s in SEVERITY_ORDER}
     for f in findings:
         sev = f.get("severity", "info").lower()
         grouped.setdefault(sev, []).append(f)
 
-    # Build findings sections — one page per severity (pages 6-10)
     findings_sections = ""
     for sev in SEVERITY_ORDER:
         items = grouped.get(sev, [])
         label = SEVERITY_LABELS[sev]
         findings_sections += f"""
         <div class="section">
-        <h2><span class="severity-{sev}">{label.upper()}</span> Findings ({len(items)})</h2>
+        <h2><span class="badge badge-{sev}">{label.upper()}</span> Findings ({len(items)})</h2>
         {findings_table(items, sev_filter=sev)}
         </div>"""
 
-    # CVE enrichment block
     cve_block = ""
     if cve_text and cve_text != "No service/version pairs matched the local CVE database.":
         cve_block = f"<pre style='font-size:8.5pt;background:#f4f4f4;padding:8pt;'>{_esc(cve_text[:1500])}</pre>"
     else:
         cve_block = "<p>No CVE matches were found in the local knowledge base for the detected services.</p>"
 
-    # LLM analysis blocks (supplemental data for Scan Results page)
     analysis_html = ""
     for i, block in enumerate(llm_blocks):
         snippet = _esc(block[:1200])
         analysis_html += f"<div style='margin-bottom:12pt;'><strong>Phase {i+1} Output:</strong><pre style='font-size:8.5pt;background:#fafafa;padding:6pt;white-space:pre-wrap;'>{snippet}</pre></div>"
 
-    # Recommendations
     recommendations = """
     <ul>
       <li><strong>Patch Management:</strong> Prioritize critical and high-severity findings. Apply vendor patches within 30 days of release. Establish a monthly patch cycle for routine updates and an emergency process for zero-day disclosures.</li>
@@ -326,21 +320,20 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
     </ul>
     """
 
-    # Remediation table sorted by severity — expanded to fill 3 pages
     remediation_rows = []
     for sev in SEVERITY_ORDER:
         for f in grouped.get(sev, []):
             title = f.get('title', '—')
             rem = f.get('remediation') or _gen_remediation(title, sev)
+            badge = f'<span class="badge badge-{sev}">{SEVERITY_LABELS[sev]}</span>'
             remediation_rows.append(f"""
             <tr>
-                <td><span class="severity-{sev}">{SEVERITY_LABELS[sev]}</span></td>
+                <td>{badge}</td>
                 <td>{_esc(title)}</td>
                 <td>{_esc(f.get('affected_asset', target))}</td>
                 <td>{_esc(rem)[:250]}</td>
             </tr>""")
 
-    # Generic remediation rows to fill the table and ensure 3-page span (pages 13-15)
     generic_remediations = [
         ("High", "Open Sensitive Port (SSH/RDP/SMB)", target, "Restrict access using firewall rules. Allow only from management jump hosts. Enable fail2ban for SSH. Disable SMBv1. Use VPN for remote access."),
         ("High", "Database Port Exposed (MySQL/PostgreSQL/MongoDB)", target, "Bind to 127.0.0.1 only. Use TLS for remote connections. Enforce strong authentication. Disable default accounts. Enable audit logging."),
@@ -365,9 +358,10 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
     ]
     for sev_label, title, asset, rem in generic_remediations:
         sev_key = sev_label.lower()
+        badge = f'<span class="badge badge-{sev_key}">{sev_label}</span>'
         remediation_rows.append(f"""
         <tr>
-            <td><span class="severity-{sev_key}">{sev_label}</span></td>
+            <td>{badge}</td>
             <td>{_esc(title)}</td>
             <td>{_esc(asset)}</td>
             <td>{_esc(rem)}</td>
@@ -378,7 +372,6 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
         {''.join(remediation_rows)}
     </table>"""
 
-    # Security policy table
     policy_table = """
     <table>
       <tr><th>Policy Setting</th><th>Recommended Value</th><th>Purpose</th></tr>
@@ -395,7 +388,6 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
     </table>
     """
 
-    # Open ports supplemental data
     open_ports = meta.get("open_ports", [])
     services = meta.get("services", {})
     ports_table_rows = ""
@@ -403,7 +395,8 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
         for p in open_ports:
             svc = services.get(str(p), "unknown")
             sev = "high" if p in HIGH_PORTS else ("medium" if p in MEDIUM_PORTS else "info")
-            ports_table_rows += f"<tr><td>{p}</td><td><span class='severity-{sev}'>{svc}</span></td><td>{SEVERITY_LABELS.get(sev, 'Info')}</td></tr>"
+            badge = f'<span class="badge badge-{sev}">{SEVERITY_LABELS.get(sev, "Info")}</span>'
+            ports_table_rows += f"<tr><td>{p}</td><td>{_esc(svc)}</td><td>{badge}</td></tr>"
     else:
         ports_table_rows = "<tr><td colspan='3'>No open ports detected</td></tr>"
 
@@ -471,7 +464,8 @@ using a local knowledge base.</p>
     for sev in SEVERITY_ORDER:
         cnt = counts.get(sev, 0)
         pct = f"{cnt/total*100:.1f}%" if total > 0 else "0.0%"
-        html += f"  <tr><td class='severity-{sev}'>{SEVERITY_LABELS[sev]}</td><td>{cnt}</td><td>{pct}</td></tr>\n"
+        badge = f'<span class="badge badge-{sev}">{SEVERITY_LABELS[sev]}</span>'
+        html += f"  <tr><td>{badge}</td><td>{cnt}</td><td>{pct}</td></tr>\n"
 
     html += f"""
 </table>
@@ -536,7 +530,8 @@ level, along with the corresponding risk rating.</p>
     for sev in SEVERITY_ORDER:
         cnt = counts.get(sev, 0)
         pct = f"{cnt/total*100:.1f}%" if total > 0 else "0.0%"
-        html += f"  <tr><td class='severity-{sev}'>{SEVERITY_LABELS[sev]}</td><td>{cnt}</td><td>{pct}</td><td>{risk_levels[sev]}</td></tr>\n"
+        badge = f'<span class="badge badge-{sev}">{SEVERITY_LABELS[sev]}</span>'
+        html += f"  <tr><td>{badge}</td><td>{cnt}</td><td>{pct}</td><td>{risk_levels[sev]}</td></tr>\n"
 
     html += f"""
 </table>
@@ -588,8 +583,7 @@ Benchmarks and NIST SP 800-63B guidelines.</p>
 # ---------------------------------------------------------------------------
 # PDF rendering
 # ---------------------------------------------------------------------------
-# xhtml2pdf-compatible CSS (replaces the weasyprint CSS entirely)
-XHTML2PDF_CSS = """\
+XHTML2PDF_CSS = """
 @page {
     size: a4 portrait;
     margin: 2cm 2cm 3cm 2cm;
@@ -652,26 +646,27 @@ td {
 .cover .meta { font-size: 12pt; color: #555; margin-top: 40pt; }
 .cover .author { font-size: 14pt; font-weight: bold; margin-top: 30pt; }
 .toc td { border: none; padding: 3pt 8pt; }
-.severity-critical { color: #c0392b; font-weight: bold; }
-.severity-high { color: #e74c3c; font-weight: bold; }
-.severity-medium { color: #f39c12; font-weight: bold; }
-.severity-low { color: #3498db; }
-.severity-info { color: #7f8c8d; }
+.badge {
+    display: inline-block;
+    padding: 2pt 6pt;
+    border-radius: 4pt;
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 8.5pt;
+    text-align: center;
+}
+.badge-critical { background-color: #c0392b; }
+.badge-high { background-color: #e74c3c; }
+.badge-medium { background-color: #f39c12; }
+.badge-low { background-color: #3498db; }
+.badge-info { background-color: #95a5a6; }
 .section { page-break-before: always; }
 .footer-note { font-size: 8pt; color: #888; margin-top: 30pt; text-align: center; }
 """
 
 
 def _xhtml2pdf_compatible_html(html: str) -> str:
-    """Convert weasyprint-style HTML to xhtml2pdf-compatible HTML.
-
-    xhtml2pdf has a limited CSS parser that can't handle @bottom-center
-    counters, :nth-child, or :first-of-type. We replace the entire CSS
-    block and add xhtml2pdf-style page numbering.
-    """
     import re as _re
-
-    # Replace the entire <style>...</style> block with xhtml2pdf-compatible CSS
     html = _re.sub(
         r'<style>.*?</style>',
         f'<style>\n{XHTML2PDF_CSS}\n</style>',
@@ -679,28 +674,39 @@ def _xhtml2pdf_compatible_html(html: str) -> str:
         count=1,
         flags=_re.DOTALL,
     )
-
-    # Add xhtml2pdf footer div for page numbers (before </body>)
     footer_div = '<div id="footer_content" style="text-align:center; font-size:9pt; color:#666;">Page <pdf:pagenumber> of <pdf:pagecount></div>'
     html = html.replace("</body>", f"{footer_div}\n</body>")
-
     return html
 
 
 def render_pdf(html_path: Path, pdf_path: Path) -> Path:
-    """Render HTML to PDF. Try weasyprint → playwright → xhtml2pdf."""
+    """Render HTML to PDF. Default to xhtml2pdf (works on Windows without GTK), fallback to others."""
     errors = []
 
-    # Attempt 1: weasyprint (best CSS support, needs GTK on Windows)
+    # Attempt 1: xhtml2pdf (pure Python, works on Windows without GTK) - NOW THE DEFAULT
+    try:
+        from xhtml2pdf import pisa  # type: ignore
+        html_content = html_path.read_text(encoding="utf-8")
+        html_content = _xhtml2pdf_compatible_html(html_content)
+        with open(pdf_path, "wb") as f:
+            result = pisa.CreatePDF(html_content, dest=f, encoding="utf-8")
+        if result.err:
+            raise RuntimeError(f"xhtml2pdf reported {result.err} errors")
+        return pdf_path
+    except Exception as exc1:
+        errors.append(f"xhtml2pdf: {exc1}")
+        print(f"[!] xhtml2pdf failed ({exc1}), trying weasyprint...")
+
+    # Attempt 2: weasyprint (best CSS support, needs GTK on Windows)
     try:
         import weasyprint  # type: ignore
         weasyprint.HTML(filename=str(html_path)).write_pdf(str(pdf_path))
         return pdf_path
-    except Exception as exc:
-        errors.append(f"weasyprint: {exc}")
-        print(f"[!] weasyprint failed ({exc}), trying playwright...")
+    except Exception as exc2:
+        errors.append(f"weasyprint: {exc2}")
+        print(f"[!] weasyprint failed ({exc2}), trying playwright...")
 
-    # Attempt 2: playwright (good CSS support, needs browser install)
+    # Attempt 3: playwright (good CSS support, needs browser install)
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
         with sync_playwright() as p:
@@ -711,22 +717,8 @@ def render_pdf(html_path: Path, pdf_path: Path) -> Path:
             page.pdf(path=str(pdf_path), format="A4", print_background=True, margin={"top": "2cm", "bottom": "2.5cm", "left": "2cm", "right": "2cm"})
             browser.close()
         return pdf_path
-    except Exception as exc2:
-        errors.append(f"playwright: {exc2}")
-        print(f"[!] playwright failed ({exc2}), trying xhtml2pdf...")
-
-    # Attempt 3: xhtml2pdf (pure Python, works on Windows without GTK)
-    try:
-        from xhtml2pdf import pisa  # type: ignore
-        html_content = html_path.read_text(encoding="utf-8")
-        html_content = _xhtml2pdf_compatible_html(html_content)
-        with open(pdf_path, "wb") as f:
-            result = pisa.CreatePDF(html_content, dest=f, encoding="utf-8")
-        if result.err:
-            raise RuntimeError(f"xhtml2pdf reported {result.err} errors")
-        return pdf_path
     except Exception as exc3:
-        errors.append(f"xhtml2pdf: {exc3}")
+        errors.append(f"playwright: {exc3}")
         raise RuntimeError("All PDF renderers failed:\n  " + "\n  ".join(errors))
 
 
@@ -749,7 +741,6 @@ def main():
     cve_text = data.get("cve_text", "")
     llm_blocks = data.get("llm_blocks", [])
 
-    # Merge top-level keys into meta so _build_html can access them
     if "open_ports" in data:
         meta["open_ports"] = data["open_ports"]
     if "services" in data:
