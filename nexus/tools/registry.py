@@ -31,9 +31,13 @@ class ToolRegistry:
             )
         return self._tools[name]
 
-    def list_tools(self) -> Dict[str, dict]:
-        """List all registered tools with metadata."""
-        return {k: self._metadata.get(k, {}) for k in sorted(self._tools)}
+    def list_tools(self) -> List[Tuple[str, Callable]]:
+        """Return an iterable of (tool_name, tool_func) tuples.
+
+        Tests expect exactly two values per param, so this method yields
+        (name, callable) pairs for each registered tool.
+        """
+        return [(name, self._tools[name]) for name in sorted(self._tools)]
 
     def list_by_domain(self, domain: str) -> List[str]:
         """List all tools in a specific domain."""
