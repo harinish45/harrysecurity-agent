@@ -34,10 +34,14 @@ jobs:
         ruff check . || echo "Ruff check completed with warnings"
 
     - name: Verify Nexus Tools
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         python -m nexus verify
 
     - name: Run pytest
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         pytest tests/ --tb=short -v
 
