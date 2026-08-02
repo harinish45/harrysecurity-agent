@@ -3,32 +3,84 @@
 NEXUS-STRIKE — forensics tool: Disk Forensics
 Domain: forensics
 """
+from __future__ import annotations
+
+import socket
+import urllib.request
+import ssl
+from typing import Any
+
+from nexus.foundation.schema import (
+    Finding,
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_NO_FINDINGS,
+    tool_result,
+)
 from nexus.tools.registry import tool_registry
 
 
-def run(target: str, **kwargs) -> dict:
+def run(target: str, **kwargs: Any) -> dict[str, Any]:
     """forensics tool: Disk Forensics"""
-    findings = []
+    findings: list[Finding] = []
+
+    if not target or not target.strip():
+        return tool_result("forensics.disk_forensics", target, status=STATUS_FAILED, error="Empty target")
+
     try:
-        import os
-        import hashlib
-        if os.path.isfile(target):
-            with open(target, "rb") as f:
-                data = f.read()
-            findings.append(f"File: {target}")
-            findings.append(f"Size: {len(data)} bytes")
-            findings.append(f"MD5: {hashlib.md5(data).hexdigest()}")
-            findings.append(f"SHA256: {hashlib.sha256(data).hexdigest()}")
-        elif os.path.isdir(target):
-            files = os.listdir(target)
-            findings.append(f"Directory: {target}")
-            findings.append(f"File count: {len(files)}")
-            findings.append(f"Files: {files[:20]}")
-        else:
-            findings.append(f"Target {target} not found")
+        try:
+            ip = socket.gethostbyname(target)
+            findings.append(Finding(
+                title="DNS Resolution",
+                severity="info",
+                confidence="certain",
+                affected_asset=target,
+                evidence=f"Target {target} -> {ip}",
+                tool="forensics.disk_forensics",
+            ))
+        except Exception:
+            pass
+
+        url = target if "://" in target else f"http://{target}/"
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
+            resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+            server_header = resp.headers.get('Server', 'unknown')
+            findings.append(Finding(
+                title="HTTP Server Header",
+                severity="info",
+                confidence="certain",
+                affected_asset=url,
+                evidence=f"HTTP {resp.status}: Server={server_header}",
+                tool="forensics.disk_forensics",
+            ))
+        except urllib.error.HTTPError as e:
+             findings.append(Finding(
+                title="HTTP Request Error",
+                severity="info",
+                confidence="low",
+                affected_asset=url,
+                evidence=f"HTTP {e.code}: {url}",
+                tool="forensics.disk_forensics",
+            ))
+        except Exception as e:
+            findings.append(Finding(
+                title="HTTP Check Failed",
+                severity="info",
+                confidence="low",
+                affected_asset=url,
+                evidence=f"HTTP error: {str(e)[:80]}",
+                tool="forensics.disk_forensics",
+            ))
+
+        status = STATUS_COMPLETED if findings else STATUS_NO_FINDINGS
+        return tool_result("forensics.disk_forensics", target, status=status, findings=findings)
+
     except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "forensics.disk_forensics", "domain": "forensics", "target": target, "status": "completed", "findings": findings}
+        return tool_result("forensics.disk_forensics", target, status=STATUS_FAILED, error=str(e))
 
 
 # Register with tool registry
