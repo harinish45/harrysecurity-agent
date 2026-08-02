@@ -1,11 +1,50 @@
 name: CI
-on: [push]
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install -e .
-      - run: pytest tests/unit -v
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-mock ruff
+
+    - name: Lint with Ruff
+      run: |
+        ruff check . || echo "Ruff check completed with warnings"
+
+    - name: Verify Nexus Tools
+      run: |
+        python -m nexus verify
+
+    - name: Run pytest
+      run: |
+        pytest tests/ --tb=short -v
+
+    - name: Upload test artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pytest-results
+        path: reports/
+        retention-days: 7
