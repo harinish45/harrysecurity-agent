@@ -3,7 +3,7 @@ NEXUS-STRIKE Tool Registry
 Central registry for all 500+ security tools across 29 domains.
 Supports registration, lookup, domain filtering, and metadata.
 """
-from typing import Callable, Dict, Any, List, Optional
+from typing import Callable, Dict, Any, List, Optional, Tuple
 
 
 class ToolRegistry:
@@ -63,3 +63,11 @@ class ToolRegistry:
 
 # Global singleton
 tool_registry = ToolRegistry()
+
+
+def list_tools() -> List[Tuple[str, Callable]]:
+    """
+    Return an iterable of (tool_name, tool_func) tuples.
+    Tests expect exactly two values per param.
+    """
+    return [(name, tool_registry.get(name)) for name in sorted(tool_registry._tools)]
