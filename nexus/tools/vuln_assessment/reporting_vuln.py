@@ -3,84 +3,46 @@
 NEXUS-STRIKE — vuln_assessment tool: Reporting Vuln
 Domain: vuln_assessment
 """
-from __future__ import annotations
-
-import socket
-import urllib.request
-import ssl
-from typing import Any
-
-from nexus.foundation.schema import (
-    Finding,
-    STATUS_COMPLETED,
-    STATUS_FAILED,
-    STATUS_NO_FINDINGS,
-    tool_result,
-)
 from nexus.tools.registry import tool_registry
 
 
-def run(target: str, **kwargs: Any) -> dict[str, Any]:
+def run(target: str, **kwargs) -> dict:
     """vuln_assessment tool: Reporting Vuln"""
-    findings: list[Finding] = []
-
-    if not target or not target.strip():
-        return tool_result("vuln_assessment.reporting_vuln", target, status=STATUS_FAILED, error="Empty target")
-
+    findings = []
     try:
-        try:
-            ip = socket.gethostbyname(target)
-            findings.append(Finding(
-                title="DNS Resolution",
-                severity="info",
-                confidence="certain",
-                affected_asset=target,
-                evidence=f"Target {target} -> {ip}",
-                tool="vuln_assessment.reporting_vuln",
-            ))
-        except Exception:
-            pass
-
-        url = target if "://" in target else f"http://{target}/"
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = urllib.request.urlopen(req, timeout=5, context=ctx)
-            server_header = resp.headers.get('Server', 'unknown')
-            findings.append(Finding(
-                title="HTTP Server Header",
-                severity="info",
-                confidence="certain",
-                affected_asset=url,
-                evidence=f"HTTP {resp.status}: Server={server_header}",
-                tool="vuln_assessment.reporting_vuln",
-            ))
-        except urllib.error.HTTPError as e:
-             findings.append(Finding(
-                title="HTTP Request Error",
-                severity="info",
-                confidence="low",
-                affected_asset=url,
-                evidence=f"HTTP {e.code}: {url}",
-                tool="vuln_assessment.reporting_vuln",
-            ))
-        except Exception as e:
-            findings.append(Finding(
-                title="HTTP Check Failed",
-                severity="info",
-                confidence="low",
-                affected_asset=url,
-                evidence=f"HTTP error: {str(e)[:80]}",
-                tool="vuln_assessment.reporting_vuln",
-            ))
-
-        status = STATUS_COMPLETED if findings else STATUS_NO_FINDINGS
-        return tool_result("vuln_assessment.reporting_vuln", target, status=status, findings=findings)
-
+        import socket
+        import urllib.request
+        import ssl
+        # Port scan
+        ports = kwargs.get("ports", [80, 443, 8080, 8443, 3000, 4000, 5000, 8000, 9000, 9090])
+        open_ports = []
+        for port in ports:
+            try:
+                with socket.create_connection((target, port), timeout=1):
+                    open_ports.append(port)
+            except:
+                pass
+        if open_ports:
+            findings.append(f"Open ports: {open_ports}")
+            # HTTP fingerprint
+            for port in open_ports:
+                scheme = "https" if port in (443, 8443) else "http"
+                url = f"{scheme}://{target}:{port}/"
+                try:
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
+                    resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+                    server = resp.headers.get("Server", "unknown")
+                    findings.append(f"Port {port}: Server={server}")
+                except:
+                    pass
+        else:
+            findings.append("No common web ports open")
     except Exception as e:
-        return tool_result("vuln_assessment.reporting_vuln", target, status=STATUS_FAILED, error=str(e))
+        findings.append(f"Error: {e}")
+    return {"tool": "vuln_assessment.reporting_vuln", "domain": "vuln_assessment", "target": target, "status": "completed", "findings": findings}
 
 
 # Register with tool registry

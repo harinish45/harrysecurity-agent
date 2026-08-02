@@ -3,84 +3,34 @@
 NEXUS-STRIKE — network tool: Smb Enum
 Domain: network
 """
-from __future__ import annotations
-
-import socket
-import urllib.request
-import ssl
-from typing import Any
-
-from nexus.foundation.schema import (
-    Finding,
-    STATUS_COMPLETED,
-    STATUS_FAILED,
-    STATUS_NO_FINDINGS,
-    tool_result,
-)
 from nexus.tools.registry import tool_registry
 
 
-def run(target: str, **kwargs: Any) -> dict[str, Any]:
+def run(target: str, **kwargs) -> dict:
     """network tool: Smb Enum"""
-    findings: list[Finding] = []
-
-    if not target or not target.strip():
-        return tool_result("network.smb_enum", target, status=STATUS_FAILED, error="Empty target")
-
+    findings = []
     try:
-        try:
-            ip = socket.gethostbyname(target)
-            findings.append(Finding(
-                title="DNS Resolution",
-                severity="info",
-                confidence="certain",
-                affected_asset=target,
-                evidence=f"Target {target} -> {ip}",
-                tool="network.smb_enum",
-            ))
-        except Exception:
-            pass
-
-        url = target if "://" in target else f"http://{target}/"
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = urllib.request.urlopen(req, timeout=5, context=ctx)
-            server_header = resp.headers.get('Server', 'unknown')
-            findings.append(Finding(
-                title="HTTP Server Header",
-                severity="info",
-                confidence="certain",
-                affected_asset=url,
-                evidence=f"HTTP {resp.status}: Server={server_header}",
-                tool="network.smb_enum",
-            ))
-        except urllib.error.HTTPError as e:
-             findings.append(Finding(
-                title="HTTP Request Error",
-                severity="info",
-                confidence="low",
-                affected_asset=url,
-                evidence=f"HTTP {e.code}: {url}",
-                tool="network.smb_enum",
-            ))
-        except Exception as e:
-            findings.append(Finding(
-                title="HTTP Check Failed",
-                severity="info",
-                confidence="low",
-                affected_asset=url,
-                evidence=f"HTTP error: {str(e)[:80]}",
-                tool="network.smb_enum",
-            ))
-
-        status = STATUS_COMPLETED if findings else STATUS_NO_FINDINGS
-        return tool_result("network.smb_enum", target, status=status, findings=findings)
-
+        import socket
+        import concurrent.futures
+        ports = kwargs.get("ports", [21,22,23,25,53,80,110,111,135,139,143,443,445,465,587,631,993,995,1433,1521,3000,3306,3389,4000,5000,5432,5900,6379,7070,8000,8080,8443,8888,9000,9090,9200,27017,27018,50000])
+        def probe(port):
+            try:
+                with socket.create_connection((target, port), timeout=1):
+                    return port
+            except:
+                return None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=60) as ex:
+            results = list(ex.map(probe, ports))
+        open_ports = sorted(p for p in results if p is not None)
+        findings.append(f"Open ports on {target}: {open_ports}")
+        if open_ports:
+            known = {21:"FTP",22:"SSH",23:"Telnet",25:"SMTP",53:"DNS",80:"HTTP",110:"POP3",443:"HTTPS",445:"SMB",3306:"MySQL",3389:"RDP",5432:"PostgreSQL",6379:"Redis",8080:"HTTP-Alt",9200:"Elasticsearch"}
+            for p in open_ports:
+                svc = known.get(p, "Unknown")
+                findings.append(f"Port {p}: {svc}")
     except Exception as e:
-        return tool_result("network.smb_enum", target, status=STATUS_FAILED, error=str(e))
+        findings.append(f"Error: {e}")
+    return {"tool": "network.smb_enum", "domain": "network", "target": target, "status": "completed", "findings": findings}
 
 
 # Register with tool registry

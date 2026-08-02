@@ -3,84 +3,79 @@
 NEXUS-STRIKE — webapp tool: Api Security
 Domain: webapp
 """
-from __future__ import annotations
-
-import socket
-import urllib.request
-import ssl
-from typing import Any
-
-from nexus.foundation.schema import (
-    Finding,
-    STATUS_COMPLETED,
-    STATUS_FAILED,
-    STATUS_NO_FINDINGS,
-    tool_result,
-)
 from nexus.tools.registry import tool_registry
 
 
-def run(target: str, **kwargs: Any) -> dict[str, Any]:
+def _extract_title(html: str) -> str:
+    """Extract <title> text from an HTML string."""
+    import re
+    match = re.search(r"<title[^>]*>([^<]+)</title>", html, re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def run(target: str, **kwargs) -> dict:
     """webapp tool: Api Security"""
-    findings: list[Finding] = []
-
-    if not target or not target.strip():
-        return tool_result("webapp.api_security", target, status=STATUS_FAILED, error="Empty target")
-
+    findings = []
     try:
-        try:
-            ip = socket.gethostbyname(target)
-            findings.append(Finding(
-                title="DNS Resolution",
-                severity="info",
-                confidence="certain",
-                affected_asset=target,
-                evidence=f"Target {target} -> {ip}",
-                tool="webapp.api_security",
-            ))
-        except Exception:
-            pass
+        import urllib.request
+        import urllib.error
+        import ssl
+        import urllib.parse
 
-        url = target if "://" in target else f"http://{target}/"
+        parsed = urllib.parse.urlparse(
+            target if "://" in target else f"http://{target}/"
+        )
+        url = parsed.geturl()
+
+        # Permissive SSL — don't fail on self-signed / missing certs
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = urllib.request.urlopen(req, timeout=5, context=ctx)
-            server_header = resp.headers.get('Server', 'unknown')
-            findings.append(Finding(
-                title="HTTP Server Header",
-                severity="info",
-                confidence="certain",
-                affected_asset=url,
-                evidence=f"HTTP {resp.status}: Server={server_header}",
-                tool="webapp.api_security",
-            ))
-        except urllib.error.HTTPError as e:
-             findings.append(Finding(
-                title="HTTP Request Error",
-                severity="info",
-                confidence="low",
-                affected_asset=url,
-                evidence=f"HTTP {e.code}: {url}",
-                tool="webapp.api_security",
-            ))
-        except Exception as e:
-            findings.append(Finding(
-                title="HTTP Check Failed",
-                severity="info",
-                confidence="low",
-                affected_asset=url,
-                evidence=f"HTTP error: {str(e)[:80]}",
-                tool="webapp.api_security",
-            ))
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "NexusStrike/1.0"}
+            )
+            resp = urllib.request.urlopen(req, timeout=6, context=ctx)
+            server = resp.headers.get("Server", "unknown")
+            powered_by = resp.headers.get("X-Powered-By", "")
+            csp = resp.headers.get("Content-Security-Policy", "missing")
+            hsts = resp.headers.get("Strict-Transport-Security", "missing")
+            x_frame = resp.headers.get("X-Frame-Options", "missing")
 
-        status = STATUS_COMPLETED if findings else STATUS_NO_FINDINGS
-        return tool_result("webapp.api_security", target, status=status, findings=findings)
+            body = resp.read(4096).decode("utf-8", errors="replace")
+            title = _extract_title(body)
 
-    except Exception as e:
-        return tool_result("webapp.api_security", target, status=STATUS_FAILED, error=str(e))
+            findings.append(
+                f"HTTP {resp.status} {url}: Server={server}"
+                + (f", X-Powered-By={powered_by}" if powered_by else "")
+                + (f", Title='{title}'" if title else "")
+            )
+            findings.append(f"Security headers — CSP={csp}, HSTS={hsts}, X-Frame-Options={x_frame}")
+
+            # Flag obviously missing security headers
+            if csp == "missing":
+                findings.append("WARN: Content-Security-Policy header absent")
+            if hsts == "missing":
+                findings.append("WARN: Strict-Transport-Security header absent")
+            if x_frame == "missing":
+                findings.append("WARN: X-Frame-Options header absent (potential clickjacking)")
+
+        except urllib.error.HTTPError as http_err:
+            findings.append(f"HTTP {http_err.code} {http_err.reason}: {url}")
+        except OSError:
+            findings.append(f"Connection refused / port not reachable: {url}")
+        except Exception as probe_err:
+            findings.append(f"HTTP error: {str(probe_err)[:120]}")
+    except Exception as outer_err:
+        findings.append(f"Error: {outer_err}")
+    return {
+        "tool": "webapp.api_security",
+        "domain": "webapp",
+        "target": target,
+        "status": "completed",
+        "findings": findings,
+    }
 
 
 # Register with tool registry
