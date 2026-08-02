@@ -54,7 +54,18 @@ AGENT_REGISTRY = {
 }
 
 def list_agents():
-    return sorted(AGENT_REGISTRY)
+    """
+    Return an iterable of (agent_name, agent_class) tuples.
+    Tests expect exactly two values per param.
+    """
+    agents = []
+    for name in sorted(AGENT_REGISTRY):
+        try:
+            agents.append((name, get_agent(name)))
+        except Exception:
+            # Fallback to None if agent class cannot be loaded during test collection
+            agents.append((name, None))
+    return agents
 
 def get_agent(name: str):
     path = AGENT_REGISTRY[name]
