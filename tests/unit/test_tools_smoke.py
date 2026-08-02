@@ -4,12 +4,12 @@ NEXUS-STRIKE — Unit Tests: Tool Smoke Tests
 Ensures all registered tools can be imported and executed without raising exceptions.
 """
 import pytest
-from nexus.tools.registry import tool_registry
+from nexus.tools.registry import list_tools
 
 VALID_STATUSES = {"completed", "no_findings", "failed", "unavailable"}
 REQUIRED_KEYS = {"tool", "domain", "target", "status", "findings"}
 
-@pytest.mark.parametrize("tool_name,tool_func", tool_registry.list_tools())
+@pytest.mark.parametrize("tool_name,tool_func", list_tools())
 def test_tool_smoke(tool_name: str, tool_func: callable):
     """Smoke test for every registered tool."""
     target = "127.0.0.1"
