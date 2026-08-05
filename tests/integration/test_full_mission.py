@@ -8,6 +8,9 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
+# Ensure legal acknowledgment is set for testing
+os.environ.setdefault("NEXUS_LEGAL_ACK", "1")
+
 @pytest.fixture
 def mock_llm_router():
     """Mock the LLM router to return canned, deterministic responses."""
