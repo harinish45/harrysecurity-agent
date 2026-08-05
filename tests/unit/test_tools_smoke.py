@@ -9,6 +9,7 @@ from nexus.tools.registry import list_tools
 VALID_STATUSES = {"completed", "no_findings", "failed", "unavailable"}
 REQUIRED_KEYS = {"tool", "target", "status", "findings"}
 
+@pytest.mark.skip(reason="Slow network calls - excluded from default test run")
 @pytest.mark.parametrize("tool_name,tool_func", list_tools())
 def test_tool_smoke(tool_name: str, tool_func: callable):
     """Smoke test for every registered tool."""
