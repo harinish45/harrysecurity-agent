@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NEXUS-STRIKE — PurpleSec-style PDF Report Generator
+NEXUS-STRIKE — PurpleSec-style PDF Report Generator (v2)
 ====================================================
 Takes a raw JSON file from scripts/nexus_scan.py and produces a 16-page
 professional vulnerability assessment PDF report.
@@ -58,9 +58,183 @@ SEVERITY_COLORS = {
 }
 
 HIGH_PORTS = {21, 23, 135, 139, 445, 1433, 3306, 3389, 5432, 6379, 9200, 27017}
-MEDIUM_PORTS = {22, 25, 53, 110, 143, 993, 995, 8080, 8443}
+MEDIUM_PORTS = {22, 25, 53, 110, 143, 993, 995, 8443}
+# Development/admin ports — these are LOW risk because they are commonly
+# run by developers locally and rarely represent production exposure.
+LOW_PORTS = {80, 443, 8080, 8000, 3000, 5000, 8888, 9000, 9090, 4000, 7070}
 
 
+# ---------------------------------------------------------------------------
+# Issue 1 + Issue 2: Real prose generation for descriptions and remediations
+# ---------------------------------------------------------------------------
+def generate_description(category: str, evidence: str, asset: str) -> str:
+    """
+    Return a 3-5 sentence real description explaining what the finding means,
+    its security impact, and the protocol/port/service involved.
+    Does NOT just copy the raw evidence string.
+    """
+    c = (category or "").lower()
+    ev = (evidence or "").lower()
+    a = str(asset or "")
+
+    # --- Port open ---
+    if any(tok in c or tok in ev for tok in ("open port", "open_port", "port open", "ports:")):
+        nums = re.findall(r"\b(\d{2,5})\b", ev)
+        port = nums[0] if nums else "unknown"
+        if int(port) in HIGH_PORTS if nums else False:
+            return (
+                f"TCP port {port} on {a} is accepting connections from the network. "
+                f"This port is associated with a high-risk service commonly targeted by "
+                f"attackers (e.g., SMB, RDP, databases). If this service is not strictly "
+                f"required, it significantly expands the host's attack surface and may "
+                f"expose administrative interfaces, unpatched software, or default credentials "
+                f"to remote adversaries."
+            )
+        return (
+            f"TCP port {port} on {a} is accepting connections from the network. "
+            f"An open port indicates an active listening service that could be probed for "
+            f"weak authentication, outdated versions, or known vulnerabilities. If this "
+            f"service is not strictly required for business operations, it expands the "
+            f"host's attack surface and may expose administrative interfaces, development "
+            f"tools, or unpatched software to remote attackers."
+        )
+
+    # --- DNS ---
+    if any(tok in c or tok in ev for tok in ("dns", "resolved", "reverse dns", "ptr")):
+        return (
+            f"Forward or reverse DNS resolution succeeded for {a}. DNS lookups reveal the "
+            f"host's network identity and can be used by attackers to map the surrounding "
+            f"infrastructure. Unrestricted zone transfers or the absence of DNSSEC validation "
+            f"can enable spoofing, cache poisoning, or unauthorized enumeration of internal "
+            f"hostnames."
+        )
+
+    # --- HTTP / banner ---
+    if any(tok in c or tok in ev for tok in ("http", "server header", "x-powered-by", "banner")):
+        return (
+            f"The HTTP service on {a} disclosed version information via response headers "
+            f"(Server, X-Powered-By, or similar). Version disclosure allows attackers to "
+            f"identify the exact software release in use and cross-reference it against "
+            f"public CVE databases to find known exploitable weaknesses. Suppressing version "
+            f"information and adding security headers (HSTS, CSP, X-Frame-Options) is a "
+            f"fundamental hardening step."
+        )
+
+    # --- SSL/TLS ---
+    if any(tok in c or tok in ev for tok in ("ssl", "tls", "certificate")):
+        return (
+            f"An SSL/TLS service was identified on {a}. Weak cipher suites, outdated "
+            f"protocol versions (TLS 1.0, 1.1), self-signed certificates, or imminent "
+            f"expiration can enable man-in-the-middle attacks or downgrade attacks. "
+            f"Modern best practice requires TLS 1.2 or TLS 1.3 with forward-secret "
+            f"cipher suites (AES-GCM, ChaCha20) and certificates issued by a trusted CA."
+        )
+
+    # --- SQLi ---
+    if any(tok in c or tok in ev for tok in ("sqli", "sql injection", "sql_injection")):
+        return (
+            f"Potential SQL injection vectors were tested against {a}. Successful SQL "
+            f"injection allows an attacker to read, modify, or delete database contents, "
+            f"bypass authentication, and in some cases escalate to remote code execution "
+            f"via xp_cmdshell or INTO OUTFILE. Mitigation requires parameterized queries "
+            f"across every data-access path, a WAF as a compensating control, and rigorous "
+            f"input validation."
+        )
+
+    # --- CVE ---
+    if any(tok in c or tok in ev for tok in ("cve", "vulnerability", "exploit")):
+        return (
+            f"A known CVE or vulnerability was identified on {a}. Public exploit code "
+            f"exists for many CVEs, and unpatched systems are frequently compromised "
+            f"within days of disclosure. Remediation requires applying vendor patches, "
+            f"restricting network access to the affected service, and monitoring for "
+            f"exploitation attempts via SIEM rules."
+        )
+
+    # --- Default fallback ---
+    return (
+        f"An informational finding was recorded for {a}. While this observation does not "
+        f"directly represent a vulnerability, it contributes to the attacker's "
+        f"reconnaissance picture and should be reviewed as part of the overall hardening "
+        f"of the target. Verify the business justification for this exposure and apply "
+        f"vendor-recommended hardening guidance."
+    )
+
+
+def generate_remediation(category: str, evidence: str, asset: str) -> str:
+    """
+    Return a specific, applicable remediation. Does NOT use the same generic
+    template for all findings.
+    """
+    c = (category or "").lower()
+    ev = (evidence or "").lower()
+    a = str(asset or "")
+
+    nums = re.findall(r"\b(\d{2,5})\b", ev)
+    port = int(nums[0]) if nums else None
+
+    # --- Port-based remediations ---
+    if port in (21,):
+        return ("FTP transmits credentials in plaintext. Replace with SFTP or FTPS. "
+                "Restrict source IPs via firewall. Disable anonymous login. "
+                "Apply latest vendor patches.")
+    if port in (22,):
+        return ("Restrict SSH source IPs via firewall or VPN. Disable password auth; "
+                "enforce key-based authentication. Disable root login. "
+                "Enable fail2ban. Apply latest vendor patches (regreSSHion CVE-2024-6387).")
+    if port in (23,):
+        return ("Telnet transmits all data in plaintext. Replace with SSH. "
+                "If unavoidable, tunnel through a VPN and restrict source IPs.")
+    if port in (135, 139, 445):
+        return ("Disable SMB if not required. Block ports 135/139/445 at the perimeter. "
+                "Disable SMBv1. Enforce SMB signing. Apply latest patches (EternalBlue). "
+                "Restrict to management jump hosts.")
+    if port in (1433, 3306, 5432, 6379, 9200, 27017):
+        return ("Bind the database to 127.0.0.1 or a private interface. Require strong "
+                "authentication. Disable default accounts (root, sa, admin). Enable TLS "
+                "for remote connections. Apply latest security patches. Enable audit logging.")
+    if port in (3389,):
+        return ("Restrict RDP source IPs via firewall or VPN. Enable Network Level "
+                "Authentication (NLA). Enforce MFA. Apply latest patches (BlueKeep "
+                "CVE-2019-0708). Consider replacing with a hardened bastion host.")
+    if port in (80, 443, 8080, 8443):
+        return ("Restrict source IPs to known clients. Redirect HTTP to HTTPS. Enforce "
+                "TLS 1.2+. Add security headers (HSTS, CSP, X-Frame-Options, "
+                "X-Content-Type-Options). Review web application for OWASP Top 10 issues.")
+
+    # --- DNS ---
+    if any(tok in c or tok in ev for tok in ("dns", "resolved", "reverse")):
+        return ("Enable DNSSEC. Restrict zone transfers to authorized secondary "
+                "nameservers. Monitor for unauthorized DNS changes. Implement DNS "
+                "response rate limiting. Enable DNS over TLS/HTTPS where supported.")
+
+    # --- HTTP missing headers ---
+    if any(tok in c or tok in ev for tok in ("http", "server header", "banner", "x-powered")):
+        return ("Add Strict-Transport-Security, Content-Security-Policy, X-Frame-Options, "
+                "X-Content-Type-Options, Referrer-Policy headers. Suppress Server and "
+                "X-Powered-By version disclosure. Disable directory listing.")
+
+    # --- SSL/TLS ---
+    if any(tok in c or tok in ev for tok in ("ssl", "tls", "certificate")):
+        return ("Disable TLS 1.0 and 1.1. Require TLS 1.2+ with strong cipher suites "
+                "(AES-GCM, ChaCha20). Renew certificates before expiry. Replace "
+                "self-signed certificates with CA-issued equivalents.")
+
+    # --- SQLi ---
+    if any(tok in c or tok in ev for tok in ("sqli", "sql injection")):
+        return ("Migrate vulnerable parameters to parameterized queries or an ORM. "
+                "Deploy a WAF as an interim compensating control. Implement strict "
+                "input validation and output encoding. Conduct a code review of all "
+                "data-access paths.")
+
+    # --- Generic ---
+    return ("Review and remediate per vendor guidance. Apply latest patches, restrict "
+            "network access to authorized sources, and monitor for exploitation attempts.")
+
+
+# ---------------------------------------------------------------------------
+# Severity inference (Issue 7: dev ports = LOW)
+# ---------------------------------------------------------------------------
 def _infer_severity(finding: dict) -> str:
     text = json.dumps(finding).lower()
     if "sqli" in text and ("vulnerable" in text or "injection" in text):
@@ -74,6 +248,8 @@ def _infer_severity(finding: dict) -> str:
                     return "high"
                 if p in MEDIUM_PORTS:
                     return "medium"
+                if p in LOW_PORTS:
+                    return "low"
     sev = finding.get("severity", "").lower()
     if sev in SEVERITY_ORDER:
         return sev
@@ -85,109 +261,145 @@ def _normalize_findings(raw: Any) -> list[dict]:
     if isinstance(raw, list):
         for item in raw:
             if isinstance(item, str):
-                findings.append({"title": item, "severity": _infer_severity({"title": item}), "description": item, "evidence": item})
+                cat = item
+                findings.append({
+                    "title": item,
+                    "severity": _infer_severity({"title": item}),
+                    "description": generate_description(cat, item, ""),
+                    "evidence": item,
+                    "remediation": generate_remediation(cat, item, ""),
+                })
             elif isinstance(item, dict):
                 f = dict(item)
                 f.setdefault("severity", _infer_severity(f))
                 f.setdefault("title", f.get("title", "Untitled"))
-                f.setdefault("description", f.get("evidence", f.get("title", "")))
+                title = f["title"]
+                evidence = f.get("evidence", title)
+                f.setdefault("description", generate_description(title, evidence, f.get("affected_asset", "")))
+                f.setdefault("remediation", generate_remediation(title, evidence, f.get("affected_asset", "")))
                 findings.append(f)
     elif isinstance(raw, dict):
         for key, val in raw.items():
             if isinstance(val, list):
                 for item in val:
                     if isinstance(item, str):
-                        findings.append({"title": item, "severity": _infer_severity({"title": item}), "description": item})
+                        findings.append({
+                            "title": item,
+                            "severity": _infer_severity({"title": item}),
+                            "description": generate_description(key, item, ""),
+                            "remediation": generate_remediation(key, item, ""),
+                        })
                     elif isinstance(item, dict):
                         f = dict(item)
                         f.setdefault("severity", _infer_severity(f))
                         f.setdefault("title", f.get("title", key))
+                        title = f["title"]
+                        evidence = f.get("evidence", title)
+                        f.setdefault("description", generate_description(title, evidence, f.get("affected_asset", "")))
+                        f.setdefault("remediation", generate_remediation(title, evidence, f.get("affected_asset", "")))
                         findings.append(f)
     return findings
 
 
 # ---------------------------------------------------------------------------
-# HTML report builder
+# Issue 4: xhtml2pdf-compatible CSS (no inline-block badges, no border-radius)
 # ---------------------------------------------------------------------------
 CSS = """
 @page {
     size: A4;
-    margin: 2cm 2cm 2.5cm 2cm;
+    margin: 1.8cm 1.8cm 2.2cm 1.8cm;
     @bottom-center {
         content: "Page " counter(page) " of " counter(pages);
         font-family: Helvetica, Arial, sans-serif;
-        font-size: 9pt;
-        color: #666;
+        font-size: 8.5pt;
+        color: #888;
     }
 }
 * { box-sizing: border-box; }
 body {
     font-family: Helvetica, Arial, sans-serif;
-    font-size: 10.5pt;
-    line-height: 1.5;
+    font-size: 10pt;
+    line-height: 1.4;
     color: #222;
     margin: 0;
     padding: 0;
 }
-h1 { font-size: 22pt; margin: 0 0 8pt 0; }
+h1 { font-size: 20pt; margin: 0 0 6pt 0; page-break-after: avoid; }
 h2 {
-    font-size: 14pt;
-    margin: 24pt 0 10pt 0;
-    padding-bottom: 4pt;
-    border-bottom: 1.5pt solid #2c3e50;
+    font-size: 13pt;
+    margin: 0 0 8pt 0;
+    padding-bottom: 3pt;
+    border-bottom: 1pt solid #2c3e50;
     color: #2c3e50;
     page-break-after: avoid;
 }
-h3 { font-size: 12pt; margin: 16pt 0 6pt 0; color: #34495e; page-break-after: avoid; }
+h3 { font-size: 11pt; margin: 12pt 0 4pt 0; color: #34495e; page-break-after: avoid; }
+p { margin: 4pt 0; orphans: 3; widows: 3; }
 table {
     width: 100%;
     border-collapse: collapse;
-    margin: 10pt 0 16pt 0;
-    font-size: 9.5pt;
+    margin: 8pt 0 12pt 0;
+    font-size: 9pt;
+    page-break-inside: auto;
 }
+tr { page-break-inside: avoid; page-break-after: auto; }
 th {
     background: #ecf0f1;
     color: #2c3e50;
     font-weight: bold;
     text-align: left;
-    padding: 6pt 8pt;
-    border: 1pt solid #bdc3c7;
+    padding: 4pt 6pt;
+    border: 0.5pt solid #bdc3c7;
 }
 td {
-    padding: 5pt 8pt;
-    border: 1pt solid #ddd;
+    padding: 4pt 6pt;
+    border: 0.5pt solid #ddd;
     vertical-align: top;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 tr:nth-child(even) { background: #f9f9f9; }
 .cover {
     text-align: center;
-    padding-top: 120pt;
+    padding-top: 100pt;
 }
-.cover h1 { font-size: 26pt; margin-bottom: 18pt; }
-.cover .meta { font-size: 12pt; color: #555; margin-top: 40pt; }
-.cover .author { font-size: 14pt; font-weight: bold; margin-top: 30pt; }
+.cover h1 { font-size: 24pt; margin-bottom: 14pt; }
+.cover .meta { font-size: 11pt; color: #555; margin-top: 30pt; line-height: 1.6; }
+.cover .author { font-size: 13pt; font-weight: bold; margin-top: 24pt; }
+.cover .footer-note { font-size: 8pt; color: #888; margin-top: 30pt; }
 .toc a { text-decoration: none; color: #222; }
-.toc td { border: none; padding: 3pt 8pt; }
-
-/* 4-Color Severity Badges */
+.toc td { border: none; padding: 2pt 6pt; }
+.toc { page-break-after: always; }
+/* Severity badges — use display:inline (not inline-block) for xhtml2pdf */
 .badge {
-    display: inline-block;
-    padding: 2pt 6pt;
-    border-radius: 4pt;
+    padding: 1pt 4pt;
     color: #ffffff;
     font-weight: bold;
-    font-size: 8.5pt;
+    font-size: 8pt;
     text-align: center;
+    display: inline;
+    line-height: 1.2;
 }
-.badge-critical { background-color: #c0392b; }
-.badge-high { background-color: #e74c3c; }
-.badge-medium { background-color: #f39c12; }
-.badge-low { background-color: #3498db; }
-.badge-info { background-color: #95a5a6; }
-
+.badge-critical { background-color: #8b0000; }
+.badge-high { background-color: #c0392b; }
+.badge-medium { background-color: #d68910; }
+.badge-low { background-color: #2874a6; }
+.badge-info { background-color: #5d6d7e; }
 .section { page-break-before: always; }
 .section:first-of-type { page-break-before: auto; }
-.footer-note { font-size: 8pt; color: #888; margin-top: 30pt; text-align: center; }
+.no-break { page-break-inside: avoid; }
+pre {
+    font-family: 'Courier New', monospace;
+    font-size: 8pt;
+    background: #fafafa;
+    padding: 4pt 6pt;
+    border: 0.5pt solid #e0e0e0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin: 4pt 0 8pt 0;
+    line-height: 1.3;
+}
+.footer-note { font-size: 8pt; color: #888; margin-top: 20pt; text-align: center; }
 """
 
 
@@ -226,6 +438,24 @@ def _esc(text: str) -> str:
     return s
 
 
+# ---------------------------------------------------------------------------
+# Issue 3: Filter mock LLM blocks
+# ---------------------------------------------------------------------------
+def _filter_real_llm_blocks(llm_blocks: list[str]) -> list[str]:
+    """Return only blocks that contain real LLM output (skip mock/fallback)."""
+    real = []
+    for b in llm_blocks or []:
+        if not b:
+            continue
+        s = str(b).strip()
+        if s.startswith("[") and "Would call API with" in s:
+            continue
+        if "Would call API with" in s:
+            continue
+        real.append(b)
+    return real
+
+
 def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, llm_blocks: list[str]) -> str:
     now = datetime.now().strftime("%B %d, %Y")
     operator = meta.get("operator", "HARINISH")
@@ -235,27 +465,19 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
         counts[sev] = counts.get(sev, 0) + 1
     total = len(findings)
 
-    def _gen_remediation(title: str, sev: str) -> str:
-        t = title.lower()
-        if "open port" in t or "port" in t:
-            return "Restrict access using firewall rules. Close unused ports. Allow only from trusted sources."
-        if "banner" in t:
-            return "Suppress version banners in service configuration. Minimize information disclosure."
-        if "dns" in t or "resolved" in t or "reverse" in t:
-            return "Restrict DNS zone transfers. Use DNSSEC. Monitor for DNS spoofing attempts."
-        if "sqli" in t or "sql injection" in t:
-            return "Use parameterized queries. Deploy WAF rules. Implement input validation."
-        if "ssl" in t or "tls" in t:
-            return "Disable TLS 1.0/1.1. Enforce TLS 1.2+ with strong cipher suites."
-        if "http" in t:
-            return "Add security headers (HSTS, CSP, X-Frame-Options). Remove version info from headers."
-        if sev == "high":
-            return "Apply vendor patches. Restrict network access. Monitor for exploitation."
-        if sev == "medium":
-            return "Update to latest stable version. Review configuration. Harden service settings."
-        if sev == "low":
-            return "Review and document. Apply hardening recommendations. Monitor for changes."
-        return "Review and remediate per vendor guidance."
+    # Issue 3: filter mock LLM blocks
+    real_llm_blocks = _filter_real_llm_blocks(llm_blocks)
+    llm_was_mock = len(real_llm_blocks) == 0 and len(llm_blocks or []) > 0
+    llm_was_absent = len(llm_blocks or []) == 0
+
+    # Issue 6: accurate phase counts
+    # 8 automated phases + 3 LLM phases
+    auto_phases = 8
+    if llm_was_absent or llm_was_mock:
+        llm_phases_completed = 0
+    else:
+        llm_phases_completed = min(3, len(real_llm_blocks))
+    total_phases_completed = auto_phases + llm_phases_completed
 
     def findings_table(items, sev_filter=None):
         rows = []
@@ -264,15 +486,17 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
             if sev_filter and sev != sev_filter:
                 continue
             title = f.get('title', '—')
-            desc = f.get('evidence', f.get('description', title))
-            rem = f.get('remediation') or _gen_remediation(title, sev)
+            # Issue 1: use generated description (not raw evidence)
+            desc = f.get('description') or generate_description(title, f.get('evidence', ''), f.get('affected_asset', target))
+            # Issue 2: use generated remediation (not generic template)
+            rem = f.get('remediation') or generate_remediation(title, f.get('evidence', ''), f.get('affected_asset', target))
             badge = f'<span class="badge badge-{sev}">{SEVERITY_LABELS[sev]}</span>'
             rows.append(f"""
             <tr>
                 <td>{badge} {_esc(title)}</td>
                 <td>{_esc(f.get('affected_asset', target))}</td>
-                <td>{_esc(desc)[:200]}</td>
-                <td>{_esc(rem)[:150]}</td>
+                <td>{_esc(desc)}</td>
+                <td>{_esc(rem)}</td>
             </tr>""")
         if not rows:
             return "<p>No findings in this category.</p>"
@@ -302,10 +526,17 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
     else:
         cve_block = "<p>No CVE matches were found in the local knowledge base for the detected services.</p>"
 
+    # Issue 9: LLM analysis section (filtered / renamed / hidden)
     analysis_html = ""
-    for i, block in enumerate(llm_blocks):
-        snippet = _esc(block[:1200])
-        analysis_html += f"<div style='margin-bottom:12pt;'><strong>Phase {i+1} Output:</strong><pre style='font-size:8.5pt;background:#fafafa;padding:6pt;white-space:pre-wrap;'>{snippet}</pre></div>"
+    if real_llm_blocks:
+        analysis_html += "<h3>LLM Phase Logs</h3>"
+        for i, block in enumerate(real_llm_blocks):
+            snippet = _esc(block[:1200])
+            analysis_html += f"<div style='margin-bottom:12pt;'><strong>Phase {i+1} Output:</strong><pre style='font-size:8.5pt;background:#fafafa;padding:6pt;white-space:pre-wrap;'>{snippet}</pre></div>"
+    elif llm_was_mock:
+        analysis_html = "<p>AI analysis was unavailable for this scan (LLM provider returned mock/fallback responses). Findings are based on automated detection rules and CVE matching only.</p>"
+    else:
+        analysis_html = "<p>No AI analysis output was recorded.</p>"
 
     recommendations = """
     <ul>
@@ -324,48 +555,15 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
     for sev in SEVERITY_ORDER:
         for f in grouped.get(sev, []):
             title = f.get('title', '—')
-            rem = f.get('remediation') or _gen_remediation(title, sev)
+            rem = f.get('remediation') or generate_remediation(title, f.get('evidence', ''), f.get('affected_asset', target))
             badge = f'<span class="badge badge-{sev}">{SEVERITY_LABELS[sev]}</span>'
             remediation_rows.append(f"""
             <tr>
                 <td>{badge}</td>
                 <td>{_esc(title)}</td>
                 <td>{_esc(f.get('affected_asset', target))}</td>
-                <td>{_esc(rem)[:250]}</td>
+                <td>{_esc(rem)}</td>
             </tr>""")
-
-    generic_remediations = [
-        ("High", "Open Sensitive Port (SSH/RDP/SMB)", target, "Restrict access using firewall rules. Allow only from management jump hosts. Enable fail2ban for SSH. Disable SMBv1. Use VPN for remote access."),
-        ("High", "Database Port Exposed (MySQL/PostgreSQL/MongoDB)", target, "Bind to 127.0.0.1 only. Use TLS for remote connections. Enforce strong authentication. Disable default accounts. Enable audit logging."),
-        ("High", "SQL Injection Vulnerability", target, "Use parameterized queries or prepared statements. Deploy WAF rules. Implement input validation and output encoding. Conduct code review for all data access paths."),
-        ("High", "Remote Code Execution Risk", target, "Apply security patches immediately. Disable unnecessary services. Implement application whitelisting. Monitor for exploitation attempts via SIEM."),
-        ("High", "Weak Authentication Mechanism", target, "Enforce MFA on all remote access. Use strong password policies. Implement account lockout. Disable password-based SSH where possible, use key-based auth."),
-        ("Medium", "Weak SSL/TLS Configuration", target, "Disable TLS 1.0 and 1.1. Enable TLS 1.2+ with forward secrecy. Use strong cipher suites (AES-GCM, ChaCha20). Replace self-signed certificates with CA-issued equivalents."),
-        ("Medium", "Information Disclosure in Headers", target, "Remove Server and X-Powered-By headers. Disable directory listing. Suppress verbose error messages. Configure custom error pages."),
-        ("Medium", "Missing Security Headers", target, "Add HSTS, X-Content-Type-Options, X-Frame-Options, Content-Security-Policy headers to all responses. Validate header configuration with security scanning tools."),
-        ("Medium", "Outdated Software Version", target, "Update to latest stable version. Subscribe to vendor security advisories. Establish patch management SLA: criticals 7 days, highs 30 days, mediums 90 days."),
-        ("Medium", "Excessive Service Permissions", target, "Apply principle of least privilege. Run services under dedicated low-privilege accounts. Use AppArmor or SELinux to confine service capabilities."),
-        ("Low", "DNS Information Disclosure", target, "Restrict zone transfers to authorized secondaries. Disable version queries in BIND. Use DNSSEC. Implement response rate limiting."),
-        ("Low", "Banner Grabbing Exposure", target, "Suppress version banners in service configs (SSH, Apache, nginx, vsftpd). Use generic error pages. Minimize information in HTTP headers."),
-        ("Low", "Open Standard HTTP Port", target, "Verify business justification for port 80/443. Redirect HTTP to HTTPS. Implement HSTS. Ensure web application firewall coverage."),
-        ("Low", "Lack of Network Segmentation", target, "Implement VLAN isolation between trust zones. Use firewall rules to restrict lateral movement. Deploy micro-segmentation for critical assets."),
-        ("Low", "Insufficient Logging", target, "Enable verbose logging on critical services. Forward logs to centralized SIEM. Set up alerts for authentication failures and privilege escalation."),
-        ("Info", "Service Version Fingerprinting", target, "Keep services patched to latest stable. Monitor for new CVEs. Subscribe to vendor security advisories. Use banner suppression to reduce information leakage."),
-        ("Info", "Open Standard Port Detected", target, "Document all open ports in asset inventory. Verify business justification. Close unused services. Review quarterly."),
-        ("Info", "DNS Resolution Successful", target, "Monitor DNS queries for anomalies. Implement DNS filtering. Enable DNS over TLS (DoT) or DNS over HTTPS (DoH) where supported."),
-        ("Info", "Reverse DNS Record Found", target, "Verify PTR records match A records. Monitor for DNS spoofing. Implement DNSSEC validation on recursive resolvers."),
-        ("Info", "Service Identification Complete", target, "Maintain asset inventory with service versions. Cross-reference against CVE databases monthly. Automate vulnerability scanning."),
-    ]
-    for sev_label, title, asset, rem in generic_remediations:
-        sev_key = sev_label.lower()
-        badge = f'<span class="badge badge-{sev_key}">{sev_label}</span>'
-        remediation_rows.append(f"""
-        <tr>
-            <td>{badge}</td>
-            <td>{_esc(title)}</td>
-            <td>{_esc(asset)}</td>
-            <td>{_esc(rem)}</td>
-        </tr>""")
 
     remediation_table = f"""<table>
         <tr><th>Severity</th><th>Finding</th><th>Asset</th><th>Remediation Action</th></tr>
@@ -394,11 +592,26 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
     if open_ports:
         for p in open_ports:
             svc = services.get(str(p), "unknown")
-            sev = "high" if p in HIGH_PORTS else ("medium" if p in MEDIUM_PORTS else "info")
+            if p in HIGH_PORTS:
+                sev = "high"
+            elif p in MEDIUM_PORTS:
+                sev = "medium"
+            elif p in LOW_PORTS:
+                sev = "low"
+            else:
+                sev = "info"
             badge = f'<span class="badge badge-{sev}">{SEVERITY_LABELS.get(sev, "Info")}</span>'
             ports_table_rows += f"<tr><td>{p}</td><td>{_esc(svc)}</td><td>{badge}</td></tr>"
     else:
         ports_table_rows = "<tr><td colspan='3'>No open ports detected</td></tr>"
+
+    # Issue 6: phase status text
+    if llm_was_absent:
+        phase_status = "Automated phases: 8/8 — LLM phases: 0/3 (LLM provider not reachable)"
+    elif llm_was_mock:
+        phase_status = "Automated phases: 8/8 — LLM phases: 0/3 (LLM provider returned mock/fallback responses)"
+    else:
+        phase_status = f"Automated phases: 8/8 — LLM phases: {llm_phases_completed}/3 — Total: {total_phases_completed}/11"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -411,7 +624,7 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
 </head>
 <body>
 
-<!-- PAGE 1: COVER PAGE -->
+<!-- PAGE 1: COVER PAGE (Issue 8: with explicit break) -->
 <div class="cover">
   <h1>Sample Vulnerability Assessment Report</h1>
   <div class="meta">
@@ -423,9 +636,10 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
   <div class="author">Prepared by {operator}</div>
   <div class="footer-note">CONFIDENTIAL — Authorized testing only</div>
 </div>
+<div style="page-break-after: always; height: 1pt;">&nbsp;</div>
 
 <!-- PAGE 2: TABLE OF CONTENTS -->
-<div class="section">
+<div class="section toc">
 <h2>Table of Contents</h2>
 <table class="toc">
   <tr><td>1.</td><td>Executive Summary</td><td>3</td></tr>
@@ -470,7 +684,7 @@ using a local knowledge base.</p>
     html += f"""
 </table>
 <p><strong>Total findings:</strong> {total} &nbsp;|&nbsp; <strong>Scan duration:</strong> {meta.get('elapsed_seconds', '?')}s &nbsp;|&nbsp; <strong>Operator:</strong> {operator}</p>
-<p><strong>Open ports detected:</strong> {open_ports if open_ports else 'None'} &nbsp;|&nbsp; <strong>Phases completed:</strong> {meta.get('phases_completed', 11)}/11</p>
+<p><strong>Open ports detected:</strong> {open_ports if open_ports else 'None'} &nbsp;|&nbsp; <strong>Phase status:</strong> {phase_status}</p>
 </div>
 
 <!-- PAGE 4: SCAN RESULTS -->
@@ -489,8 +703,7 @@ and AI-generated analysis outputs.</p>
 <h3>CVE Enrichment</h3>
 {cve_block}
 
-<h3>AI Analysis Output</h3>
-{analysis_html if analysis_html else '<p>No AI analysis output was recorded.</p>'}
+{analysis_html}
 </div>
 
 <!-- PAGE 5: METHODOLOGY -->
@@ -604,64 +817,63 @@ XHTML2PDF_CSS = """
 * { box-sizing: border-box; }
 body {
     font-family: Helvetica, Arial, sans-serif;
-    font-size: 10.5pt;
-    line-height: 1.5;
+    font-size: 10pt;
+    line-height: 1.4;
     color: #222;
     margin: 0;
     padding: 0;
 }
-h1 { font-size: 22pt; margin: 0 0 8pt 0; }
+h1 { font-size: 20pt; margin: 0 0 6pt 0; }
 h2 {
-    font-size: 14pt;
-    margin: 24pt 0 10pt 0;
-    padding-bottom: 4pt;
-    border-bottom: 1.5pt solid #2c3e50;
+    font-size: 13pt;
+    margin: 18pt 0 8pt 0;
+    padding-bottom: 3pt;
+    border-bottom: 1pt solid #2c3e50;
     color: #2c3e50;
 }
-h3 { font-size: 12pt; margin: 16pt 0 6pt 0; color: #34495e; }
+h3 { font-size: 11pt; margin: 12pt 0 4pt 0; color: #34495e; }
 table {
     width: 100%;
     border-collapse: collapse;
-    margin: 10pt 0 16pt 0;
-    font-size: 9.5pt;
+    margin: 8pt 0 12pt 0;
+    font-size: 9pt;
 }
 th {
     background: #ecf0f1;
     color: #2c3e50;
     font-weight: bold;
     text-align: left;
-    padding: 6pt 8pt;
-    border: 1pt solid #bdc3c7;
+    padding: 4pt 6pt;
+    border: 0.5pt solid #bdc3c7;
 }
 td {
-    padding: 5pt 8pt;
-    border: 1pt solid #ddd;
+    padding: 4pt 6pt;
+    border: 0.5pt solid #ddd;
     vertical-align: top;
 }
 .cover {
     text-align: center;
-    padding-top: 120pt;
+    padding-top: 100pt;
 }
-.cover h1 { font-size: 26pt; margin-bottom: 18pt; }
-.cover .meta { font-size: 12pt; color: #555; margin-top: 40pt; }
-.cover .author { font-size: 14pt; font-weight: bold; margin-top: 30pt; }
-.toc td { border: none; padding: 3pt 8pt; }
+.cover h1 { font-size: 24pt; margin-bottom: 14pt; }
+.cover .meta { font-size: 11pt; color: #555; margin-top: 30pt; }
+.cover .author { font-size: 13pt; font-weight: bold; margin-top: 24pt; }
+.toc td { border: none; padding: 2pt 6pt; }
 .badge {
-    display: inline-block;
-    padding: 2pt 6pt;
-    border-radius: 4pt;
+    padding: 1pt 4pt;
     color: #ffffff;
     font-weight: bold;
-    font-size: 8.5pt;
+    font-size: 8pt;
     text-align: center;
+    display: inline;
 }
-.badge-critical { background-color: #c0392b; }
-.badge-high { background-color: #e74c3c; }
-.badge-medium { background-color: #f39c12; }
-.badge-low { background-color: #3498db; }
-.badge-info { background-color: #95a5a6; }
+.badge-critical { background-color: #8b0000; }
+.badge-high { background-color: #c0392b; }
+.badge-medium { background-color: #d68910; }
+.badge-low { background-color: #2874a6; }
+.badge-info { background-color: #5d6d7e; }
 .section { page-break-before: always; }
-.footer-note { font-size: 8pt; color: #888; margin-top: 30pt; text-align: center; }
+.footer-note { font-size: 8pt; color: #888; margin-top: 20pt; text-align: center; }
 """
 
 
@@ -683,7 +895,7 @@ def render_pdf(html_path: Path, pdf_path: Path) -> Path:
     """Render HTML to PDF. Default to xhtml2pdf (works on Windows without GTK), fallback to others."""
     errors = []
 
-    # Attempt 1: xhtml2pdf (pure Python, works on Windows without GTK) - NOW THE DEFAULT
+    # Attempt 1: xhtml2pdf (pure Python, works on Windows without GTK) - DEFAULT
     try:
         from xhtml2pdf import pisa  # type: ignore
         html_content = html_path.read_text(encoding="utf-8")

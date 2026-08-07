@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-NEXUS-STRIKE — CVE Enrichment Extension
+NEXUS-STRIKE — CVE Enrichment Extension (v2)
 Takes raw recon findings (service + version) and matches them against a
 local CVE knowledge base. Adds severity, CVE ID, and remediation hints
 so the LLM phases have something concrete to work with.
+
+v2: adds fallback matches for unknown versions and port-only detections.
 
 Offline. No external API. Safe to run against any target you own.
 
@@ -161,6 +163,62 @@ CVE_DB = {
              "Patch Windows. Public Metasploit module."),
         ]},
     ],
+    # =====================================================================
+    # Issue 5: Generic fallback matches for unknown versions / port-only detections
+    # =====================================================================
+    "generic": [
+        {"version_prefix": "", "cves": [
+            # Open database ports — always flagged regardless of version
+            ("PORT-3306", "HIGH", "MySQL port 3306 exposed",
+             "Bind to 127.0.0.1. Enforce strong authentication. Disable default accounts. Apply patches."),
+            ("PORT-5432", "HIGH", "PostgreSQL port 5432 exposed",
+             "Bind to 127.0.0.1. Require TLS for remote connections. Apply patches."),
+            ("PORT-6379", "HIGH", "Redis port 6379 exposed",
+             "Bind to 127.0.0.1. Enable AUTH password. Disable dangerous commands. Apply patches."),
+            ("PORT-9200", "HIGH", "Elasticsearch port 9200 exposed",
+             "Bind to 127.0.0.1. Enable X-Pack security. Apply patches."),
+            ("PORT-27017", "HIGH", "MongoDB port 27017 exposed",
+             "Bind to 127.0.0.1. Enable authentication. Disable --noauth. Apply patches."),
+            ("PORT-1433", "HIGH", "MSSQL port 1433 exposed",
+             "Bind to private interface. Enforce strong SA password. Disable xp_cmdshell."),
+            # SMB / NetBIOS
+            ("PORT-445", "CRITICAL", "SMB port 445 exposed",
+             "Block at perimeter. Disable SMBv1. Enforce SMB signing. Patch for EternalBlue (MS17-010)."),
+            ("PORT-139", "CRITICAL", "NetBIOS port 139 exposed",
+             "Block at perimeter. Disable NetBIOS over TCP/IP if not required."),
+            # RDP
+            ("PORT-3389", "HIGH", "RDP port 3389 exposed",
+             "Restrict source IPs. Enable NLA. Enforce MFA. Patch for BlueKeep (CVE-2019-0708)."),
+            # Telnet
+            ("PORT-23", "HIGH", "Telnet port 23 exposed",
+             "Telnet transmits all data in plaintext. Replace with SSH."),
+            # FTP
+            ("PORT-21", "HIGH", "FTP port 21 exposed",
+             "FTP transmits credentials in plaintext. Replace with SFTP or FTPS. Disable anonymous."),
+            # SSH
+            ("PORT-22", "MEDIUM", "SSH port 22 exposed",
+             "Verify OpenSSH version. Patch for regreSSHion (CVE-2024-6387). Enforce key-based auth."),
+            # HTTP / generic web
+            ("PORT-80", "MEDIUM", "HTTP port 80 exposed without TLS",
+             "Redirect to HTTPS. Add security headers. Review for OWASP Top 10."),
+            ("PORT-443", "LOW", "HTTPS port 443 exposed",
+             "Verify TLS 1.2+ with strong ciphers. Add HSTS. Review for OWASP Top 10."),
+            # Header hygiene (detected from banners)
+            ("MISSING-HSTS", "MEDIUM", "HTTP Strict-Transport-Security header missing",
+             "Add HSTS header with min-age of at least 31536000."),
+            ("MISSING-CSP", "MEDIUM", "Content-Security-Policy header missing",
+             "Add CSP header to mitigate XSS and data injection."),
+            ("MISSING-XFO", "LOW", "X-Frame-Options header missing",
+             "Add X-Frame-Options: DENY or SAMEORIGIN to mitigate clickjacking."),
+            ("VERSION-DISCLOSURE", "LOW", "Server/X-Powered-By version disclosed",
+             "Suppress version information in HTTP response headers."),
+            # DNS
+            ("DNS-ZONE-XFER", "HIGH", "DNS zone transfer may be open",
+             "Restrict zone transfers to authorized secondary nameservers."),
+            ("NO-DNSSEC", "MEDIUM", "DNSSEC not validated",
+             "Enable DNSSEC validation on recursive resolvers."),
+        ]},
+    ],
 }
 
 
@@ -182,12 +240,61 @@ SERVICE_PATTERNS = [
     (r"X-Powered-By:\s*PHP[/\s]+([0-9]+\.[0-9]+\.[0-9]+)", "php"),
 ]
 
+# Issue 5: Port-based fallback patterns
+PORT_PATTERNS = [
+    (r"\b(3306)\b", "mysql", "3306"),
+    (r"\b(5432)\b", "postgres", "5432"),
+    (r"\b(6379)\b", "redis", "6379"),
+    (r"\b(9200)\b", "elasticsearch", "9200"),
+    (r"\b(27017)\b", "mongodb", "27017"),
+    (r"\b(1433)\b", "mssql", "1433"),
+    (r"\b(445)\b", "smb", "445"),
+    (r"\b(139)\b", "netbios", "139"),
+    (r"\b(3389)\b", "rdp", "3389"),
+    (r"\b(23)\b", "telnet", "23"),
+    (r"\b(21)\b", "ftp", "21"),
+    (r"\b(22)\b", "ssh", "22"),
+]
+
+# Issue 5: Header hygiene patterns
+HEADER_PATTERNS = [
+    (r"(?i)missing.*HSTS|no.*strict-transport", "missing-hsts"),
+    (r"(?i)missing.*CSP|no.*content-security", "missing-csp"),
+    (r"(?i)missing.*X-Frame|x-frame.*missing", "missing-xfo"),
+    (r"(?i)server:\s*\w+/[\d.]+|x-powered-by", "version-disclosure"),
+]
+
 
 def parse_services(text):
     hits = []
     for pattern, key in SERVICE_PATTERNS:
         for m in re.finditer(pattern, text, re.IGNORECASE):
             hits.append((key, m.group(1)))
+    return hits
+
+
+def parse_ports(text):
+    """Issue 5: detect port numbers even without version info."""
+    hits = []
+    seen = set()
+    for pattern, svc, port in PORT_PATTERNS:
+        for m in re.finditer(pattern, text):
+            key = (f"port-{svc}", port)
+            if key not in seen:
+                seen.add(key)
+                hits.append(key)
+    return hits
+
+
+def parse_header_issues(text):
+    """Issue 5: detect HTTP header hygiene issues."""
+    hits = []
+    seen = set()
+    for pattern, key in HEADER_PATTERNS:
+        if re.search(pattern, text):
+            if key not in seen:
+                seen.add(key)
+                hits.append(("generic", key))
     return hits
 
 
@@ -200,12 +307,25 @@ def lookup_cves(service, version):
     return hits
 
 
+def lookup_generic_cves(tag):
+    """Issue 5: lookup generic fallback CVEs by tag (PORT-22, MISSING-HSTS, etc)."""
+    entries = CVE_DB.get("generic", [])
+    hits = []
+    for entry in entries:
+        for cve_id, sev, name, fix in entry["cves"]:
+            if cve_id == tag.upper() or cve_id.lower() == tag.lower():
+                hits.append((cve_id, sev, name, fix))
+    return hits
+
+
 def enrich_findings(findings, llm_router=None):
     enriched = []
     seen = set()
     for f in findings or []:
         if not isinstance(f, str):
             continue
+
+        # Standard service/version matches
         for service, version in parse_services(f):
             key = (service, version)
             if key in seen:
@@ -225,12 +345,38 @@ def enrich_findings(findings, llm_router=None):
                               "Verify version against NVD; no automatic match found.")],
                     "source": f,
                 })
-    return enriched
 
+        # Issue 5: port-based fallback matches
+        for service, port in parse_ports(f):
+            tag = f"PORT-{port}"
+            key = ("generic", tag)
+            if key in seen:
+                continue
+            seen.add(key)
+            cves = lookup_generic_cves(tag)
+            if cves:
+                enriched.append({
+                    "service": service, "version": f"port-{port}",
+                    "cves": cves, "source": f,
+                })
+
+        # Issue 5: header hygiene fallback
+        for service, tag in parse_header_issues(f):
+            key = ("generic", tag)
+            if key in seen:
+                continue
+            seen.add(key)
+            cves = lookup_generic_cves(tag)
+            if cves:
+                enriched.append({
+                    "service": service, "version": tag,
+                    "cves": cves, "source": f,
+                })
+
+    return enriched
 
 def severity_rank(sev):
     return {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}.get(sev.upper(), 0)
-
 
 def format_for_llm(enriched):
     if not enriched:
@@ -256,6 +402,8 @@ if __name__ == "__main__":
             "HTTP 80: status=200, Server=Apache/2.4.49, X-Powered-By=PHP/7.4.3",
             "MySQL 9.6.0 banner on port 3306",
             "OpenSSH_9.0 on port 22",
+            "Open port 445 on target (SMB)",
+            "Open port 3389 (RDP)",
         ]
     else:
         sample = sys.argv[1:]
