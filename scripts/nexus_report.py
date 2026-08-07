@@ -63,10 +63,19 @@ MEDIUM_PORTS = {22, 25, 53, 110, 143, 993, 995, 8443}
 # run by developers locally and rarely represent production exposure.
 LOW_PORTS = {80, 443, 8080, 8000, 3000, 5000, 8888, 9000, 9090, 4000, 7070}
 
+# Development ports that get specific descriptions/remediations
+DEV_PORTS = {8888, 8000, 3000, 5000, 9000, 9090, 7070, 4000}
+
 
 # ---------------------------------------------------------------------------
 # Issue 1 + Issue 2: Real prose generation for descriptions and remediations
 # ---------------------------------------------------------------------------
+def _safe_asset(asset: str, fallback: str = "the target") -> str:
+    """Return a non-empty asset string to avoid grammar bugs like 'on is'."""
+    a = str(asset or "").strip()
+    return a if a else fallback
+
+
 def generate_description(category: str, evidence: str, asset: str) -> str:
     """
     Return a 3-5 sentence real description explaining what the finding means,
@@ -75,13 +84,123 @@ def generate_description(category: str, evidence: str, asset: str) -> str:
     """
     c = (category or "").lower()
     ev = (evidence or "").lower()
-    a = str(asset or "")
+    a = _safe_asset(asset)
+
+    nums = re.findall(r"\b(\d{2,5})\b", ev)
+    port = int(nums[0]) if nums else None
+
+    # --- Issue 3: DNS forward vs reverse ---
+    if "resolved" in ev and "->" in ev and "reverse" not in ev:
+        # Forward DNS: "Resolved hostname -> IP"
+        return (
+            f"Forward DNS resolution succeeded for {a}. The hostname resolved to the "
+            f"recorded IP address, confirming that the target's network identity is "
+            f"discoverable via DNS. While DNS resolution itself is expected behavior, "
+            f"attackers can use this information to map the surrounding infrastructure, "
+            f"enumerate internal hostnames, and plan lateral movement. Verify that "
+            f"DNSSEC is enabled to prevent spoofing and that zone transfers are restricted."
+        )
+
+    if "reverse dns" in ev or ("reverse" in ev and "->" in ev):
+        # Reverse DNS: "Reverse DNS: IP -> hostname"
+        return (
+            f"Reverse DNS lookup for IP {a} returned a hostname via the PTR record. "
+            f"The existence of a PTR record indicates that reverse DNS is configured, "
+            f"which can reveal internal naming conventions and help attackers identify "
+            f"the asset's role (e.g., web-server-01.corp.local). Verify the PTR record "
+            f"matches the asset inventory and forward-confirms. Unauthorised PTR records "
+            f"should be audited for DNS hijacking."
+        )
+
+    # --- Issue 3: HTTP 404 specific ---
+    if "http" in ev and "404" in ev:
+        return (
+            f"The HTTP service on port {port or 'the target'} returned a 404 Not Found "
+            f"response to a test request. This confirms the web server is running and "
+            f"reachable, but no application responded at the requested path. The Server "
+            f"header was either suppressed or returned 'unknown', which limits version "
+            f"fingerprinting but does not eliminate risk. Verify this is the intended "
+            f"behavior; consider adding security headers (HSTS, CSP, X-Frame-Options) "
+            f"even on 404 responses to harden the HTTP stack."
+        )
 
     # --- Port open ---
     if any(tok in c or tok in ev for tok in ("open port", "open_port", "port open", "ports:")):
-        nums = re.findall(r"\b(\d{2,5})\b", ev)
-        port = nums[0] if nums else "unknown"
-        if int(port) in HIGH_PORTS if nums else False:
+        if port is None:
+            port_str = "unknown"
+        else:
+            port_str = str(port)
+
+        # Issue 1: Port-specific descriptions for dev ports
+        if port in DEV_PORTS:
+            if port == 8888:
+                return (
+                    f"TCP port {port} on {a} is listening. Port 8888 is commonly used by "
+                    f"Jupyter Notebook, development dashboards, and internal admin interfaces. "
+                    f"Jupyter Notebook instances without authentication allow arbitrary code "
+                    f"execution; development dashboards frequently leak source code, environment "
+                    f"variables, and database credentials. Restrict access to localhost or "
+                    f"known internal IPs only. If external access is required, place behind "
+                    f"a reverse proxy with authentication and TLS."
+                )
+            if port == 8000:
+                return (
+                    f"TCP port {port} on {a} is listening. Port 8000 is commonly used by "
+                    f"development HTTP servers (Django, FastAPI, Uvicorn, simple HTTP servers). "
+                    f"Development servers typically lack production hardening, do not enforce "
+                    f"authentication, and may expose source code or debug endpoints. "
+                    f"Bind to 127.0.0.1 unless external access is required; if external access "
+                    f"is needed, add authentication and use a reverse proxy with TLS."
+                )
+            if port == 3000:
+                return (
+                    f"TCP port {port} on {a} is listening. Port 3000 is commonly used by "
+                    f"Node.js / Express development servers, React development servers, "
+                    f"and Grafana. Development servers typically lack production hardening "
+                    f"and may expose debug endpoints, environment variables, or source code. "
+                    f"Bind to 127.0.0.1 unless external access is required; if external access "
+                    f"is needed, add authentication and use a reverse proxy with TLS."
+                )
+            if port == 5000:
+                return (
+                    f"TCP port {port} on {a} is listening. Port 5000 is commonly used by "
+                    f"Flask development servers, Docker Registry (v1), and UPnP. "
+                    f"Flask development servers should never be exposed to untrusted networks "
+                    f"as they lack production hardening and may expose debug endpoints. "
+                    f"Bind to 127.0.0.1; if external access is required, use a production "
+                    f"WSGI server (gunicorn, uwsgi) with authentication and TLS."
+                )
+            if port == 9000:
+                return (
+                    f"TCP port {port} on {a} is listening. Port 9000 is commonly used by "
+                    f"PHP-FPM, SonarQube, and various development tools. Exposed PHP-FPM "
+                    f"instances can be abused to execute arbitrary code via fastcgi_param "
+                    f"injection. Restrict to 127.0.0.1 and require authentication."
+                )
+            if port == 9090:
+                return (
+                    f"TCP port {port} on {a} is listening. Port 9090 is commonly used by "
+                    f"Prometheus, Cockpit, and various web admin interfaces. These services "
+                    f"frequently leak system metrics, configuration data, and version "
+                    f"information. Restrict to 127.0.0.1 and require authentication."
+                )
+            if port == 7070:
+                return (
+                    f"TCP port {port} on {a} is listening. Port 7070 is commonly used by "
+                    f"development tools, proxy services, and admin interfaces. "
+                    f"Restrict to 127.0.0.1 and require authentication. If external access "
+                    f"is required, place behind a reverse proxy with TLS and basic auth."
+                )
+            # Fallback for any other dev port
+            return (
+                f"TCP port {port} on {a} is listening. This port is commonly used by "
+                f"development or administrative tools. Development servers typically lack "
+                f"production hardening and may expose debug endpoints, source code, or "
+                f"configuration data. Restrict to 127.0.0.1 unless external access is "
+                f"required; if external access is needed, add authentication and TLS."
+            )
+
+        if port in HIGH_PORTS:
             return (
                 f"TCP port {port} on {a} is accepting connections from the network. "
                 f"This port is associated with a high-risk service commonly targeted by "
@@ -90,8 +209,9 @@ def generate_description(category: str, evidence: str, asset: str) -> str:
                 f"expose administrative interfaces, unpatched software, or default credentials "
                 f"to remote adversaries."
             )
+        # Generic port open (with safe asset)
         return (
-            f"TCP port {port} on {a} is accepting connections from the network. "
+            f"TCP port {port_str} on {a} is accepting connections from the network. "
             f"An open port indicates an active listening service that could be probed for "
             f"weak authentication, outdated versions, or known vulnerabilities. If this "
             f"service is not strictly required for business operations, it expands the "
@@ -99,8 +219,8 @@ def generate_description(category: str, evidence: str, asset: str) -> str:
             f"tools, or unpatched software to remote attackers."
         )
 
-    # --- DNS ---
-    if any(tok in c or tok in ev for tok in ("dns", "resolved", "reverse dns", "ptr")):
+    # --- DNS (generic) ---
+    if any(tok in c or tok in ev for tok in ("dns", "ptr")):
         return (
             f"Forward or reverse DNS resolution succeeded for {a}. DNS lookups reveal the "
             f"host's network identity and can be used by attackers to map the surrounding "
@@ -168,7 +288,7 @@ def generate_remediation(category: str, evidence: str, asset: str) -> str:
     """
     c = (category or "").lower()
     ev = (evidence or "").lower()
-    a = str(asset or "")
+    a = _safe_asset(asset)
 
     nums = re.findall(r"\b(\d{2,5})\b", ev)
     port = int(nums[0]) if nums else None
@@ -197,13 +317,46 @@ def generate_remediation(category: str, evidence: str, asset: str) -> str:
         return ("Restrict RDP source IPs via firewall or VPN. Enable Network Level "
                 "Authentication (NLA). Enforce MFA. Apply latest patches (BlueKeep "
                 "CVE-2019-0708). Consider replacing with a hardened bastion host.")
+
+    # Issue 2: Port-specific dev port remediations
+    if port == 8888:
+        return ("Bind Jupyter to 127.0.0.1 or use a reverse proxy with authentication. "
+                "Set --ip=127.0.0.1 and configure a token/password via JupyterLab settings. "
+                "Never expose Jupyter without authentication. Apply latest patches. "
+                "Restrict source IPs to known internal networks.")
+    if port == 8000:
+        return ("Identify the development tool (Django, FastAPI, Uvicorn, simple HTTP "
+                "server). Bind to 127.0.0.1. Add authentication before any external access. "
+                "Use a reverse proxy (nginx, Caddy) with TLS and basic auth if external "
+                "access is required. Disable debug mode.")
+    if port == 3000:
+        return ("Identify the development tool (Node.js, Express, React, Grafana). "
+                "Bind to 127.0.0.1. Add authentication before any external access. "
+                "Use a reverse proxy with TLS. Disable debug mode and source map exposure.")
+    if port == 5000:
+        return ("Identify the service (Flask, Docker Registry, UPnP). For Flask, replace "
+                "development server with gunicorn/uwsgi. Bind to 127.0.0.1. Add "
+                "authentication. Disable debug mode. Apply latest patches.")
+    if port == 9000:
+        return ("Identify the service (PHP-FPM, SonarQube). For PHP-FPM, restrict to "
+                "127.0.0.1 and require authentication. Disable public access. "
+                "Apply latest patches. Monitor for fastcgi_param injection attempts.")
+    if port == 9090:
+        return ("Identify the service (Prometheus, Cockpit, web admin). Restrict to "
+                "127.0.0.1. Add authentication before any external access. "
+                "Disable public exposure of system metrics. Apply latest patches.")
+    if port == 7070:
+        return ("Bind to 127.0.0.1. Add authentication. Restrict source IPs to known "
+                "internal networks. If external access is required, use a reverse proxy "
+                "with TLS and basic auth.")
+
     if port in (80, 443, 8080, 8443):
         return ("Restrict source IPs to known clients. Redirect HTTP to HTTPS. Enforce "
                 "TLS 1.2+. Add security headers (HSTS, CSP, X-Frame-Options, "
                 "X-Content-Type-Options). Review web application for OWASP Top 10 issues.")
 
     # --- DNS ---
-    if any(tok in c or tok in ev for tok in ("dns", "resolved", "reverse")):
+    if any(tok in c or tok in ev for tok in ("dns", "resolved", "reverse", "ptr")):
         return ("Enable DNSSEC. Restrict zone transfers to authorized secondary "
                 "nameservers. Monitor for unauthorized DNS changes. Implement DNS "
                 "response rate limiting. Enable DNS over TLS/HTTPS where supported.")
@@ -402,7 +555,6 @@ pre {
 .footer-note { font-size: 8pt; color: #888; margin-top: 20pt; text-align: center; }
 """
 
-
 def _clean_text(text: str) -> str:
     if not text:
         return ""
@@ -426,7 +578,6 @@ def _clean_text(text: str) -> str:
     result = re.sub(r" +", " ", result).strip()
     result = result.encode("ascii", "ignore").decode("ascii")
     return result
-
 
 def _esc(text: str) -> str:
     if not text:
@@ -454,7 +605,6 @@ def _filter_real_llm_blocks(llm_blocks: list[str]) -> list[str]:
             continue
         real.append(b)
     return real
-
 
 def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, llm_blocks: list[str]) -> str:
     now = datetime.now().strftime("%B %d, %Y")
@@ -551,10 +701,12 @@ def _build_html(target: str, findings: list[dict], meta: dict, cve_text: str, ll
     </ul>
     """
 
+    # Issue 4: Remediation table uses same source as findings table
     remediation_rows = []
     for sev in SEVERITY_ORDER:
         for f in grouped.get(sev, []):
             title = f.get('title', '—')
+            # Use the same logic as findings_table
             rem = f.get('remediation') or generate_remediation(title, f.get('evidence', ''), f.get('affected_asset', target))
             badge = f'<span class="badge badge-{sev}">{SEVERITY_LABELS[sev]}</span>'
             remediation_rows.append(f"""
@@ -876,7 +1028,6 @@ td {
 .footer-note { font-size: 8pt; color: #888; margin-top: 20pt; text-align: center; }
 """
 
-
 def _xhtml2pdf_compatible_html(html: str) -> str:
     import re as _re
     html = _re.sub(
@@ -889,7 +1040,6 @@ def _xhtml2pdf_compatible_html(html: str) -> str:
     footer_div = '<div id="footer_content" style="text-align:center; font-size:9pt; color:#666;">Page <pdf:pagenumber> of <pdf:pagecount></div>'
     html = html.replace("</body>", f"{footer_div}\n</body>")
     return html
-
 
 def render_pdf(html_path: Path, pdf_path: Path) -> Path:
     """Render HTML to PDF. Default to xhtml2pdf (works on Windows without GTK), fallback to others."""
