@@ -76,6 +76,43 @@ def _safe_asset(asset: str, fallback: str = "the target") -> str:
     return a if a else fallback
 
 
+def classify_dns_finding(evidence: str) -> str:
+    """Return 'forward' or 'reverse' based on DNS finding type."""
+    ev_lower = (evidence or "").lower()
+    if ev_lower.startswith("reverse dns") or ("reverse" in ev_lower and "->" in ev_lower):
+        return "reverse"
+    if "resolved" in ev_lower or ev_lower.startswith("dns"):
+        return "forward"
+    return "forward"  # default
+
+
+DNS_FORWARD_DESCRIPTION = (
+    "Forward DNS resolution for the target succeeded. The hostname was successfully "
+    "resolved to its IP address, which means DNS is functioning correctly but also "
+    "means the hostname is publicly discoverable. Attackers can use forward DNS to "
+    "map the organization's external service footprint. Verify DNSSEC is enabled to "
+    "prevent DNS spoofing and cache poisoning attacks. Restrict zone transfers to "
+    "authorised secondary nameservers only."
+)
+
+DNS_REVERSE_DESCRIPTION = (
+    "Reverse DNS lookup for the target IP returned a hostname. The PTR record is "
+    "configured and consistent with forward DNS, which is a positive security "
+    "indicator. Reverse DNS is required by many mail servers and network services "
+    "to validate origin identity. Verify the PTR record matches the asset inventory "
+    "and that no stale or unintended records remain."
+)
+
+HTTP_404_REMEDIATION = (
+    "Bind the web server to 127.0.0.1 if external access is not required. If the "
+    "service is meant to be public, add security headers (Strict-Transport-Security, "
+    "Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy). "
+    "Suppress Server and X-Powered-By version disclosure. Configure the web server to "
+    "return a meaningful 404 page without exposing internal paths. Restrict source IPs "
+    "to known clients via firewall."
+)
+
+
 def generate_description(category: str, evidence: str, asset: str) -> str:
     """
     Return a 3-5 sentence real description explaining what the finding means,
@@ -89,28 +126,12 @@ def generate_description(category: str, evidence: str, asset: str) -> str:
     nums = re.findall(r"\b(\d{2,5})\b", ev)
     port = int(nums[0]) if nums else None
 
-    # --- Issue 3: DNS forward vs reverse ---
-    if "resolved" in ev and "->" in ev and "reverse" not in ev:
-        # Forward DNS: "Resolved hostname -> IP"
-        return (
-            f"Forward DNS resolution succeeded for {a}. The hostname resolved to the "
-            f"recorded IP address, confirming that the target's network identity is "
-            f"discoverable via DNS. While DNS resolution itself is expected behavior, "
-            f"attackers can use this information to map the surrounding infrastructure, "
-            f"enumerate internal hostnames, and plan lateral movement. Verify that "
-            f"DNSSEC is enabled to prevent spoofing and that zone transfers are restricted."
-        )
-
-    if "reverse dns" in ev or ("reverse" in ev and "->" in ev):
-        # Reverse DNS: "Reverse DNS: IP -> hostname"
-        return (
-            f"Reverse DNS lookup for IP {a} returned a hostname via the PTR record. "
-            f"The existence of a PTR record indicates that reverse DNS is configured, "
-            f"which can reveal internal naming conventions and help attackers identify "
-            f"the asset's role (e.g., web-server-01.corp.local). Verify the PTR record "
-            f"matches the asset inventory and forward-confirms. Unauthorised PTR records "
-            f"should be audited for DNS hijacking."
-        )
+    # --- Issue 1: Explicit DNS forward vs reverse ---
+    dns_type = classify_dns_finding(evidence)
+    if dns_type == "forward" and ("resolved" in ev or "dns" in ev):
+        return DNS_FORWARD_DESCRIPTION.format(asset=a)
+    if dns_type == "reverse":
+        return DNS_REVERSE_DESCRIPTION.format(asset=a)
 
     # --- Issue 3: HTTP 404 specific ---
     if "http" in ev and "404" in ev:
@@ -292,6 +313,10 @@ def generate_remediation(category: str, evidence: str, asset: str) -> str:
 
     nums = re.findall(r"\b(\d{2,5})\b", ev)
     port = int(nums[0]) if nums else None
+
+    # --- Issue 2: Category-first remediation selection (HTTP 404) ---
+    if "http" in c and "404" in ev:
+        return HTTP_404_REMEDIATION
 
     # --- Port-based remediations ---
     if port in (21,):
