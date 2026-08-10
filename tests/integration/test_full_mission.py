@@ -21,10 +21,13 @@ def mock_llm_router():
         yield mock_complete
 
 @pytest.mark.asyncio
-async def test_full_mission_execution(mock_llm_router, tmp_path):
+async def test_full_mission_execution(mock_llm_router, tmp_path, monkeypatch):
     """Test end-to-end mission execution with mocked LLM."""
     from nexus.orchestration.engine import OrchestrationEngine
-    
+
+    # Acknowledge written authorization so the legal guard allows the mission.
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+
     target = "127.0.0.1"
     mission_id = "test-mission-001"
     output_dir = str(tmp_path / "reports")

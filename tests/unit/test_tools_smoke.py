@@ -6,7 +6,7 @@ Ensures all registered tools can be imported and executed without raising except
 import pytest
 from nexus.tools.registry import list_tools
 
-VALID_STATUSES = {"completed", "no_findings", "failed", "unavailable"}
+VALID_STATUSES = {"completed", "no_findings", "failed", "unavailable", "requires_credentials"}
 REQUIRED_KEYS = {"tool", "target", "status", "findings"}
 
 @pytest.mark.skip(reason="Slow network calls - excluded from default test run")

@@ -477,9 +477,15 @@ def live(
     else:
         custom_ports = None
 
-    # Import and run the live agent
-    from scripts.live_agent import main as live_main
-    live_main(target=target, host=host)
+    # Import and run the live agent — inject args via sys.argv so argparse picks them up
+    import sys as _sys
+    _argv_orig = _sys.argv[:]
+    _sys.argv = ["live_agent.py", "--target", target, "--host", host]
+    try:
+        from scripts.live_agent import main as live_main
+        live_main()
+    finally:
+        _sys.argv = _argv_orig
 
 
 

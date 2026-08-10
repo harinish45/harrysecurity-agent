@@ -196,7 +196,7 @@ def run(
         if vi.get("version"):
             evidence_parts.append(f"Version: {vi['version']}")
         evidence_parts.append(f"Banner: {b['banner'][:200]}")
-        if b.get("tls", {}).get("available"):
+        if b.get("tls") and b["tls"].get("available"):
             tls = b["tls"]
             evidence_parts.append(f"TLS: {tls.get('version')} cipher={tls.get('cipher')}")
             if tls.get("not_after"):
@@ -207,7 +207,7 @@ def run(
         sev = "medium"
         if b["service"] in ("SSH", "Telnet", "FTP", "RDP", "VNC"):
             sev = "high"
-        if b.get("tls", {}).get("version", "").startswith(("TLSv1.0", "TLSv1.1", "SSL")):
+        if b.get("tls") and b["tls"].get("version", "").startswith(("TLSv1.0", "TLSv1.1", "SSL")):
             sev = "high"
 
         remediation = f"Review service on port {b['port']} ({b['service']})."
@@ -236,7 +236,7 @@ def run(
         metadata={
             "ports_scanned": len(port_list),
             "banners_found": len(banners),
-            "tls_ports": len([b for b in banners if b.get("tls", {}).get("available")]),
+            "tls_ports": len([b for b in banners if b.get("tls") and b["tls"].get("available")]),
         },
     )
 

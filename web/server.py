@@ -94,5 +94,57 @@ async def websocket_steer(websocket: WebSocket):
     except Exception:
         pass
 
+@app.get("/api/agents")
+async def get_agents():
+    """Get all agents grouped by tier for topology view."""
+    try:
+        from nexus.agents.agent_registry import get_agents_by_tier, get_agent_count
+        return {
+            "total": get_agent_count(),
+            "by_tier": get_agents_by_tier(),
+        }
+    except ImportError:
+        return {"total": 0, "by_tier": {}}
+
+
+@app.get("/api/skills")
+async def get_skills():
+    """Get all registered skills from both registries."""
+    try:
+        from nexus.skills import skills_registry, skill_registry
+        return {
+            "functional": [s.name for s in skills_registry.list_all()],
+            "class_based": skill_registry.list_all(),
+            "total": skill_registry.count,
+        }
+    except ImportError:
+        return {"functional": [], "class_based": [], "total": 0}
+
+
+@app.get("/api/tools")
+async def get_tools():
+    """Get tool counts grouped by domain."""
+    try:
+        from nexus.tools.registry import get_tool_count_by_domain, get_tool_domains
+        return {
+            "domains": get_tool_domains(),
+            "counts": get_tool_count_by_domain(),
+            "total": sum(get_tool_count_by_domain().values()),
+        }
+    except ImportError:
+        return {"domains": [], "counts": {}, "total": 0}
+
+
+def launch_dashboard(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
+    """Launch the Strix dashboard and optionally open the browser."""
+    if open_browser:
+        import threading
+        import webbrowser
+        url = f"http://{host}:{port}"
+        # Open browser after a short delay so the server is ready
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8765)
+    launch_dashboard()
