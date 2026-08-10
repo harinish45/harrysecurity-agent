@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXUS-STRIKE Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="logo">NEXUS-STRIKE</div>
+        <nav>
+            <a href="#dashboard" class="active">Dashboard</a>
+            <a href="#pentests">Pentests</a>
+            <a href="#issues">Issues</a>
+            <a href="#reports">Reports</a>
+            <a href="#networks">Networks</a>
+            <a href="#knowledge">Knowledge</a>
+            <a href="#settings">Settings</a>
+        </nav>
+    </div>
+    <div class="main-content">
+        <header>
+            <h1>Security Dashboard</h1>
+            <div class="user-info">Prepared by HARINISH</div>
+        </header>
+        
+        <main id="dashboard-view">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Total Findings</h3>
+                    <p id="total-findings">0</p>
+                </div>
+                <div class="stat-card critical">
+                    <h3>Critical</h3>
+                    <p id="critical-count">0</p>
+                </div>
+                <div class="stat-card high">
+                    <h3>High</h3>
+                    <p id="high-count">0</p>
+                </div>
+                <div class="stat-card medium">
+                    <h3>Medium</h3>
+                    <p id="medium-count">0</p>
+                </div>
+            </div>
+            
+            <div class="charts-container">
+                <div class="chart-box">
+                    <h3>Severity Distribution</h3>
+                    <canvas id="severityChart"></canvas>
+                </div>
+                <div class="chart-box">
+                    <h3>Agent Topology</h3>
+                    <div id="agent-graph"></div>
+                </div>
+            </div>
+
+            <div class="reports-section">
+                <h3>Recent Reports</h3>
+                <table id="reports-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Size</th>
+                            <th>Modified</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reports-tbody">
+                        <tr><td colspan="4">Loading reports...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
