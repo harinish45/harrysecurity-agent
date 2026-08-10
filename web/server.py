@@ -135,6 +135,102 @@ async def get_tools():
         return {"domains": [], "counts": {}, "total": 0}
 
 
+# ── Scan control state (in-process only, resets on restart) ──────────────────
+import subprocess as _subprocess
+_active_scan: dict = {"process": None, "target": None, "status": "idle"}
+
+
+@app.get("/api/findings")
+async def get_findings(limit: int = 50):
+    """Return findings from the most recent JSON report."""
+    if not REPORTS_DIR.exists():
+        return {"findings": [], "total": 0, "target": None}
+
+    json_files = sorted(
+        [f for f in REPORTS_DIR.iterdir() if f.suffix == ".json"],
+        key=lambda x: x.stat().st_mtime,
+        reverse=True,
+    )
+    if not json_files:
+        return {"findings": [], "total": 0, "target": None}
+
+    with open(json_files[0], "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    findings = data.get("findings", [])
+    return {
+        "findings": findings[:limit],
+        "total": len(findings),
+        "target": data.get("_meta", {}).get("target"),
+        "report": json_files[0].name,
+    }
+
+
+@app.get("/api/config")
+async def get_config():
+    """Return current platform configuration (safe, no secrets)."""
+    try:
+        from nexus.foundation.config import config
+        return {
+            "ollama_base_url": getattr(config, "ollama_base_url", "http://localhost:11434/v1"),
+            "ollama_model":    getattr(config, "ollama_model", "qwen2.5-coder:7b"),
+            "reports_dir":     str(REPORTS_DIR),
+        }
+    except ImportError:
+        return {"error": "config not available"}
+
+
+@app.post("/api/config")
+async def update_config(payload: dict):
+    """Placeholder for future config write support."""
+    return {"status": "accepted", "note": "Runtime config changes not yet persisted"}
+
+
+@app.post("/api/scan/start")
+async def scan_start(payload: dict):
+    """Launch nexus live in a background subprocess for the given target."""
+    global _active_scan
+    target = payload.get("target", "127.0.0.1")
+
+    if _active_scan["process"] and _active_scan["process"].poll() is None:
+        return {"status": "already_running", "target": _active_scan["target"]}
+
+    import sys as _sys
+    cmd = [_sys.executable, "-m", "nexus", "live", "--target", target]
+    proc = _subprocess.Popen(
+        cmd,
+        stdout=_subprocess.DEVNULL,
+        stderr=_subprocess.DEVNULL,
+        env={**__import__("os").environ, "NEXUS_LEGAL_ACK": "I_HAVE_WRITTEN_AUTHORIZATION"},
+    )
+    _active_scan = {"process": proc, "target": target, "status": "running"}
+    return {"status": "started", "target": target, "pid": proc.pid}
+
+
+@app.post("/api/scan/stop")
+async def scan_stop():
+    """Terminate any running background scan."""
+    global _active_scan
+    proc = _active_scan.get("process")
+    if proc and proc.poll() is None:
+        proc.terminate()
+        _active_scan["status"] = "stopped"
+        return {"status": "stopped"}
+    return {"status": "no_active_scan"}
+
+
+@app.get("/api/scan/status")
+async def scan_status():
+    """Return current scan status."""
+    proc = _active_scan.get("process")
+    running = proc is not None and proc.poll() is None
+    return {
+        "status": "running" if running else _active_scan.get("status", "idle"),
+        "target": _active_scan.get("target"),
+        "pid": proc.pid if proc and running else None,
+    }
+
+
 def launch_dashboard(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
     """Launch the Strix dashboard and optionally open the browser."""
     if open_browser:

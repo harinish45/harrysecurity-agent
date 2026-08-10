@@ -3,50 +3,133 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NEXUS-STRIKE Dashboard</title>
+    <meta name="description" content="NEXUS-STRIKE Strix Security Dashboard — AI-powered cybersecurity platform by HARINISH">
+    <title>NEXUS-STRIKE | Strix Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
 </head>
 <body>
-    <div class="sidebar">
-        <div class="logo">NEXUS-STRIKE</div>
-        <nav>
-            <a href="#dashboard" class="active">Dashboard</a>
-            <a href="#pentests">Pentests</a>
-            <a href="#issues">Issues</a>
-            <a href="#reports">Reports</a>
-            <a href="#networks">Networks</a>
-            <a href="#knowledge">Knowledge</a>
-            <a href="#settings">Settings</a>
+    <div class="sidebar" id="sidebar">
+        <div class="logo">
+            <span class="logo-icon">⚡</span>
+            <span class="logo-text">NEXUS-STRIKE</span>
+        </div>
+        <div class="sidebar-label">PLATFORM</div>
+        <nav id="main-nav">
+            <a href="#dashboard" class="nav-item active" data-page="dashboard" id="nav-dashboard">
+                <span class="nav-icon">🎯</span> Dashboard
+            </a>
+            <a href="#pentests" class="nav-item" data-page="pentests" id="nav-pentests">
+                <span class="nav-icon">🔴</span> Pentests
+            </a>
+            <a href="#issues" class="nav-item" data-page="issues" id="nav-issues">
+                <span class="nav-icon">⚠️</span> Issues
+            </a>
+            <a href="#reports" class="nav-item" data-page="reports" id="nav-reports">
+                <span class="nav-icon">📄</span> Reports
+            </a>
         </nav>
+        <div class="sidebar-label">INTELLIGENCE</div>
+        <nav>
+            <a href="#supply-chain" class="nav-item" data-page="supply-chain" id="nav-supply-chain">
+                <span class="nav-icon">🔗</span> Supply Chain
+            </a>
+            <a href="#repositories" class="nav-item" data-page="repositories" id="nav-repositories">
+                <span class="nav-icon">📦</span> Repositories
+            </a>
+            <a href="#domains" class="nav-item" data-page="domains" id="nav-domains">
+                <span class="nav-icon">🌐</span> Domains
+            </a>
+        </nav>
+        <div class="sidebar-label">OPERATIONS</div>
+        <nav>
+            <a href="#networks" class="nav-item" data-page="networks" id="nav-networks">
+                <span class="nav-icon">🌍</span> Networks
+            </a>
+            <a href="#knowledge" class="nav-item" data-page="knowledge" id="nav-knowledge">
+                <span class="nav-icon">🧠</span> Knowledge
+            </a>
+            <a href="#chat" class="nav-item" data-page="chat" id="nav-chat">
+                <span class="nav-icon">💬</span> Chat
+            </a>
+            <a href="#pr-reviews" class="nav-item" data-page="pr-reviews" id="nav-pr-reviews">
+                <span class="nav-icon">🔍</span> PR Reviews
+            </a>
+            <a href="#integrations" class="nav-item" data-page="integrations" id="nav-integrations">
+                <span class="nav-icon">🔌</span> Integrations
+            </a>
+            <a href="#settings" class="nav-item" data-page="settings" id="nav-settings">
+                <span class="nav-icon">⚙️</span> Settings
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="status-dot online"></div>
+            <span>Agent Online</span>
+        </div>
     </div>
+
     <div class="main-content">
         <header>
-            <h1>Security Dashboard</h1>
-            <div class="user-info">Prepared by HARINISH</div>
-        </header>
-        
-        <main id="dashboard-view">
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <h3>Total Findings</h3>
-                    <p id="total-findings">0</p>
-                </div>
-                <div class="stat-card critical">
-                    <h3>Critical</h3>
-                    <p id="critical-count">0</p>
-                </div>
-                <div class="stat-card high">
-                    <h3>High</h3>
-                    <p id="high-count">0</p>
-                </div>
-                <div class="stat-card medium">
-                    <h3>Medium</h3>
-                    <p id="medium-count">0</p>
+            <div class="header-left">
+                <h1 id="page-title">Security Dashboard</h1>
+                <span class="breadcrumb" id="page-breadcrumb">Overview</span>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-scan" id="scan-btn" onclick="startScan()">
+                    <span id="scan-btn-text">▶ Start Scan</span>
+                </button>
+                <div class="user-badge">
+                    <span class="user-avatar">H</span>
+                    <span>HARINISH</span>
                 </div>
             </div>
-            
+        </header>
+
+        <!-- ── DASHBOARD PAGE ── -->
+        <main id="page-dashboard" class="page active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">🎯</div>
+                    <h3>Total Findings</h3>
+                    <p id="total-findings">—</p>
+                    <span class="stat-delta">Last scan</span>
+                </div>
+                <div class="stat-card critical">
+                    <div class="stat-icon">🔴</div>
+                    <h3>Critical</h3>
+                    <p id="critical-count">—</p>
+                    <span class="stat-delta">Immediate action</span>
+                </div>
+                <div class="stat-card high">
+                    <div class="stat-icon">🟠</div>
+                    <h3>High</h3>
+                    <p id="high-count">—</p>
+                    <span class="stat-delta">Fix within 7 days</span>
+                </div>
+                <div class="stat-card medium">
+                    <div class="stat-icon">🟡</div>
+                    <h3>Medium</h3>
+                    <p id="medium-count">—</p>
+                    <span class="stat-delta">Fix within 30 days</span>
+                </div>
+                <div class="stat-card agents">
+                    <div class="stat-icon">🤖</div>
+                    <h3>Agents</h3>
+                    <p id="agent-count">50</p>
+                    <span class="stat-delta">6 tiers active</span>
+                </div>
+                <div class="stat-card tools">
+                    <div class="stat-icon">🔧</div>
+                    <h3>Tools</h3>
+                    <p id="tool-count">266+</p>
+                    <span class="stat-delta">29 domains</span>
+                </div>
+            </div>
+
             <div class="charts-container">
                 <div class="chart-box">
                     <h3>Severity Distribution</h3>
@@ -59,23 +142,263 @@
             </div>
 
             <div class="reports-section">
-                <h3>Recent Reports</h3>
+                <div class="section-header">
+                    <h3>Recent Reports</h3>
+                    <button class="btn btn-sm" onclick="loadReports()">↻ Refresh</button>
+                </div>
                 <table id="reports-table">
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Size</th>
-                            <th>Modified</th>
-                            <th>Action</th>
+                            <th>Name</th><th>Size</th><th>Modified</th><th>Action</th>
                         </tr>
                     </thead>
                     <tbody id="reports-tbody">
-                        <tr><td colspan="4">Loading reports...</td></tr>
+                        <tr><td colspan="4" class="loading-cell">Loading reports…</td></tr>
                     </tbody>
                 </table>
             </div>
         </main>
+
+        <!-- ── PENTESTS PAGE ── -->
+        <main id="page-pentests" class="page">
+            <div class="page-content">
+                <div class="scan-control-panel">
+                    <h2>Live Pentest Control</h2>
+                    <p class="subtitle">Start and monitor real-time security assessments</p>
+                    <div class="scan-form">
+                        <input type="text" id="scan-target" placeholder="Target IP or domain (e.g. 192.168.1.1)" class="form-input">
+                        <select id="scan-mode" class="form-select">
+                            <option value="guided">Guided (Recommended)</option>
+                            <option value="autonomous">Autonomous</option>
+                            <option value="tool">Tool-only</option>
+                        </select>
+                        <button class="btn btn-scan-lg" onclick="startScanFromPanel()">▶ Launch Assessment</button>
+                        <button class="btn btn-danger" onclick="stopScan()">⏹ Stop</button>
+                    </div>
+                    <div id="scan-output" class="scan-output">
+                        <span class="muted">No scan running. Configure target and press Launch.</span>
+                    </div>
+                </div>
+                <div class="agents-grid" id="agents-grid">
+                    <h3>Agent Status</h3>
+                    <div id="tier-cards" class="tier-cards"></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- ── ISSUES PAGE ── -->
+        <main id="page-issues" class="page">
+            <div class="issues-header">
+                <h2>Security Issues</h2>
+                <div class="filter-bar">
+                    <button class="filter-btn active" onclick="filterIssues('all')">All</button>
+                    <button class="filter-btn critical" onclick="filterIssues('critical')">Critical</button>
+                    <button class="filter-btn high" onclick="filterIssues('high')">High</button>
+                    <button class="filter-btn medium" onclick="filterIssues('medium')">Medium</button>
+                    <button class="filter-btn low" onclick="filterIssues('low')">Low</button>
+                </div>
+            </div>
+            <div id="issues-list" class="issues-list">
+                <div class="empty-state">
+                    <span class="empty-icon">✅</span>
+                    <p>No issues found yet. Run a scan to populate this view.</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- ── REPORTS PAGE ── -->
+        <main id="page-reports" class="page">
+            <div class="section-header">
+                <h2>All Reports</h2>
+                <button class="btn" onclick="loadReports()">↻ Refresh</button>
+            </div>
+            <div class="reports-grid" id="reports-grid">
+                <div class="loading-cell">Loading reports…</div>
+            </div>
+        </main>
+
+        <!-- ── SUPPLY CHAIN PAGE ── -->
+        <main id="page-supply-chain" class="page">
+            <h2>Supply Chain Security</h2>
+            <p class="subtitle">Monitor third-party dependencies and vendor risk</p>
+            <div class="skills-grid" id="skills-list">
+                <div class="loading-cell">Loading skills…</div>
+            </div>
+        </main>
+
+        <!-- ── REPOSITORIES PAGE ── -->
+        <main id="page-repositories" class="page">
+            <h2>Repositories</h2>
+            <p class="subtitle">Code security and secret scanning across repositories</p>
+            <div class="tool-domains-grid" id="tool-domains-grid">
+                <div class="loading-cell">Loading tool domains…</div>
+            </div>
+        </main>
+
+        <!-- ── DOMAINS PAGE ── -->
+        <main id="page-domains" class="page">
+            <h2>Security Domains</h2>
+            <p class="subtitle">277 tools organized across 29 security domains</p>
+            <div class="domains-grid" id="domains-grid">
+                <div class="loading-cell">Loading domains…</div>
+            </div>
+        </main>
+
+        <!-- ── NETWORKS PAGE ── -->
+        <main id="page-networks" class="page">
+            <h2>Network Intelligence</h2>
+            <p class="subtitle">Asset discovery, network topology, and vulnerability mapping</p>
+            <div class="info-cards">
+                <div class="info-card">
+                    <h3>🌐 Network Tools</h3>
+                    <ul id="network-tools-list"><li>Loading…</li></ul>
+                </div>
+                <div class="info-card">
+                    <h3>🔍 Reconnaissance Tools</h3>
+                    <ul id="recon-tools-list"><li>Loading…</li></ul>
+                </div>
+            </div>
+        </main>
+
+        <!-- ── KNOWLEDGE PAGE ── -->
+        <main id="page-knowledge" class="page">
+            <h2>Knowledge Base</h2>
+            <p class="subtitle">NEXUS-STRIKE platform documentation and threat intelligence</p>
+            <div class="knowledge-grid">
+                <div class="knowledge-card">
+                    <h3>🤖 50 Agents</h3>
+                    <p>Specialized AI agents organized in 6 operational tiers: Orchestrator, Offensive, Defensive, Analysis, Specialized, and Support.</p>
+                    <div id="tier-summary" class="tier-summary"></div>
+                </div>
+                <div class="knowledge-card">
+                    <h3>🔧 277 Tools</h3>
+                    <p>Real security tool implementations across 29 domains. All modules import cleanly and expose a callable <code>run()</code> interface.</p>
+                </div>
+                <div class="knowledge-card">
+                    <h3>🎓 7 Skills</h3>
+                    <p>High-level skill orchestrations: Web Security, Cloud Security, Code Security, Reconnaissance, Network Security, Threat Intelligence, and Compliance.</p>
+                </div>
+                <div class="knowledge-card">
+                    <h3>📄 PDF Reports</h3>
+                    <p>Professional security reports with real prose, port-specific descriptions, DNS separation, HTTP 404 remediation, and PurpleSec-style cover page.</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- ── CHAT PAGE ── -->
+        <main id="page-chat" class="page">
+            <h2>AI Security Chat</h2>
+            <p class="subtitle">Ask NEXUS-STRIKE anything. Use skill chips to activate domain scans.</p>
+            <div class="chat-container">
+                <div class="skill-chips" id="skill-chips"></div>
+                <div class="chat-messages" id="chat-messages">
+                    <div class="chat-msg system">
+                        <span class="chat-avatar">⚡</span>
+                        <div class="chat-bubble">
+                            NEXUS-STRIKE ready. Select a skill chip above or type a command.
+                            Try: <em>"scan 127.0.0.1 for web vulnerabilities"</em>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-row">
+                    <input type="text" id="chat-input" placeholder="Ask about your security posture…" class="form-input" onkeydown="if(event.key==='Enter')sendChat()">
+                    <button class="btn" onclick="sendChat()">Send ▶</button>
+                </div>
+            </div>
+        </main>
+
+        <!-- ── PR REVIEWS PAGE ── -->
+        <main id="page-pr-reviews" class="page">
+            <h2>PR Security Reviews</h2>
+            <p class="subtitle">Automated security analysis of pull requests and code changes</p>
+            <div class="empty-state">
+                <span class="empty-icon">🔍</span>
+                <p>Connect a GitHub repository in Settings to enable automated PR security reviews.</p>
+                <button class="btn" onclick="navigate('settings')">Go to Settings →</button>
+            </div>
+        </main>
+
+        <!-- ── INTEGRATIONS PAGE ── -->
+        <main id="page-integrations" class="page">
+            <h2>Integrations</h2>
+            <p class="subtitle">Connect NEXUS-STRIKE to your security toolchain</p>
+            <div class="integrations-grid">
+                <div class="integration-card available">
+                    <div class="int-icon">🤖</div>
+                    <h3>Ollama (Local LLM)</h3>
+                    <p>Run AI analysis locally with Ollama. Zero data leaves your machine.</p>
+                    <span class="badge badge-available">Available</span>
+                </div>
+                <div class="integration-card available">
+                    <div class="int-icon">🧠</div>
+                    <h3>OpenAI / GPT-4</h3>
+                    <p>Cloud LLM for complex reasoning and report generation.</p>
+                    <span class="badge badge-available">Available</span>
+                </div>
+                <div class="integration-card available">
+                    <div class="int-icon">⚡</div>
+                    <h3>Anthropic Claude</h3>
+                    <p>Long-context analysis for large codebases and complex findings.</p>
+                    <span class="badge badge-available">Available</span>
+                </div>
+                <div class="integration-card">
+                    <div class="int-icon">📡</div>
+                    <h3>OpenRouter</h3>
+                    <p>Access 100+ models through a unified API. Cost-optimized routing.</p>
+                    <span class="badge">Configure</span>
+                </div>
+                <div class="integration-card">
+                    <div class="int-icon">🔵</div>
+                    <h3>Azure OpenAI</h3>
+                    <p>Enterprise-grade AI with compliance and data residency controls.</p>
+                    <span class="badge">Configure</span>
+                </div>
+                <div class="integration-card">
+                    <div class="int-icon">⚡</div>
+                    <h3>Groq</h3>
+                    <p>Ultra-fast inference for real-time security analysis.</p>
+                    <span class="badge">Configure</span>
+                </div>
+            </div>
+        </main>
+
+        <!-- ── SETTINGS PAGE ── -->
+        <main id="page-settings" class="page">
+            <h2>Settings</h2>
+            <p class="subtitle">NEXUS-STRIKE platform configuration</p>
+            <div class="settings-grid">
+                <div class="settings-card">
+                    <h3>🌐 Dashboard</h3>
+                    <div class="setting-row">
+                        <label>Host</label>
+                        <input type="text" value="127.0.0.1" class="form-input sm" readonly>
+                    </div>
+                    <div class="setting-row">
+                        <label>Port</label>
+                        <input type="text" value="8765" class="form-input sm" readonly>
+                    </div>
+                </div>
+                <div class="settings-card">
+                    <h3>🔧 Platform Info</h3>
+                    <div class="setting-row"><label>Version</label><span>v0.2.0</span></div>
+                    <div class="setting-row"><label>Tools</label><span id="settings-tools">277</span></div>
+                    <div class="setting-row"><label>Agents</label><span>50</span></div>
+                    <div class="setting-row"><label>Skills</label><span>7</span></div>
+                    <div class="setting-row"><label>Author</label><span>HARINISH</span></div>
+                </div>
+                <div class="settings-card">
+                    <h3>📋 Quick Links</h3>
+                    <div class="quick-links">
+                        <a href="https://github.com/harinish45/harrysecurity-agent" target="_blank" class="btn btn-sm">GitHub Repo ↗</a>
+                        <a href="/api/stats" target="_blank" class="btn btn-sm">API Stats ↗</a>
+                        <a href="/api/agents" target="_blank" class="btn btn-sm">API Agents ↗</a>
+                        <a href="/api/tools" target="_blank" class="btn btn-sm">API Tools ↗</a>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
+
     <script src="/static/js/app.js"></script>
 </body>
 </html>
