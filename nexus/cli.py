@@ -482,6 +482,28 @@ def live(
     live_main(target=target, host=host)
 
 
+
+@app.command("view")
+def view(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Dashboard bind address"),
+    port: int = typer.Option(8765, "--port", "-p", help="Dashboard port"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open browser automatically"),
+):
+    """🖥️ Launch the NEXUS-STRIKE web dashboard."""
+    console.print(Panel.fit(
+        "🖥️ [bold cyan]NEXUS-STRIKE Dashboard[/]",
+        subtitle="[dim]Localhost-only, token-protected security dashboard[/]",
+        style="bold cyan",
+    ))
+    try:
+        from web.server import launch_dashboard
+        launch_dashboard(host=host, port=port, open_browser=not no_browser)
+    except ImportError as exc:
+        console.print(f"[red]Dashboard dependencies missing: {exc}[/]")
+        console.print("[dim]Install with: pip install fastapi uvicorn[standard] websockets jinja2[/]")
+        raise typer.Exit(1)
+
+
 def main():
     app()
 

@@ -74,3 +74,60 @@ def get_agent(name: str):
 
 def get_agent_count():
     return len(AGENT_REGISTRY)
+
+
+# =============================================================================
+# Tier grouping (Enhancement Package)
+# =============================================================================
+
+TIER_MAP = {
+    "orchestrator": [
+        "mission_commander_agent", "task_planner_agent", "agent_router_agent",
+        "pattern_selector_agent", "quality_assessor_agent",
+    ],
+    "offensive": [
+        "recon_agent", "network_agent", "webapp_agent", "exploit_agent",
+        "ad_agent", "cloud_agent", "mobile_agent", "wireless_agent",
+        "redteam_agent", "social_eng_agent", "physical_pen_agent",
+        "api_attacker_agent", "phishing_agent",
+    ],
+    "defensive": [
+        "soc_agent", "ir_agent", "threat_hunt_agent", "detection_engineer_agent",
+        "blue_team_agent", "hardening_agent", "deception_agent",
+    ],
+    "analysis": [
+        "malware_agent", "forensics_agent", "reverse_eng_agent", "threat_intel_agent",
+        "crypto_agent", "code_review_agent", "osint_analyst_agent",
+        "vuln_analyst_agent", "supply_chain_agent",
+    ],
+    "specialized": [
+        "iot_agent", "ot_ics_agent", "automotive_agent", "hardware_agent",
+        "rf_sdr_agent", "ai_security_agent", "compliance_auditor_agent",
+        "embedded_agent",
+    ],
+    "support": [
+        "searcher_agent", "coder_agent", "installer_agent", "reporter_agent",
+        "validator_agent", "debugger_agent", "doc_writer_agent", "hitl_liaison_agent",
+    ],
+}
+
+
+def get_agents_by_tier() -> dict:
+    """Return agents grouped by their operational tier."""
+    result: dict = {tier: [] for tier in TIER_MAP}
+    for name in AGENT_REGISTRY:
+        for tier, members in TIER_MAP.items():
+            if name in members:
+                result[tier].append(name)
+                break
+    return result
+
+
+def get_agent_tiers() -> list:
+    """Return all tier names."""
+    return list(TIER_MAP.keys())
+
+
+def get_agent_count_by_tier() -> dict:
+    """Return agent count per tier."""
+    return {tier: len(agents) for tier, agents in get_agents_by_tier().items()}

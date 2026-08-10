@@ -71,3 +71,26 @@ def list_tools() -> List[Tuple[str, Callable]]:
     Tests expect exactly two values per param.
     """
     return [(name, tool_registry.get(name)) for name in sorted(tool_registry._tools)]
+
+
+# =============================================================================
+# Domain grouping helpers (Enhancement Package)
+# =============================================================================
+
+def get_tool_domains() -> list:
+    """Return all unique tool domain names."""
+    return tool_registry.get_domains()
+
+
+def get_tools_by_domain() -> dict:
+    """Return tools grouped by domain (dict[domain, list[tool_name]])."""
+    groups: dict = {}
+    for name in sorted(tool_registry._tools):
+        domain = name.split(".")[0] if "." in name else "unknown"
+        groups.setdefault(domain, []).append(name)
+    return groups
+
+
+def get_tool_count_by_domain() -> dict:
+    """Return tool count per domain."""
+    return {domain: len(tools) for domain, tools in get_tools_by_domain().items()}
