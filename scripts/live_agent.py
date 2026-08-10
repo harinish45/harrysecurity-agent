@@ -68,10 +68,10 @@ KNOWN_SERVICES = {
     80: "HTTP", 110: "POP3", 135: "MSRPC", 139: "NetBIOS", 143: "IMAP",
     443: "HTTPS", 445: "SMB", 465: "SMTPS", 587: "SMTP-Submit", 631: "IPP",
     993: "IMAPS", 995: "POP3S", 1433: "MSSQL", 1521: "OracleDB",
-    3000: "Flask/Node", 3306: "MySQL", 3389: "RDP", 4000: "Default",
-    5000: "Flask/Dev", 5432: "PostgreSQL", 5900: "VNC", 6379: "Redis",
-    7070: "Default", 8000: "HTTP-Alt", 8080: "HTTP-Proxy", 8443: "HTTPS-Alt",
-    8888: "Default", 9000: "SonarQube", 9090: "HTTP-Alt2", 9200: "Elasticsearch",
+    3000: "Dev-HTTP (Node/React)", 3306: "MySQL", 3389: "RDP", 4000: "Dev-HTTP",
+    5000: "Dev-HTTP (Flask)", 5432: "PostgreSQL", 5900: "VNC", 6379: "Redis",
+    7070: "Dev-HTTP", 8000: "Dev-HTTP (Django/FastAPI)", 8080: "HTTP-Proxy", 8443: "HTTPS-Alt",
+    8888: "Jupyter/Dev", 9000: "Dev-HTTP (PHP-FPM/SonarQube)", 9090: "Dev-HTTP (Prometheus/Cockpit)", 9200: "Elasticsearch",
     27017: "MongoDB", 27018: "MongoDB-Shard", 50000: "DB2",
 }
 
