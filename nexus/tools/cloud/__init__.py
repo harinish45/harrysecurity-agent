@@ -9,6 +9,7 @@ from . import container_scanning
 from . import serverless_security
 from . import secret_detection
 from . import iac_review
+from . import s3_audit
 
 __all__ = [
     "aws_review",
@@ -16,6 +17,7 @@ __all__ = [
     "gcp_review",
     "iam_audit",
     "s3_review",
+    "s3_audit",
     "kubernetes_security",
     "docker_security",
     "container_scanning",

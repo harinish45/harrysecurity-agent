@@ -10,6 +10,7 @@ from . import cert_transparency
 from . import shodan_search
 from . import censys_search
 from . import asset_discovery
+from . import subdomain_takeover
 
 __all__ = [
     "subdomain_enum",
@@ -23,5 +24,6 @@ __all__ = [
     "cert_transparency",
     "shodan_search",
     "censys_search",
-    "asset_discovery"
+    "asset_discovery",
+    "subdomain_takeover"
 ]

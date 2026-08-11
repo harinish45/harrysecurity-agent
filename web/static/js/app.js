@@ -1,6 +1,6 @@
 /**
  * NEXUS-STRIKE Strix Dashboard — Full JavaScript
- * 13-page SPA with Chart.js, D3.js, live API polling
+ * 13-page SPA with Chart.js, D3.js, live API polling, WebSocket scan progress
  */
 
 'use strict';
@@ -9,14 +9,103 @@
 let severityChart = null;
 let scanPolling = null;
 let allFindings = [];
+let scanSocket = null;
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
+    initThemeToggle();
+    initHamburger();
+    initScanWebSocket();
     await Promise.all([loadStats(), loadReports()]);
     initAgentGraph();
     loadSkillChips();
 });
+
+// ── Theme Toggle ──────────────────────────────────────────────
+function initThemeToggle() {
+    const toggle = document.getElementById('theme-toggle');
+    if (!toggle) return;
+
+    // Load saved theme (default: dark)
+    const saved = localStorage.getItem('nexus-theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', saved);
+    toggle.textContent = saved === 'dark' ? '🌙' : '☀️';
+
+    toggle.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme') || 'dark';
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('nexus-theme', next);
+        toggle.textContent = next === 'dark' ? '🌙' : '☀️';
+    });
+}
+
+// ── Hamburger Menu (mobile) ───────────────────────────────────
+function initHamburger() {
+    const hamburger = document.getElementById('hamburger');
+    const sidebar = document.getElementById('sidebar');
+    if (!hamburger || !sidebar) return;
+
+    hamburger.addEventListener('click', () => {
+        sidebar.classList.toggle('open');
+    });
+
+    // Close sidebar when a nav item is clicked on mobile
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+            if (window.innerWidth <= 768) sidebar.classList.remove('open');
+        });
+    });
+}
+
+// ── WebSocket Scan Progress ───────────────────────────────────
+function initScanWebSocket() {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${proto}://${window.location.host}/ws/scan`;
+
+    try {
+        scanSocket = new WebSocket(wsUrl);
+
+        scanSocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleScanEvent(data);
+            } catch (e) {
+                console.warn('Invalid WS message:', event.data);
+            }
+        };
+
+        scanSocket.onclose = () => {
+            // Auto-reconnect after 3s
+            setTimeout(() => {
+                if (document.visibilityState !== 'hidden') initScanWebSocket();
+            }, 3000);
+        };
+
+        scanSocket.onerror = () => {
+            // Silent — server may not be running
+        };
+    } catch (e) {
+        console.warn('WebSocket init failed:', e);
+    }
+}
+
+function handleScanEvent(data) {
+    const output = document.getElementById('scan-output');
+    if (!output) return;
+
+    if (data.type === 'status') {
+        const statusText = data.status === 'running' ? '🟢 Running' : (data.status === 'stopped' ? '⏹ Stopped' : '⚪ Idle');
+        output.textContent = `Status: ${statusText} | Target: ${data.target || '—'}\n`;
+    } else if (data.type === 'phase') {
+        output.textContent += `\n[Phase ${data.phase}] ${data.message || ''}`;
+        output.scrollTop = output.scrollHeight;
+    } else if (data.type === 'output') {
+        output.textContent += `\n${data.line || ''}`;
+        output.scrollTop = output.scrollHeight;
+    }
+}
 
 // ── Navigation ─────────────────────────────────────────────────
 function initNavigation() {
@@ -507,7 +596,7 @@ async function startScan() {
 async function startScanFromPanel() {
     const target = document.getElementById('scan-target')?.value?.trim() || '127.0.0.1';
     const output = document.getElementById('scan-output');
-    if (output) output.textContent = `🚀 Launching assessment against ${target}…\nUse "nexus live --target ${target}" in your terminal for the full 11-phase scan.`;
+    if (output) output.textContent = `🚀 Launching assessment against ${target}…\n`;
     await fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target}) }).catch(() => {});
 }
 
@@ -524,5 +613,5 @@ function setText(id, value) {
 }
 
 function escHtml(str) {
-    return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    return String(str).replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[c]));
 }

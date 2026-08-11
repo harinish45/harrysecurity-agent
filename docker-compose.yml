@@ -1,19 +1,71 @@
+version: "3.9"
+
 services:
   nexus:
     build: .
-    env_file: .env
+    image: nexus-strike:1.0.0
+    container_name: nexus-strike
+    env_file:
+      - .env
+    environment:
+      - LLM_PROVIDER=ollama
+      - OLLAMA_BASE_URL=http://ollama:11434/v1
     volumes:
-      - .:/app
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: nexus mcp --port 8888
-    ports: ["8888:8888"]
+      - ./engagements:/app/engagements
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+    ports:
+      - "8765:8765"   # Dashboard
+      - "8888:8888"   # MCP server
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    networks:
+      - nexus-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nexus-ollama
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    networks:
+      - nexus-net
+
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    container_name: nexus-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - nexus-net
+
   postgres:
     image: postgres:16-alpine
+    container_name: nexus-postgres
     environment:
       POSTGRES_DB: nexus
       POSTGRES_USER: nexus
       POSTGRES_PASSWORD: nexus
-    ports: ["5432:5432"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - nexus-net
+
+volumes:
+  ollama-models:
+  redis-data:
+  postgres-data:
+
+networks:
+  nexus-net:
+    driver: bridge

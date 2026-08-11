@@ -4,14 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nexus-strike"
-version = "0.2.0"
-description = "The Ultimate AI-Powered Cybersecurity Platform — 29 domains, 263 tools, 50 agents, 10 LLM providers"
+version = "1.0.0"
+description = "The Ultimate AI-Powered Cybersecurity Platform — 29 domains, 270+ tools, 50 agents, 10 LLM providers"
 readme = "README.md"
 requires-python = ">=3.10"
-keywords = ["security", "penetration-testing", "osint", "red-team", "blue-team", "llm", "ai-security"]
+keywords = ["security", "penetration-testing", "osint", "red-team", "blue-team", "llm", "ai-security", "vulnerability-scanner", "sast", "dast"]
 license = "MIT"
 authors = [
     {name = "NEXUS-STRIKE Team"},
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Security :: Penetration Testing",
+    "Topic :: Security :: Vulnerability Management",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Networking :: Monitoring",
 ]
 
 dependencies = [
@@ -57,6 +74,8 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.8.0",
     "bandit>=1.7.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
 ]
 all = [
     "openai>=1.35.0",
@@ -70,9 +89,10 @@ all = [
 nexus = "nexus.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/nexus-strike/nexus-strike"
-Repository = "https://github.com/nexus-strike/nexus-strike"
-Documentation = "https://nexus-strike.readthedocs.io"
+Homepage = "https://github.com/harinish45/nexus-strike"
+Repository = "https://github.com/harinish45/nexus-strike"
+Issues = "https://github.com/harinish45/nexus-strike/issues"
+Documentation = "https://github.com/harinish45/nexus-strike/blob/main/README.md"
 
 [tool.pytest.ini_options]
 # Manual, target-specific assessment scripts must not be auto-collected.

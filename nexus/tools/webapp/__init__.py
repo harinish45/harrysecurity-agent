@@ -16,6 +16,7 @@ from . import auth_test
 from . import authorization_test
 from . import session_mgmt
 from . import jwt_analysis
+from . import jwt_attacks
 from . import api_security
 from . import graphql
 from . import rest_api_testing
@@ -45,6 +46,7 @@ __all__ = [
     "authorization_test",
     "session_mgmt",
     "jwt_analysis",
+    "jwt_attacks",
     "api_security",
     "graphql",
     "rest_api_testing",

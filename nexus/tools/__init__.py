@@ -27,6 +27,7 @@ from . import rf_sdr
 from . import soc
 from . import threat_intel
 from . import vuln_assessment
+from . import webapi
 from . import webapp
 from . import wireless
 

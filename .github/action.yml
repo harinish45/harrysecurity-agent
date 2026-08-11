@@ -1,0 +1,94 @@
+name: 'NEXUS-STRIKE'
+description: 'Run an AI-powered security assessment with NEXUS-STRIKE — the ultimate pentest platform'
+author: 'HARINISH'
+
+inputs:
+  target:
+    description: 'Target domain, IP, or URL to scan'
+    required: true
+  mode:
+    description: 'Execution mode: guided, autonomous, tool, or live (default: live)'
+    required: false
+    default: 'live'
+  llm-provider:
+    description: 'LLM provider: ollama, openai, anthropic, openrouter (default: ollama)'
+    required: false
+    default: 'ollama'
+  scope:
+    description: 'Comma-separated list of approved targets (scope allow-list)'
+    required: false
+  legal-ack:
+    description: 'Legal confirmation. Must be I_HAVE_WRITTEN_AUTHORIZATION to run'
+    required: false
+    default: ''
+
+outputs:
+  report-path:
+    description: 'Path to the generated security report'
+    value: ${{ steps.scan.outputs.report_path }}
+  findings-count:
+    description: 'Number of findings identified'
+    value: ${{ steps.scan.outputs.findings_count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: scan
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # Install dependencies
+        python -m pip install --upgrade pip
+        pip install -r "$GITHUB_ACTION_PATH/../requirements.txt"
+        pip install -e "$GITHUB_ACTION_PATH/.."
+
+        # Set legal and scope env
+        export NEXUS_LEGAL_ACK="${{ inputs.legal-ack }}"
+        if [ -n "${{ inputs.scope }}" ]; then
+          export NEXUS_ALLOWED_TARGETS="${{ inputs.scope }}"
+        fi
+
+        # Run the scan
+        if [ "${{ inputs.mode }}" = "live" ]; then
+          nexus live --target "${{ inputs.target }}"
+        elif [ "${{ inputs.mode }}" = "guided" ]; then
+          nexus run --target "${{ inputs.target }}" --mode guided --objective full_assessment
+        else
+          nexus run --target "${{ inputs.target }}" --mode "${{ inputs.mode }}"
+        fi
+
+        # Find the latest JSON report
+        LATEST_JSON=$(ls -t reports/*.json 2>/dev/null | head -1 || echo "")
+        LATEST_PDF=$(ls -t reports/*.pdf 2>/dev/null | head -1 || echo "")
+        echo "report_path=${LATEST_PDF:-${LATEST_JSON:-none}}" >> "$GITHUB_OUTPUT"
+
+        # Count findings
+        if [ -n "$LATEST_JSON" ]; then
+          FINDINGS=$(python -c "import json; d=json.load(open('$LATEST_JSON')); print(len(d.get('findings', [])))" 2>/dev/null || echo "0")
+          echo "findings_count=$FINDINGS" >> "$GITHUB_OUTPUT"
+        else
+          echo "findings_count=0" >> "$GITHUB_OUTPUT"
+        fi
+
+branding:
+  icon: 'shield'
+  color: 'red'
+
+# ============================================================
+# EXAMPLE USAGE
+# ============================================================
+# name: Security Scan
+# on: [push, schedule]
+# jobs:
+#   scan:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v7
+#       - uses: harinish45/nexus-strike-action@v1
+#         with:
+#           target: 'example.com'
+#           mode: 'live'
+#           legal-ack: 'I_HAVE_WRITTEN_AUTHORIZATION'
+#           scope: 'example.com,*.example.com'
+# ============================================================

@@ -446,9 +446,9 @@ def verify():
 def version():
     """📦 Show version information."""
     console.print(Panel.fit(
-        "[bold green]NEXUS-STRIKE[/] v0.2.0\n"
+        "[bold green]NEXUS-STRIKE[/] v1.0.0\n"
         "[dim]The Ultimate AI-Powered Cybersecurity Platform[/]\n\n"
-        "29 security domains | 263 tools | 50 agents | 6 patterns | 10 LLM providers",
+        "29 security domains | 270+ tools | 50 agents | 6 patterns | 10 LLM providers",
         style="bold",
     ))
 
@@ -487,6 +487,98 @@ def live(
     finally:
         _sys.argv = _argv_orig
 
+
+
+@app.command("skills")
+def skills(
+    action: str = typer.Argument("list", help="Subcommand: list, show <name>, or run <name>"),
+    name: str = typer.Option(None, "--name", "-n", help="Skill name for show/run"),
+    target: str = typer.Option("127.0.0.1", "--target", "-t", help="Target for skill run"),
+):
+    """🎓 List, inspect, and invoke security skills."""
+    from nexus.skills import skill_registry, skills_registry
+
+    action_lower = action.lower()
+
+    if action_lower == "list":
+        # Functional registry skills
+        functional = skills_registry.list_all()
+        table = Table(title=f"NEXUS-STRIKE Skills ({skill_registry.count} class-based + {len(functional)} functional)", box=box.ROUNDED)
+        table.add_column("Skill", style="cyan")
+        table.add_column("Category", style="green")
+        table.add_column("Description", style="white")
+
+        # Class-based registry
+        for meta in skill_registry.list_all():
+            table.add_row(meta.get("name", ""), meta.get("category", ""), meta.get("description", "")[:70])
+        # Functional registry (deduplicated)
+        seen = {meta.get("name") for meta in skill_registry.list_all()}
+        for skill in functional:
+            if skill.name not in seen:
+                table.add_row(skill.name, skill.category, skill.description[:70])
+        console.print(table)
+        console.print(f"\n[dim]Run [bold]nexus skills show <name>[/] for details | "
+                      f"[bold]nexus skills run <name> --target <host>[/] to invoke[/]")
+
+    elif action_lower == "show":
+        if not name:
+            raise typer.BadParameter("Usage: nexus skills show <skill-name>")
+        # Try class-based first
+        try:
+            skill_class = skill_registry.get(name)
+            console.print(Panel.fit(
+                f"🎓 [bold cyan]{skill_class.name}[/]\n"
+                f"[bold]Category:[/] {skill_class.category}\n"
+                f"[bold]Description:[/] {skill_class.description}\n"
+                f"[bold]Tools:[/] {', '.join(skill_class.tools)}\n\n"
+                f"[dim]{skill_class.prompt_template.strip()[:200]}…[/]",
+                title="Skill Details",
+                style="bold",
+            ))
+        except KeyError:
+            # Try functional registry
+            skill = skills_registry.get(name)
+            if skill is None:
+                all_names = [s.name for s in skills_registry.list_all()] + [m["name"] for m in skill_registry.list_all()]
+                raise typer.BadParameter(f"Skill '{name}' not found. Available: {', '.join(sorted(all_names))}")
+            console.print(Panel.fit(
+                f"🎓 [bold cyan]{skill.name}[/]\n"
+                f"[bold]Category:[/] {skill.category}\n"
+                f"[bold]Description:[/] {skill.description}\n"
+                f"[bold]Tools:[/] {', '.join(skill.tools)}\n\n"
+                f"[dim]{skill.prompt_template.strip()[:200]}…[/]",
+                title="Skill Details",
+                style="bold",
+            ))
+
+    elif action_lower == "run":
+        if not name:
+            raise typer.BadParameter("Usage: nexus skills run <skill-name> --target <host>")
+        # Try class-based first
+        try:
+            skill_class = skill_registry.get(name)
+            skill_instance = skill_class(target=target)
+            result = skill_instance.run(**{"target": target})
+            console.print(f"[green]✅ Skill '{name}' executed on {target}[/]")
+            console.print(f"[bold]Message:[/] {result.message}")
+            console.print(f"[bold]Tools used:[/] {', '.join(result.tools_used) if result.tools_used else 'none'}")
+            console.print(f"[bold]Findings:[/] {len(result.findings)}")
+            for finding in result.findings[:10]:
+                console.print(f"  - [yellow]{finding.get('title', finding)}[/] [dim]({finding.get('severity', 'info')})[/]")
+        except KeyError:
+            # Try functional registry
+            skill = skills_registry.get(name)
+            if skill is None:
+                all_names = [s.name for s in skills_registry.list_all()] + [m["name"] for m in skill_registry.list_all()]
+                raise typer.BadParameter(f"Skill '{name}' not found. Available: {', '.join(sorted(all_names))}")
+            result = skill.handler(target=target, skill_name=skill.name)
+            console.print(f"[green]✅ Skill '{name}' executed on {target}[/]")
+            console.print(f"[bold]Status:[/] {result.get('status', 'completed')}")
+            console.print(f"[bold]Message:[/] {result.get('message', '')}")
+            console.print(f"[bold]Findings:[/] {len(result.get('findings', []))}")
+
+    else:
+        raise typer.BadParameter("Action must be one of: list, show <name>, run <name>")
 
 
 @app.command("view")
