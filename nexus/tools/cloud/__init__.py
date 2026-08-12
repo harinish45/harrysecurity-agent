@@ -1,4 +1,5 @@
 from . import aws_review
+from . import aws_credential_exposure
 from . import azure_assessment
 from . import gcp_review
 from . import iam_audit
@@ -13,6 +14,7 @@ from . import s3_audit
 
 __all__ = [
     "aws_review",
+    "aws_credential_exposure",
     "azure_assessment",
     "gcp_review",
     "iam_audit",

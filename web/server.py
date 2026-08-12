@@ -180,9 +180,25 @@ async def _broadcast_scan_event(event: dict):
                 _ws_clients.remove(ws)
 
 
+def _websocket_auth_check(websocket: WebSocket, query_params: dict) -> bool:
+    """Validate token for WebSocket connections if NEXUS_DASHBOARD_TOKEN is set."""
+    if not DASHBOARD_TOKEN:
+        return True
+    token = query_params.get("token", "") or query_params.get("access_token", "")
+    if token == DASHBOARD_TOKEN:
+        return True
+    auth = websocket.headers.get("Authorization", "")
+    if auth == f"Bearer {DASHBOARD_TOKEN}":
+        return True
+    return False
+
+
 @app.websocket("/ws/scan")
 async def websocket_scan(websocket: WebSocket):
     """WebSocket endpoint for real-time scan progress streaming."""
+    if not _websocket_auth_check(websocket, dict(websocket.query_params)):
+        await websocket.close(code=4401, reason="Unauthorized")
+        return
     await websocket.accept()
     _ws_clients.append(websocket)
     try:
@@ -345,14 +361,25 @@ async def scan_status(request: Request):
     }
 
 
+def _open_browser_safe(url: str) -> None:
+    """Open the browser safely; never crash in headless environments."""
+    try:
+        import webbrowser
+        webbrowser.open(url)
+    except Exception:
+        # Headless / no display — log a helpful message instead of crashing
+        print(f"[nexus] Browser could not be opened automatically. "
+              f"Visit {url} manually.")
+
+
 def launch_dashboard(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
     """Launch the Strix dashboard and optionally open the browser."""
+    url = f"http://{host}:{port}"
     if open_browser:
         import threading
-        import webbrowser
-        url = f"http://{host}:{port}"
         # Open browser after a short delay so the server is ready
-        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.5, lambda: _open_browser_safe(url)).start()
+    print(f"[nexus] 🖥️ Dashboard available at: {url}")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 

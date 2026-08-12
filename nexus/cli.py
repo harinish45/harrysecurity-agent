@@ -327,7 +327,7 @@ def agents(
     table.add_column("Status", style="green")
 
     agents_to_show = filtered if tier else all_agents
-    for name in agents_to_show:
+    for name, cls in agents_to_show:
         table.add_row(name, "✅ Registered")
 
     console.print(table)
@@ -411,6 +411,7 @@ def verify():
         if not item.ispkg
     ]
     failures = []
+    registered_names = set(tool_registry.list_tools().keys())
     for module_name in module_names:
         try:
             module = importlib.import_module(module_name)
@@ -425,6 +426,11 @@ def verify():
                 )
                 if not accepts_target:
                     failures.append(f"{module_name}: run does not accept target")
+                short_name = module_name.split(".")[-1]
+                qual_name = f"{module_name.rsplit('.', 1)[0].split('.')[-1]}.{short_name}"
+                current_registered = set(tool_registry.list_tools().keys())
+                if qual_name not in current_registered:
+                    failures.append(f"{module_name}: not registered in tool_registry")
         except Exception as exc:
             failures.append(f"{module_name}: {type(exc).__name__}: {exc}")
 

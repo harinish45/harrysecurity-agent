@@ -1,4 +1,5 @@
 from . import assembly_analysis
+from . import disassemble
 from . import ghidra_analysis
 from . import ida_analysis
 from . import binary_patching
@@ -9,6 +10,7 @@ from . import firmware_reverse_engineering
 
 __all__ = [
     "assembly_analysis",
+    "disassemble",
     "ghidra_analysis",
     "ida_analysis",
     "binary_patching",

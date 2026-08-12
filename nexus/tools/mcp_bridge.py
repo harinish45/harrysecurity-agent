@@ -30,9 +30,9 @@ def run(target: str, **kwargs) -> dict:
 
 
 # Register with tool registry
-tool_registry.register("mcp.mcp_bridge", run, metadata={
-    "name": "mcp.mcp_bridge",
-    "domain": "mcp",
+tool_registry.register("tools.mcp_bridge", run, metadata={
+    "name": "tools.mcp_bridge",
+    "domain": "tools",
     "status": "completed",
     "description": "Basic MCP bridge endpoint connectivity check",
     "parameters": {

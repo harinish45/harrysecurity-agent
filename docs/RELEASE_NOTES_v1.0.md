@@ -2,7 +2,7 @@
 
 **Release date:** 2026-08-12
 **Version:** 1.0.0
-**Branch:** main
+**Branch:** release/v1.0.0
 **Status:** Production/Stable
 
 ---

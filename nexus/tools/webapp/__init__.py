@@ -2,6 +2,8 @@ from . import scanner
 from . import crawler
 from . import dir_enum
 from . import sqli
+from . import sql_injection
+from . import deserialization
 from . import xss
 from . import csrf
 from . import ssrf
@@ -32,6 +34,8 @@ __all__ = [
     "crawler",
     "dir_enum",
     "sqli",
+    "sql_injection",
+    "deserialization",
     "xss",
     "csrf",
     "ssrf",

@@ -11,6 +11,7 @@ from . import shodan_search
 from . import censys_search
 from . import asset_discovery
 from . import subdomain_takeover
+from . import waf_detect
 
 __all__ = [
     "subdomain_enum",
@@ -25,5 +26,6 @@ __all__ = [
     "shodan_search",
     "censys_search",
     "asset_discovery",
-    "subdomain_takeover"
+    "subdomain_takeover",
+    "waf_detect"
 ]

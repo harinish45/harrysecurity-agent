@@ -8,6 +8,8 @@ from . import network_map
 from . import smb_enum
 from . import snmp_enum
 from . import nfs_enum
+from . import arp_spoof
+from . import dhcp_starvation
 from . import autorecon
 
 __all__ = [
@@ -21,5 +23,7 @@ __all__ = [
     "smb_enum",
     "snmp_enum",
     "nfs_enum",
+    "arp_spoof",
+    "dhcp_starvation",
     "autorecon"
 ]

@@ -87,6 +87,7 @@ def run(
     target: str,
     bucket_names: str = None,
     timeout: int = 10,
+    rate_limit: float = 0.0,
     **kwargs: Any,
 ) -> dict:
     """Audit S3 buckets for public access and misconfigurations.
@@ -99,6 +100,9 @@ def run(
         Explicit comma-separated bucket names to test. If omitted, generated from target.
     timeout : int
         Request timeout in seconds.
+    rate_limit : float
+        Delay in seconds between bucket probes (default: 0.0).
+        Set to e.g. 0.5 to avoid tripping AWS rate limits / enumeration detection.
     """
     if not target or not target.strip():
         return tool_result("cloud.s3_audit", target, status=STATUS_FAILED, error="Empty target")
