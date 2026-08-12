@@ -4,6 +4,8 @@ Core mission execution engine with LLM-powered planning, agent delegation, and s
 """
 from rich.console import Console
 import json as json_mod
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from nexus.agents.base_agent import AgentContext
 from nexus.foundation.guardrails import LegalGuard, ScopeGuard, EscalationGuard
 from nexus.intelligence.llm.router import LLMRouter
@@ -24,10 +26,11 @@ class OrchestrationEngine:
 
     async def run_mission(self, target: str, mission_id: str = "mission-001",
                           mode: str = "guided", objective: str = "full_assessment",
-                          engagement: dict | None = None) -> dict:
+                          engagement: dict | None = None, hat_mode: str = "white",
+                          workflow: str = "full_assessment") -> dict:
         """Execute a complete security assessment mission."""
         console.print(f"[bold green]OrchestrationEngine: Starting mission {mission_id} on {target}[/]")
-        logger.info(f"Mission {mission_id} started: target={target}, mode={mode}")
+        logger.info(f"Mission {mission_id} started: target={target}, mode={mode}, hat_mode={hat_mode}, workflow={workflow}")
 
         # Phase 1: Validate
         try:
@@ -42,7 +45,7 @@ class OrchestrationEngine:
         self.mission_context = AgentContext(mission_id=mission_id, target=target)
 
         # Phase 3: Plan mission using LLM
-        plan = await self._plan_mission(target, mode, objective)
+        plan = await self._plan_mission(target, mode, objective, hat_mode, workflow)
         self.mission_context.add_to_history(f"Mission planned: {len(plan)} phases")
 
         # Phase 4: Execute phases
@@ -71,14 +74,17 @@ class OrchestrationEngine:
             "status": "completed",
         }
 
-    async def _plan_mission(self, target: str, mode: str, objective: str) -> list:
+    async def _plan_mission(self, target: str, mode: str, objective: str, hat_mode: str = "white", workflow: str = "full_assessment") -> list:
         """Use LLM to decompose the mission into phases."""
         prompt = f"""You are a penetration testing mission planner. Plan a security assessment for target: {target}
 Mode: {mode}
 Objective: {objective}
+Hat Mode: {hat_mode} (white=authorized, grey=ambiguous, black=unauthorized simulation)
+Workflow: {workflow}
 
 Available domains: reconnaissance, network, webapp, wireless, active_directory, cloud, mobile, malware,
-reverse_engineering, exploit_dev, forensics, incident_response, threat_intel, iam, compliance, appsec, ai_security
+reverse_engineering, exploit_dev, forensics, incident_response, threat_intel, iam, compliance, appsec, ai_security,
+container, api, physical, ai_ml, blockchain
 
 Return a JSON list of phases with agent and task for each phase.
 Format: [{{"agent": "recon_agent", "task": "description", "domain": "reconnaissance"}}]
@@ -105,7 +111,7 @@ Format: [{{"agent": "recon_agent", "task": "description", "domain": "reconnaissa
         ]
 
     async def _execute_phase(self, phase: dict) -> dict:
-        """Execute a single mission phase using the appropriate agent."""
+        """Execute a single mission phase using the appropriate agent with parallel tool execution."""
         agent_name = phase.get("agent", "recon_agent")
         task = phase.get("task", "Unknown task")
         domain = phase.get("domain", "reconnaissance")
@@ -117,17 +123,30 @@ Format: [{{"agent": "recon_agent", "task": "description", "domain": "reconnaissa
         findings = []
         domain_tools = tool_registry.list_by_domain(domain)
 
-        # Run first few tools from the domain
-        for tool_name in domain_tools[:3]:
+        # Run up to 5 tools from the domain in parallel using ThreadPoolExecutor
+        tools_to_run = domain_tools[:5]
+        
+        def run_tool(tool_name):
             try:
                 result = self.tool_executor.run(
                     tool_name,
                     target=self.mission_context.target if self.mission_context else "",
                 )
-                if result.get("findings"):
-                    findings.extend(result["findings"])
+                return result
             except Exception as e:
                 logger.warning(f"Tool {tool_name} failed: {e}")
+                return {"findings": []}
+
+        if tools_to_run:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                # Run all tools in parallel threads
+                results = await asyncio.gather(
+                    *(loop.run_in_executor(executor, run_tool, tool_name) for tool_name in tools_to_run)
+                )
+            for result in results:
+                if result and result.get("findings"):
+                    findings.extend(result["findings"])
 
         return {
             "agent": agent_name,

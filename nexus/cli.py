@@ -53,6 +53,10 @@ def run(
                                   help="Mission objective: full_assessment, quick_scan, vuln_scan, osint"),
     provider: str = typer.Option(None, "--provider", "-p",
                                  help="LLM provider: openai, anthropic, openrouter, ollama, groq, deepseek, omniroute, custom"),
+    hat_mode: str = typer.Option("white", "--hat-mode", "-h",
+                                 help="Engagement mode: [bold]white[/] (authorized), [bold]grey[/] (ambiguous), [bold]black[/] (unauthorized simulation)"),
+    workflow: str = typer.Option("full_assessment", "--workflow", "-w",
+                                 help="Assessment workflow: web_pentest, network_audit, cloud_assessment, red_team, blue_team, compliance_audit"),
 ):
     """🚀 Launch a security assessment mission."""
     engagement_record = None
@@ -72,7 +76,7 @@ def run(
         ScopeGuard.validate(target)
 
     console.print(Panel.fit(
-        "🏴‍☠️ [bold green]NEXUS-STRIKE[/] v0.1.0 — Ultimate AI-Powered Cybersecurity Platform",
+        "🏴‍☠️ [bold green]NEXUS-STRIKE[/] v1.0.0 — Ultimate AI-Powered Cybersecurity Platform",
         style="bold green",
     ))
 
@@ -82,6 +86,7 @@ def run(
     console.print(f"[dim]LLM Provider: [cyan]{provider_info['active_provider']}[/] | "
                   f"Model: [cyan]{provider_info['model']}[/] | "
                   f"Available: [cyan]{', '.join(provider_info['available_providers'])}[/][/]")
+    console.print(f"[dim]Hat Mode: [cyan]{hat_mode}[/] | Workflow: [cyan]{workflow}[/][/]")
 
     # Run the orchestration engine
     from nexus.orchestration.engine import OrchestrationEngine
@@ -94,6 +99,8 @@ def run(
             mode=mode,
             objective=objective,
             engagement=engagement_record,
+            hat_mode=hat_mode,
+            workflow=workflow,
         )
         return result
 
@@ -466,6 +473,8 @@ def live(
     ports: str = typer.Option(None, "--ports", "-p", help="Comma-separated port list (default: top ports)"),
     llm_url: str = typer.Option(None, "--llm-url", help="LLM gateway URL (default: from env or Ollama)"),
     llm_model: str = typer.Option(None, "--llm-model", help="LLM model name"),
+    hat_mode: str = typer.Option("white", "--hat-mode", "-h", help="Engagement mode: white, grey, black"),
+    workflow: str = typer.Option("full_assessment", "--workflow", "-w", help="Assessment workflow"),
 ):
     """🚀 Run the live AI cybersecurity agent against a target."""
     import sys
@@ -606,7 +615,6 @@ def view(
         console.print(f"[red]Dashboard dependencies missing: {exc}[/]")
         console.print("[dim]Install with: pip install fastapi uvicorn[standard] websockets jinja2[/]")
         raise typer.Exit(1)
-
 
 def main():
     app()
