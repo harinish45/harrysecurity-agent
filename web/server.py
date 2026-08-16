@@ -12,12 +12,16 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from nexus.foundation.guardrails import InputGuard, LegalGuard, ScopeGuard
+from web.mission_api import router as mission_router
+from web.mission_scheduler_api import router as mission_scheduler_router
 
 app = FastAPI(title="NEXUS-STRIKE Dashboard")
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 REPORTS_DIR = Path(__file__).parent.parent / "reports"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.include_router(mission_router)
+app.include_router(mission_scheduler_router)
 
 DASHBOARD_TOKEN = os.environ.get("NEXUS_DASHBOARD_TOKEN", "").strip()
 _subprocess = subprocess
@@ -82,8 +86,7 @@ async def get_report(filename: str, request: Request):
 @app.get("/api/stats")
 async def get_stats(request: Request):
     _require_token(request)
-    json_files = sorted([p for p in REPORTS_DIR.glob("*.json") if p.is_file()],
-                        key=lambda p: p.stat().st_mtime, reverse=True) if REPORTS_DIR.exists() else []
+    json_files = sorted([p for p in REPORTS_DIR.glob("*.json") if p.is_file()], key=lambda p: p.stat().st_mtime, reverse=True) if REPORTS_DIR.exists() else []
     if not json_files:
         return {"error": "No reports found"}
     data = json.loads(json_files[0].read_text(encoding="utf-8"))
@@ -92,11 +95,7 @@ async def get_stats(request: Request):
     normalized = [_normalize_finding(f) for f in findings]
     for finding in normalized:
         severity_counts[finding["severity"]] += 1
-    return {"target": data.get("_meta", {}).get("target", "Unknown"),
-            "total_findings": len(findings), "severity_counts": severity_counts,
-            "open_ports": data.get("open_ports", []),
-            "phases_completed": data.get("_meta", {}).get("phases_completed", 0),
-            "findings": normalized}
+    return {"target": data.get("_meta", {}).get("target", "Unknown"), "total_findings": len(findings), "severity_counts": severity_counts, "open_ports": data.get("open_ports", []), "phases_completed": data.get("_meta", {}).get("phases_completed", 0), "findings": normalized}
 
 
 @app.get("/api/agents")
@@ -110,8 +109,7 @@ async def get_agents(request: Request):
 async def get_skills(request: Request):
     _require_token(request)
     from nexus.skills import skill_registry, skills_registry
-    return {"functional": [skill.name for skill in skills_registry.list_all()],
-            "class_based": skill_registry.list_all(), "total": skill_registry.count}
+    return {"functional": [skill.name for skill in skills_registry.list_all()], "class_based": skill_registry.list_all(), "total": skill_registry.count}
 
 
 @app.get("/api/tools")
@@ -144,8 +142,7 @@ def _websocket_auth_check(websocket: WebSocket, params: dict | None = None) -> b
         return True
     params = params or {}
     query_params = getattr(websocket, "query_params", {})
-    token = (params.get("token") or params.get("access_token") or
-             query_params.get("token", "") or query_params.get("access_token", ""))
+    token = (params.get("token") or params.get("access_token") or query_params.get("token", "") or query_params.get("access_token", ""))
     return token == DASHBOARD_TOKEN or websocket.headers.get("Authorization", "") == f"Bearer {DASHBOARD_TOKEN}"
 
 
@@ -161,8 +158,7 @@ async def websocket_scan(websocket: WebSocket):
     try:
         process = _active_scan.get("process")
         running = process is not None and process.poll() is None
-        await websocket.send_json({"type": "status", "status": "running" if running else _active_scan.get("status", "idle"),
-                                   "target": _active_scan.get("target")})
+        await websocket.send_json({"type": "status", "status": "running" if running else _active_scan.get("status", "idle"), "target": _active_scan.get("target")})
         while True:
             await websocket.receive_text()
     except Exception:
@@ -189,22 +185,19 @@ async def get_findings(request: Request, limit: int = 50):
     _require_token(request)
     if not 1 <= limit <= 1000:
         raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
-    json_files = sorted([p for p in REPORTS_DIR.glob("*.json") if p.is_file()],
-                        key=lambda p: p.stat().st_mtime, reverse=True) if REPORTS_DIR.exists() else []
+    json_files = sorted([p for p in REPORTS_DIR.glob("*.json") if p.is_file()], key=lambda p: p.stat().st_mtime, reverse=True) if REPORTS_DIR.exists() else []
     if not json_files:
         return {"findings": [], "total": 0, "target": None}
     data = json.loads(json_files[0].read_text(encoding="utf-8"))
     findings = [_normalize_finding(f) for f in data.get("findings", [])]
-    return {"findings": findings[:limit], "total": len(findings),
-            "target": data.get("_meta", {}).get("target"), "report": json_files[0].name}
+    return {"findings": findings[:limit], "total": len(findings), "target": data.get("_meta", {}).get("target"), "report": json_files[0].name}
 
 
 @app.get("/api/config")
 async def get_config(request: Request):
     _require_token(request)
     from nexus.foundation.config import config
-    return {"ollama_base_url": getattr(config, "ollama_base_url", "http://localhost:11434/v1"),
-            "ollama_model": getattr(config, "ollama_model", "qwen2.5-coder:7b"), "reports_dir": str(REPORTS_DIR)}
+    return {"ollama_base_url": getattr(config, "ollama_base_url", "http://localhost:11434/v1"), "ollama_model": getattr(config, "ollama_model", "qwen2.5-coder:7b"), "reports_dir": str(REPORTS_DIR)}
 
 
 @app.post("/api/config")
@@ -230,8 +223,7 @@ async def scan_start(payload: dict, request: Request):
         return {"status": "already_running", "target": _active_scan["target"]}
     _active_scan.update({"process": None, "target": target, "status": "starting"})
     await _broadcast_scan_event({"type": "phase", "target": target, "phase": 0, "message": "Scan starting"})
-    proc = _subprocess.Popen([os.sys.executable, "-m", "nexus", "live", "--target", target],
-                             stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=dict(os.environ))
+    proc = _subprocess.Popen([os.sys.executable, "-m", "nexus", "live", "--target", target], stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=dict(os.environ))
     _active_scan.update({"process": proc, "status": "running"})
     await _broadcast_scan_event({"type": "status", "status": "running", "target": target})
 
@@ -265,8 +257,7 @@ async def scan_status(request: Request):
     _require_token(request)
     process = _active_scan.get("process")
     running = process is not None and process.poll() is None
-    return {"status": "running" if running else _active_scan.get("status", "idle"),
-            "target": _active_scan.get("target"), "pid": process.pid if process and running else None}
+    return {"status": "running" if running else _active_scan.get("status", "idle"), "target": _active_scan.get("target"), "pid": process.pid if process and running else None}
 
 
 def _open_browser_safe(url: str) -> None:
