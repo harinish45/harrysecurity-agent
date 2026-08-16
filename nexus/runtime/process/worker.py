@@ -7,11 +7,16 @@ network or authorization decisions on its own.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import subprocess
+from time import monotonic
 from typing import Sequence
+from uuid import uuid4
 
 from nexus.runtime.events import Event, EventBus
+from nexus.runtime.tool_metrics import ToolExecutionMetric, ToolMetricsStore
 from nexus.runtime.workers import WorkerJob, WorkerResult, WorkerState
+from nexus.tools.registry import tool_registry
 
 
 @dataclass(frozen=True)
@@ -25,37 +30,87 @@ class ProcessOutput:
 class LocalProcessWorker:
     """Execute a pre-validated argv tuple with bounded process resources."""
 
-    def __init__(self, event_bus: EventBus | None = None, *, max_output_bytes: int = 1_000_000) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus | None = None,
+        metrics_store: ToolMetricsStore | None = None,
+        *,
+        max_output_bytes: int = 1_000_000,
+    ) -> None:
         if max_output_bytes < 1024:
             raise ValueError("max_output_bytes must be at least 1024")
         self.events = event_bus or EventBus()
+        self.metrics = metrics_store or ToolMetricsStore()
         self.max_output_bytes = max_output_bytes
 
     def execute(self, job: WorkerJob, argv: Sequence[str]) -> WorkerResult:
         job.validate()
         command = self._validate_argv(argv)
+        started = monotonic()
         self._publish(job, "worker.started", {"capability": job.capability, "command": command[0]})
         try:
             output = self._run(command, job.timeout_seconds)
         except (OSError, ValueError) as exc:
+            self._record_metric(job, started, "failed", 0, 0, error_class=type(exc).__name__)
             self._publish(job, "worker.failed", {"error": str(exc)})
             return WorkerResult(job.job_id, WorkerState.FAILED, error=str(exc))
 
+        execution_ms = round((monotonic() - started) * 1000)
+        stdout_bytes = len(output.stdout.encode("utf-8"))
+        stderr_bytes = len(output.stderr.encode("utf-8"))
+
         if output.timed_out:
+            self._record_metric(job, started, "failed", stdout_bytes, stderr_bytes, execution_ms, "TimeoutExpired")
             self._publish(job, "worker.timeout", {"timeout_seconds": job.timeout_seconds})
             return WorkerResult(job.job_id, WorkerState.FAILED, error="worker timed out")
 
         if output.returncode != 0:
             error = output.stderr[:4000] or f"process exited with code {output.returncode}"
+            self._record_metric(job, started, "failed", stdout_bytes, stderr_bytes, execution_ms, "ProcessExit")
             self._publish(job, "worker.failed", {"returncode": output.returncode, "error": error})
             return WorkerResult(job.job_id, WorkerState.FAILED, error=error)
 
+        self._record_metric(job, started, "completed", stdout_bytes, stderr_bytes, execution_ms)
         self._publish(
             job,
             "worker.completed",
-            {"returncode": output.returncode, "stdout_bytes": len(output.stdout.encode("utf-8"))},
+            {"returncode": output.returncode, "stdout_bytes": stdout_bytes},
         )
         return WorkerResult(job.job_id, WorkerState.COMPLETED)
+
+    def _record_metric(
+        self,
+        job: WorkerJob,
+        started: float,
+        status: str,
+        stdout_bytes: int,
+        stderr_bytes: int,
+        execution_ms: int | None = None,
+        error_class: str = "",
+    ) -> None:
+        resource_class = "unknown"
+        try:
+            resource_class = tool_registry.get_profile(job.capability).resource_class.value
+        except KeyError:
+            pass
+        self.metrics.add(
+            ToolExecutionMetric(
+                metric_id=f"metric_{uuid4().hex}",
+                mission_id=job.mission_id,
+                job_id=job.job_id,
+                tool_name=job.capability,
+                status=status,
+                started_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                queue_wait_ms=0,
+                execution_ms=execution_ms if execution_ms is not None else round((monotonic() - started) * 1000),
+                retries=max(0, job.attempt - 1),
+                stdout_bytes=stdout_bytes,
+                stderr_bytes=stderr_bytes,
+                resource_class=resource_class,
+                error_class=error_class,
+            )
+        )
 
     def _run(self, argv: tuple[str, ...], timeout: int) -> ProcessOutput:
         try:
@@ -93,8 +148,6 @@ class LocalProcessWorker:
         return command
 
     def _publish(self, job: WorkerJob, event_type: str, payload: dict[str, object]) -> None:
-        from datetime import datetime, timezone
-
         self.events.publish(
             Event(
                 event_id=f"job_{job.job_id}_{event_type}_{job.attempt}",
