@@ -143,8 +143,9 @@ def _websocket_auth_check(websocket: WebSocket, params: dict | None = None) -> b
     if not DASHBOARD_TOKEN:
         return True
     params = params or {}
+    query_params = getattr(websocket, "query_params", {})
     token = (params.get("token") or params.get("access_token") or
-             websocket.query_params.get("token", "") or websocket.query_params.get("access_token", ""))
+             query_params.get("token", "") or query_params.get("access_token", ""))
     return token == DASHBOARD_TOKEN or websocket.headers.get("Authorization", "") == f"Bearer {DASHBOARD_TOKEN}"
 
 
