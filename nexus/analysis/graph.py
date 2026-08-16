@@ -83,13 +83,13 @@ class AttackGraph:
             if len(edges) > max_depth:
                 return
             if node == target:
-                # Higher-confidence paths score higher while longer paths are
-                # mildly penalized to keep explanations concise.
+                # Path confidence is the product of edge confidences. This makes
+                # a weakly supported shortcut rank below a well-supported chain,
+                # while the hop count remains a deterministic tie-breaker.
                 confidence = 1.0
                 for edge in edges:
                     confidence *= edge.confidence
-                score = confidence / max(1, len(edges))
-                results.append(PathResult(nodes, edges, score))
+                results.append(PathResult(nodes, edges, confidence))
                 return
             for edge in self.outgoing(node):
                 if edge.target in nodes:
