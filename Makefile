@@ -1,12 +1,32 @@
 install:
-	pip install -e .
+	python -m pip install -e .
+
+dev:
+	python -m pip install -e ".[dev]"
+
 run:
-	nexus run --target example.com
+	nexus run --target 127.0.0.1
+
 mcp:
-	nexus mcp --port 8888
+	@echo "MCP server is not implemented yet; use the CLI command only when a future release enables it."
+
+
 tools:
 	nexus tools
+
 agents:
 	nexus agents
+
 test:
-	pytest tests/unit -v
+	python -m pytest tests/ -v
+
+lint:
+	ruff check .
+
+verify:
+	python -m nexus verify
+
+build:
+	python -m build
+
+check: lint verify test build
