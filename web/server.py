@@ -12,12 +12,16 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from nexus.foundation.guardrails import InputGuard, LegalGuard, ScopeGuard
+from web.mission_api import router as mission_router
+from web.mission_scheduler_api import router as mission_scheduler_router
 
 app = FastAPI(title="NEXUS-STRIKE Dashboard")
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 REPORTS_DIR = Path(__file__).parent.parent / "reports"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.include_router(mission_router)
+app.include_router(mission_scheduler_router)
 
 DASHBOARD_TOKEN = os.environ.get("NEXUS_DASHBOARD_TOKEN", "").strip()
 _subprocess = subprocess
@@ -139,7 +143,6 @@ def _broadcast_from_worker(event: dict):
 
 
 def _websocket_auth_check(websocket: WebSocket, params: dict | None = None) -> bool:
-    """Validate credentials from query parameters or an Authorization header."""
     if not DASHBOARD_TOKEN:
         return True
     params = params or {}
