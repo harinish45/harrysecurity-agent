@@ -50,35 +50,31 @@ AGENT_REGISTRY = {
     "validator_agent": "nexus.agents.support.validator_agent.ValidatorAgent",
     "debugger_agent": "nexus.agents.support.debugger_agent.DebuggerAgent",
     "doc_writer_agent": "nexus.agents.support.doc_writer_agent.DocWriterAgent",
-    "hitl_liaison_agent": "nexus.agents.support.hitl_liaison_agent.HitlLiaisonAgent"
+    "hitl_liaison_agent": "nexus.agents.support.hitl_liaison_agent.HitlLiaisonAgent",
 }
 
+
 def list_agents():
-    """
-    Return an iterable of (agent_name, agent_class) tuples.
-    Tests expect exactly two values per param.
-    """
+    """Return an iterable of (agent_name, agent_class) tuples."""
     agents = []
     for name in sorted(AGENT_REGISTRY):
         try:
             agents.append((name, get_agent(name)))
-        except Exception:
-            # Fallback to None if agent class cannot be loaded during test collection
+        except (ImportError, AttributeError, KeyError):
+            # A missing optional agent must not prevent registry discovery.
             agents.append((name, None))
     return agents
 
+
 def get_agent(name: str):
     path = AGENT_REGISTRY[name]
-    mod_path, cls_name = path.rsplit('.', 1)
+    mod_path, cls_name = path.rsplit(".", 1)
     return getattr(import_module(mod_path), cls_name)
+
 
 def get_agent_count():
     return len(AGENT_REGISTRY)
 
-
-# =============================================================================
-# Tier grouping (Enhancement Package)
-# =============================================================================
 
 TIER_MAP = {
     "orchestrator": [
@@ -130,4 +126,4 @@ def get_agent_tiers() -> list:
 
 def get_agent_count_by_tier() -> dict:
     """Return agent count per tier."""
-    return {tier: len(agents) for tier, agents in get_agents_by_tier().items()}
+    return {tier: len(agents) for tier, agents in get_agents_by_tier().items()}
