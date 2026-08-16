@@ -59,6 +59,10 @@ jobs:
     - name: Build package
       run: python -m build
 
+    - name: Build Docker image
+      if: matrix.python-version == '3.11'
+      run: docker build --tag nexus-strike:ci .
+
     - name: Upload test artifacts
       if: always()
       uses: actions/upload-artifact@v4
