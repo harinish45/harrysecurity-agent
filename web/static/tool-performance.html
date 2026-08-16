@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>NEXUS-STRIKE | Tool Performance</title>
+  <style>
+    :root{color-scheme:dark;--bg:#080c12;--panel:#101722;--line:#253143;--text:#eef3f8;--muted:#8794a7;--accent:#5aa7ff;--danger:#ff6b6b;--warn:#e1a83a}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,sans-serif}.page{max-width:1600px;margin:auto;padding:28px}.header{display:flex;justify-content:space-between;gap:18px;align-items:end;margin-bottom:20px}.title{font-size:28px;font-weight:750}.muted{color:var(--muted)}.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}input,select{background:#0c131e;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 11px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.card,.table-wrap{background:var(--panel);border:1px solid var(--line);border-radius:12px}.card{padding:14px}.value{font-size:22px;font-weight:700}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:1150px}th,td{text-align:left;padding:11px 12px;border-bottom:1px solid rgba(255,255,255,.06);white-space:nowrap}th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:var(--panel)}.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 7px;margin-right:4px;font-size:11px}.risk-high,.risk-critical{color:var(--danger)}.risk-medium{color:var(--warn)}.ok{color:#52d273}.empty{text-align:center;color:var(--muted);padding:30px}@media(max-width:900px){.stats{grid-template-columns:repeat(2,1fr)}}
+  </style>
+</head>
+<body>
+<div class="page">
+  <header class="header"><div><div class="title">Tool Performance Fabric</div><div class="muted">Scheduler-facing execution contracts for the security tool catalog.</div></div><a class="muted" href="/">Dashboard</a></header>
+  <div class="stats" id="stats"></div>
+  <div class="toolbar"><input id="query" placeholder="Filter tools…"><select id="domain"><option value="">All domains</option></select><select id="risk"><option value="">All risk</option><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
+  <div class="table-wrap"><table><thead><tr><th>Tool</th><th>Domain</th><th>Risk</th><th>Resource</th><th>Timeout</th><th>Concurrency</th><th>Rate/min</th><th>Parallel</th><th>Resume</th><th>Credentials</th><th>Hardware</th><th>Reliability</th><th>Tags</th></tr></thead><tbody id="rows"><tr><td colspan="13" class="empty">Loading…</td></tr></tbody></table></div>
+</div>
+<script>
+'use strict';
+const state={tools:{}};const $=id=>document.getElementById(id);
+function esc(v){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+function render(){const q=$('query').value.trim().toLowerCase(),d=$('domain').value,r=$('risk').value;const entries=Object.entries(state.tools).filter(([name,p])=>(!q||name.toLowerCase().includes(q)||String(p.domain).toLowerCase().includes(q))&&(!d||p.domain===d)&&(!r||p.risk_level===r));const rows=$('rows');rows.innerHTML='';if(!entries.length){rows.innerHTML='<tr><td colspan="13" class="empty">No matching tools.</td></tr>';return}for(const [name,p] of entries){const tr=document.createElement('tr');const tags=(p.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');tr.innerHTML=`<td><strong>${esc(name)}</strong></td><td>${esc(p.domain)}</td><td class="risk-${esc(p.risk_level)}">${esc(p.risk_level)}</td><td>${esc(p.resource_class)}</td><td>${esc(p.timeout_seconds)}s</td><td>${esc(p.max_concurrency)}</td><td>${p.rate_limit_per_minute==null?'—':esc(p.rate_limit_per_minute)}</td><td>${p.supports_parallel?'✓':'—'}</td><td>${p.supports_resume?'✓':'—'}</td><td>${p.requires_credentials?'yes':'no'}</td><td>${p.requires_hardware?'yes':'no'}</td><td>${esc(p.reliability)}</td><td>${tags}</td>`;rows.appendChild(tr)}}
+async function load(){const response=await fetch('/api/tools/profiles');if(!response.ok)throw new Error('Unable to load tool profiles');const data=await response.json();state.tools=data.tools||{};const domains=[...new Set(Object.values(state.tools).map(p=>p.domain))].sort();$('domain').innerHTML='<option value="">All domains</option>'+domains.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');const values=Object.values(state.tools);const resources=new Set(values.map(p=>p.resource_class));$('stats').innerHTML=`<div class="card"><div class="muted">Registered tools</div><div class="value">${esc(data.count||values.length)}</div></div><div class="card"><div class="muted">Domains</div><div class="value">${domains.length}</div></div><div class="card"><div class="muted">Parallel-capable</div><div class="value">${values.filter(p=>p.supports_parallel).length}</div></div><div class="card"><div class="muted">Resource classes</div><div class="value">${resources.size}</div></div>`;render()}
+$('query').oninput=render;$('domain').onchange=render;$('risk').onchange=render;load().catch(err=>$('rows').innerHTML=`<tr><td colspan="13" class="empty">${esc(err.message)}</td></tr>`);
+</script>
+</body>
+</html>
