@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NEXUS-STRIKE | Mission Control</title>
+  <style>
+    :root{color-scheme:dark;--bg:#090d14;--panel:#111823;--line:#243142;--text:#edf2f7;--muted:#8d9aad;--ok:#3fb950;--warn:#d29922;--danger:#f85149;--accent:#58a6ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,sans-serif}.shell{max-width:1500px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:22px}.title{font-size:28px;font-weight:700}.sub{color:var(--muted)}.grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}button,input,select{background:#0d141f;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px 12px}button{cursor:pointer}button.primary{background:#163a63;border-color:#265f9f}.missions{display:grid;gap:9px}.mission{display:grid;grid-template-columns:1.4fr .8fr .7fr auto;gap:12px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:10px}.status{font-size:12px;text-transform:uppercase;letter-spacing:.06em}.status.running{color:var(--ok)}.status.waiting_approval,.status.paused{color:var(--warn)}.status.failed,.status.blocked,.status.cancelled{color:var(--danger)}.events{max-height:520px;overflow:auto}.event{padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)}.event b{color:var(--accent)}.empty{padding:24px;text-align:center;color:var(--muted)}@media(max-width:980px){.grid{grid-template-columns:1fr}.mission{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="top">
+    <div><div class="title">Mission Control</div><div class="sub">Durable assessments, replayable telemetry, authorization-aware operations.</div></div>
+    <button class="primary" id="refresh">Refresh</button>
+  </div>
+  <div class="grid">
+    <section class="panel">
+      <h2>Assessments</h2>
+      <div class="toolbar"><input id="target" placeholder="Authorized target"><select id="mode"><option>guided</option><option>autonomous</option><option>tool</option></select><input id="auth" placeholder="Authorization reference"><button class="primary" id="create">Create Mission</button></div>
+      <div id="missions" class="missions"><div class="empty">Loading missions…</div></div>
+    </section>
+    <aside class="panel">
+      <h2>Live Event Stream</h2>
+      <div id="events" class="events"><div class="empty">Select a mission.</div></div>
+    </aside>
+  </div>
+</div>
+<script>
+'use strict';
+const state={missionId:null,seq:0};
+const $=id=>document.getElementById(id);
+async function api(path,opts){const res=await fetch(path,opts);if(!res.ok)throw new Error((await res.json()).detail||res.statusText);return res.json()}
+async function load(){const data=await api('/api/missions');const root=$('missions');root.innerHTML='';if(!data.missions.length){root.innerHTML='<div class="empty">No missions yet.</div>';return}for(const m of data.missions){const el=document.createElement('div');el.className='mission';el.innerHTML=`<div><strong>${escapeHtml(m.target)}</strong><div class="sub">${escapeHtml(m.mission_id)}</div></div><div>${escapeHtml(m.mode)}</div><div class="status ${escapeHtml(m.status)}">${escapeHtml(m.status)}</div><button data-id="${escapeHtml(m.mission_id)}">Open</button>`;el.querySelector('button').onclick=()=>openMission(m.mission_id);root.appendChild(el)}}
+async function openMission(id){state.missionId=id;state.seq=0;await replay()}
+async function replay(){if(!state.missionId)return;const data=await api(`/api/missions/${encodeURIComponent(state.missionId)}/events?after_sequence=${state.seq}`);const root=$('events');if(state.seq===0)root.innerHTML='';for(const e of data.events){const row=document.createElement('div');row.className='event';row.innerHTML=`<div><b>#${e.sequence}</b> ${escapeHtml(e.event_type)}</div><div class="sub">${escapeHtml(e.timestamp)}</div>`;root.prepend(row);state.seq=Math.max(state.seq,e.sequence)}}
+$('refresh').onclick=load;
+$('create').onclick=async()=>{const target=$('target').value.trim();if(!target)return;await api('/api/missions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target,mode:$('mode').value,authorization_reference:$('auth').value.trim()})});$('target').value='';await load()};
+function escapeHtml(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+load().catch(err=>{$('missions').innerHTML=`<div class="empty">${escapeHtml(err.message)}</div>`});setInterval(()=>replay().catch(()=>{}),3000);
+</script>
+</body>
+</html>
