@@ -1,7 +1,4 @@
-"""
-NEXUS-STRIKE Web Dashboard Server
-Strix-style local security platform interface.
-"""
+"""NEXUS-STRIKE local security dashboard server."""
 import asyncio
 import json
 import os
@@ -17,27 +14,24 @@ from fastapi.staticfiles import StaticFiles
 from nexus.foundation.guardrails import InputGuard, LegalGuard, ScopeGuard
 
 app = FastAPI(title="NEXUS-STRIKE Dashboard")
-
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 REPORTS_DIR = Path(__file__).parent.parent / "reports"
-
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 DASHBOARD_TOKEN = os.environ.get("NEXUS_DASHBOARD_TOKEN", "").strip()
+_subprocess = subprocess
 _active_scan = {"process": None, "target": None, "status": "idle"}
 _ws_clients: set[WebSocket] = set()
 _ws_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _require_token(request: Request):
-    """Raise 401 if NEXUS_DASHBOARD_TOKEN is set and the request is unauthenticated."""
     if DASHBOARD_TOKEN and request.headers.get("Authorization", "") != f"Bearer {DASHBOARD_TOKEN}":
         raise HTTPException(status_code=401, detail="Missing or invalid dashboard token")
 
 
 def _normalize_finding(item):
-    """Normalize a raw finding into a canonical dictionary with a safe severity."""
     if isinstance(item, dict):
         severity = str(item.get("severity", "info")).lower()
         if severity not in ("critical", "high", "medium", "low", "info"):
@@ -47,7 +41,6 @@ def _normalize_finding(item):
 
 
 def _report_path(filename: str) -> Path:
-    """Resolve a report filename while preventing traversal outside REPORTS_DIR."""
     candidate = (REPORTS_DIR / filename).resolve()
     reports_root = REPORTS_DIR.resolve()
     if candidate.parent != reports_root or candidate.suffix not in {".pdf", ".json"}:
@@ -65,24 +58,19 @@ async def read_root():
 
 @app.get("/api/reports")
 async def get_reports(request: Request):
-    """List available PDF and JSON reports."""
     _require_token(request)
     reports = []
     if REPORTS_DIR.exists():
         for file_path in REPORTS_DIR.iterdir():
             if file_path.is_file() and file_path.suffix in {".pdf", ".json"}:
-                reports.append({
-                    "name": file_path.name,
-                    "size": file_path.stat().st_size,
-                    "modified": file_path.stat().st_mtime,
-                    "url": f"/api/reports/{file_path.name}",
-                })
+                reports.append({"name": file_path.name, "size": file_path.stat().st_size,
+                                "modified": file_path.stat().st_mtime,
+                                "url": f"/api/reports/{file_path.name}"})
     return {"reports": sorted(reports, key=lambda item: item["modified"], reverse=True)}
 
 
 @app.get("/api/reports/{filename}")
 async def get_report(filename: str, request: Request):
-    """Serve a report after confinement and extension validation."""
     _require_token(request)
     file_path = _report_path(filename)
     if not file_path.exists() or not file_path.is_file():
@@ -93,34 +81,26 @@ async def get_report(filename: str, request: Request):
 
 @app.get("/api/stats")
 async def get_stats(request: Request):
-    """Get dashboard statistics from the latest report."""
     _require_token(request)
-    json_files = sorted(
-        [path for path in REPORTS_DIR.glob("*.json") if path.is_file()],
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    ) if REPORTS_DIR.exists() else []
+    json_files = sorted([p for p in REPORTS_DIR.glob("*.json") if p.is_file()],
+                        key=lambda p: p.stat().st_mtime, reverse=True) if REPORTS_DIR.exists() else []
     if not json_files:
         return {"error": "No reports found"}
     data = json.loads(json_files[0].read_text(encoding="utf-8"))
     findings = data.get("findings", [])
-    severity_counts = {severity: 0 for severity in ("critical", "high", "medium", "low", "info")}
-    normalized = [_normalize_finding(finding) for finding in findings]
+    severity_counts = {s: 0 for s in ("critical", "high", "medium", "low", "info")}
+    normalized = [_normalize_finding(f) for f in findings]
     for finding in normalized:
         severity_counts[finding["severity"]] += 1
-    return {
-        "target": data.get("_meta", {}).get("target", "Unknown"),
-        "total_findings": len(findings),
-        "severity_counts": severity_counts,
-        "open_ports": data.get("open_ports", []),
-        "phases_completed": data.get("_meta", {}).get("phases_completed", 0),
-        "findings": normalized,
-    }
+    return {"target": data.get("_meta", {}).get("target", "Unknown"),
+            "total_findings": len(findings), "severity_counts": severity_counts,
+            "open_ports": data.get("open_ports", []),
+            "phases_completed": data.get("_meta", {}).get("phases_completed", 0),
+            "findings": normalized}
 
 
 @app.get("/api/agents")
 async def get_agents(request: Request):
-    """Get registered agents grouped by operational tier."""
     _require_token(request)
     from nexus.agents.agent_registry import get_agent_count, get_agents_by_tier
     return {"total": get_agent_count(), "by_tier": get_agents_by_tier()}
@@ -128,19 +108,14 @@ async def get_agents(request: Request):
 
 @app.get("/api/skills")
 async def get_skills(request: Request):
-    """Get all registered skills."""
     _require_token(request)
     from nexus.skills import skill_registry, skills_registry
-    return {
-        "functional": [skill.name for skill in skills_registry.list_all()],
-        "class_based": skill_registry.list_all(),
-        "total": skill_registry.count,
-    }
+    return {"functional": [skill.name for skill in skills_registry.list_all()],
+            "class_based": skill_registry.list_all(), "total": skill_registry.count}
 
 
 @app.get("/api/tools")
 async def get_tools(request: Request):
-    """Get tool counts grouped by domain."""
     _require_token(request)
     from nexus.tools.registry import get_tool_count_by_domain, get_tool_domains
     counts = get_tool_count_by_domain()
@@ -148,7 +123,6 @@ async def get_tools(request: Request):
 
 
 async def _broadcast_scan_event(event: dict):
-    """Send a scan progress event to all connected WebSocket clients."""
     stale = []
     for websocket in list(_ws_clients):
         try:
@@ -164,17 +138,18 @@ def _broadcast_from_worker(event: dict):
         asyncio.run_coroutine_threadsafe(_broadcast_scan_event(event), _ws_loop)
 
 
-def _websocket_auth_check(websocket: WebSocket) -> bool:
-    """Validate token for WebSocket connections when dashboard authentication is enabled."""
+def _websocket_auth_check(websocket: WebSocket, params: dict | None = None) -> bool:
+    """Validate credentials from query parameters or an Authorization header."""
     if not DASHBOARD_TOKEN:
         return True
-    token = websocket.query_params.get("token", "") or websocket.query_params.get("access_token", "")
+    params = params or {}
+    token = (params.get("token") or params.get("access_token") or
+             websocket.query_params.get("token", "") or websocket.query_params.get("access_token", ""))
     return token == DASHBOARD_TOKEN or websocket.headers.get("Authorization", "") == f"Bearer {DASHBOARD_TOKEN}"
 
 
 @app.websocket("/ws/scan")
 async def websocket_scan(websocket: WebSocket):
-    """Stream real-time scan progress."""
     global _ws_loop
     if not _websocket_auth_check(websocket):
         await websocket.close(code=4401, reason="Unauthorized")
@@ -185,11 +160,8 @@ async def websocket_scan(websocket: WebSocket):
     try:
         process = _active_scan.get("process")
         running = process is not None and process.poll() is None
-        await websocket.send_json({
-            "type": "status",
-            "status": "running" if running else _active_scan.get("status", "idle"),
-            "target": _active_scan.get("target"),
-        })
+        await websocket.send_json({"type": "status", "status": "running" if running else _active_scan.get("status", "idle"),
+                                   "target": _active_scan.get("target")})
         while True:
             await websocket.receive_text()
     except Exception:
@@ -200,7 +172,6 @@ async def websocket_scan(websocket: WebSocket):
 
 @app.websocket("/ws/steer")
 async def websocket_steer(websocket: WebSocket):
-    """Authenticated WebSocket endpoint reserved for live scan steering."""
     if not _websocket_auth_check(websocket):
         await websocket.close(code=4401, reason="Unauthorized")
         return
@@ -214,49 +185,35 @@ async def websocket_steer(websocket: WebSocket):
 
 @app.get("/api/findings")
 async def get_findings(request: Request, limit: int = 50):
-    """Return findings from the most recent JSON report."""
     _require_token(request)
     if not 1 <= limit <= 1000:
         raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
-    json_files = sorted(
-        [path for path in REPORTS_DIR.glob("*.json") if path.is_file()],
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    ) if REPORTS_DIR.exists() else []
+    json_files = sorted([p for p in REPORTS_DIR.glob("*.json") if p.is_file()],
+                        key=lambda p: p.stat().st_mtime, reverse=True) if REPORTS_DIR.exists() else []
     if not json_files:
         return {"findings": [], "total": 0, "target": None}
     data = json.loads(json_files[0].read_text(encoding="utf-8"))
-    findings = [_normalize_finding(finding) for finding in data.get("findings", [])]
-    return {
-        "findings": findings[:limit],
-        "total": len(findings),
-        "target": data.get("_meta", {}).get("target"),
-        "report": json_files[0].name,
-    }
+    findings = [_normalize_finding(f) for f in data.get("findings", [])]
+    return {"findings": findings[:limit], "total": len(findings),
+            "target": data.get("_meta", {}).get("target"), "report": json_files[0].name}
 
 
 @app.get("/api/config")
 async def get_config(request: Request):
-    """Return safe platform configuration without secrets."""
     _require_token(request)
     from nexus.foundation.config import config
-    return {
-        "ollama_base_url": getattr(config, "ollama_base_url", "http://localhost:11434/v1"),
-        "ollama_model": getattr(config, "ollama_model", "qwen2.5-coder:7b"),
-        "reports_dir": str(REPORTS_DIR),
-    }
+    return {"ollama_base_url": getattr(config, "ollama_base_url", "http://localhost:11434/v1"),
+            "ollama_model": getattr(config, "ollama_model", "qwen2.5-coder:7b"), "reports_dir": str(REPORTS_DIR)}
 
 
 @app.post("/api/config")
 async def update_config(payload: dict, request: Request):
-    """Reject runtime config writes until a validated persistence layer exists."""
     _require_token(request)
     raise HTTPException(status_code=501, detail="Runtime config persistence is not implemented")
 
 
 @app.post("/api/scan/start")
 async def scan_start(payload: dict, request: Request):
-    """Launch a guarded NEXUS live scan in a background subprocess."""
     _require_token(request)
     target = payload.get("target", "127.0.0.1")
     if not isinstance(target, str) or not target.strip():
@@ -267,20 +224,13 @@ async def scan_start(payload: dict, request: Request):
         LegalGuard.validate(target=target)
     except Exception as exc:
         raise HTTPException(status_code=403, detail=f"Scan blocked by guardrail: {exc}") from exc
-
     process = _active_scan.get("process")
     if process and process.poll() is None:
         return {"status": "already_running", "target": _active_scan["target"]}
-
     _active_scan.update({"process": None, "target": target, "status": "starting"})
     await _broadcast_scan_event({"type": "phase", "target": target, "phase": 0, "message": "Scan starting"})
-    proc = subprocess.Popen(
-        [os.sys.executable, "-m", "nexus", "live", "--target", target],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        env=dict(os.environ),
-    )
+    proc = _subprocess.Popen([os.sys.executable, "-m", "nexus", "live", "--target", target],
+                             stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=dict(os.environ))
     _active_scan.update({"process": proc, "status": "running"})
     await _broadcast_scan_event({"type": "status", "status": "running", "target": target})
 
@@ -299,7 +249,6 @@ async def scan_start(payload: dict, request: Request):
 
 @app.post("/api/scan/stop")
 async def scan_stop(request: Request):
-    """Terminate any running background scan."""
     _require_token(request)
     process = _active_scan.get("process")
     if process and process.poll() is None:
@@ -312,19 +261,14 @@ async def scan_stop(request: Request):
 
 @app.get("/api/scan/status")
 async def scan_status(request: Request):
-    """Return current scan status."""
     _require_token(request)
     process = _active_scan.get("process")
     running = process is not None and process.poll() is None
-    return {
-        "status": "running" if running else _active_scan.get("status", "idle"),
-        "target": _active_scan.get("target"),
-        "pid": process.pid if process and running else None,
-    }
+    return {"status": "running" if running else _active_scan.get("status", "idle"),
+            "target": _active_scan.get("target"), "pid": process.pid if process and running else None}
 
 
 def _open_browser_safe(url: str) -> None:
-    """Open the browser safely; never crash in headless environments."""
     try:
         import webbrowser
         webbrowser.open(url)
@@ -333,7 +277,6 @@ def _open_browser_safe(url: str) -> None:
 
 
 def launch_dashboard(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
-    """Launch the dashboard and optionally open the browser."""
     url = f"http://{host}:{port}"
     if open_browser:
         threading.Timer(1.5, lambda: _open_browser_safe(url)).start()
