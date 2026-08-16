@@ -2,7 +2,7 @@ import sys
 
 from nexus.agents.capabilities import RiskLevel
 from nexus.runtime.process.worker import LocalProcessWorker
-from nexus.runtime.telemetry import TelemetryStore, telemetry_store
+from nexus.runtime.telemetry import ToolExecutionMetric, TelemetryStore, telemetry_store
 from nexus.runtime.workers import WorkerJob, WorkerState
 
 
@@ -42,9 +42,17 @@ def test_worker_emits_timeout_metric():
 
 def test_telemetry_store_is_bounded_and_snapshot_is_immutable():
     store = TelemetryStore(max_items=2)
-    base = dict(mission_id="m", job_id="j", tool_name="t", status="completed", started_at=1.0, finished_at=2.0)
     for index in range(3):
-        store.record(__import__("nexus.runtime.telemetry", fromlist=["ToolExecutionMetric"]).ToolExecutionMetric(job_id=f"j{index}", **{k: v for k, v in base.items() if k != "job_id"}))
+        store.record(
+            ToolExecutionMetric(
+                mission_id="m",
+                job_id=f"j{index}",
+                tool_name="t",
+                status="completed",
+                started_at=1.0,
+                finished_at=2.0,
+            )
+        )
     snapshot = store.snapshot()
     assert [metric.job_id for metric in snapshot] == ["j1", "j2"]
     assert isinstance(snapshot, tuple)
