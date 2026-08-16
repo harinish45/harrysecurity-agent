@@ -1,9 +1,11 @@
 """
 NEXUS-STRIKE Tool Registry
-Central registry for all 500+ security tools across 29 domains.
-Supports registration, lookup, domain filtering, and metadata.
+Central registry for all security tools across domains.
+Supports registration, lookup, domain filtering, metadata, and typed execution profiles.
 """
 from typing import Callable, Dict, Any, List, Optional, Tuple
+
+from nexus.tools.profile import ToolProfile, profile_from_metadata
 
 
 class ToolRegistry:
@@ -12,15 +14,19 @@ class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, Callable] = {}
         self._metadata: Dict[str, dict] = {}
+        self._profiles: Dict[str, ToolProfile] = {}
 
     def register(self, name: str, fn: Callable, metadata: Optional[dict] = None):
-        """Register a tool by domain-qualified name (e.g., 'reconnaissance.subdomain_enum')."""
+        """Register a tool by domain-qualified name."""
         self._tools[name] = fn
-        self._metadata[name] = metadata or {
+        effective = metadata or {
             "name": name,
             "domain": name.split(".")[0] if "." in name else "unknown",
             "status": "stub",
         }
+        profile = profile_from_metadata(name, effective)
+        self._profiles[name] = profile
+        self._metadata[name] = {**effective, "profile": profile}
 
     def get(self, name: str) -> Callable:
         """Get a tool function by name."""
@@ -31,9 +37,19 @@ class ToolRegistry:
             )
         return self._tools[name]
 
+    def get_profile(self, name: str) -> ToolProfile:
+        """Get the validated execution/performance contract for a tool."""
+        if name not in self._profiles:
+            raise KeyError(f"Tool '{name}' has no execution profile")
+        return self._profiles[name]
+
     def list_tools(self) -> Dict[str, dict]:
         """List all registered tools with metadata."""
         return {k: self._metadata.get(k, {}) for k in sorted(self._tools)}
+
+    def list_profiles(self) -> Dict[str, dict[str, object]]:
+        """Return JSON-safe operational profiles for routing/scheduling UIs."""
+        return {k: self._profiles[k].to_dict() for k in sorted(self._profiles)}
 
     def list_by_domain(self, domain: str) -> List[str]:
         """List all tools in a specific domain."""
@@ -74,7 +90,7 @@ def list_tools() -> List[Tuple[str, Callable]]:
 
 
 # =============================================================================
-# Domain grouping helpers (Enhancement Package)
+# Domain grouping helpers
 # =============================================================================
 
 def get_tool_domains() -> list:
@@ -83,7 +99,7 @@ def get_tool_domains() -> list:
 
 
 def get_tools_by_domain() -> dict:
-    """Return tools grouped by domain (dict[domain, list[tool_name]])."""
+    """Return tools grouped by domain."""
     groups: dict = {}
     for name in sorted(tool_registry._tools):
         domain = name.split(".")[0] if "." in name else "unknown"
@@ -93,4 +109,4 @@ def get_tools_by_domain() -> dict:
 
 def get_tool_count_by_domain() -> dict:
     """Return tool count per domain."""
-    return {domain: len(tools) for domain, tools in get_tools_by_domain().items()}
+    return {domain: len(tools) for domain, tools in get_tools_by_domain().items()}
