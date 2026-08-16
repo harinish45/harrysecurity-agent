@@ -12,12 +12,14 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from nexus.foundation.guardrails import InputGuard, LegalGuard, ScopeGuard
+from web.mission_api import router as mission_router
 
 app = FastAPI(title="NEXUS-STRIKE Dashboard")
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 REPORTS_DIR = Path(__file__).parent.parent / "reports"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.include_router(mission_router)
 
 DASHBOARD_TOKEN = os.environ.get("NEXUS_DASHBOARD_TOKEN", "").strip()
 _subprocess = subprocess
