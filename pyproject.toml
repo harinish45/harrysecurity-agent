@@ -83,4 +83,7 @@ addopts = "-ra"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["nexus*"]
+include = ["nexus*", "web*"]
+
+[tool.setuptools.package-data]
+web = ["static/**/*", "templates/**/*"]
