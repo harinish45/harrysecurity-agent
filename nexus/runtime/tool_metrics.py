@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
+from threading import RLock
 from typing import Iterable
 
 
@@ -57,16 +58,20 @@ class ToolMetricsStore:
             raise ValueError("max_records must be positive")
         self.max_records = max_records
         self._records: list[ToolExecutionMetric] = []
+        self._lock = RLock()
 
     def add(self, metric: ToolExecutionMetric) -> ToolExecutionMetric:
         metric.validate()
-        self._records.append(metric)
-        if len(self._records) > self.max_records:
-            del self._records[: len(self._records) - self.max_records]
+        with self._lock:
+            self._records.append(metric)
+            if len(self._records) > self.max_records:
+                del self._records[: len(self._records) - self.max_records]
         return metric
 
     def list(self, mission_id: str | None = None, tool_name: str | None = None) -> tuple[ToolExecutionMetric, ...]:
-        records: Iterable[ToolExecutionMetric] = tuple(self._records)
+        with self._lock:
+            snapshot = tuple(self._records)
+        records: Iterable[ToolExecutionMetric] = snapshot
         if mission_id is not None:
             records = (item for item in records if item.mission_id == mission_id)
         if tool_name is not None:
@@ -74,7 +79,8 @@ class ToolMetricsStore:
         return tuple(records)
 
     def summary(self) -> dict[str, object]:
-        records = tuple(self._records)
+        with self._lock:
+            records = tuple(self._records)
         completed = sum(item.status == "completed" for item in records)
         failed = sum(item.status == "failed" for item in records)
         total_ms = sum(item.execution_ms for item in records)
