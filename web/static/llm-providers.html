@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="NEXUS-STRIKE LLM provider and routing control center">
+  <title>NEXUS-STRIKE | LLM Control Center</title>
+  <style>
+    :root{--bg:#0b1017;--panel:#111923;--panel2:#0d151e;--border:#243142;--text:#e7edf4;--muted:#91a0b2;--accent:#61dafb;--ok:#3ddc97;--warn:#f0b429;--danger:#ff6b6b}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top right,#142335 0,#0b1017 42%);color:var(--text);font-family:Inter,system-ui,sans-serif}
+    .shell{max-width:1380px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:24px}.brand{font-weight:800;letter-spacing:.08em}.eyebrow{font-size:11px;color:var(--accent);letter-spacing:.16em;text-transform:uppercase}.title{font-size:34px;margin:8px 0}.subtitle{color:var(--muted);max-width:800px;line-height:1.6}.actions{display:flex;gap:10px}.btn{border:1px solid var(--border);background:var(--panel);color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer}.btn.primary{background:#16354b;border-color:#2c6687}.btn.danger{border-color:#6f3434}.grid{display:grid;grid-template-columns:2fr 1fr;gap:18px}.panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:16px;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.22)}.panel h2{margin:0 0 5px}.muted{color:var(--muted)}.providers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}.provider{border:1px solid var(--border);border-radius:13px;padding:15px;background:#0d151e}.provider-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.provider-name{font-weight:700}.badge{font-size:10px;text-transform:uppercase;padding:5px 8px;border-radius:999px;border:1px solid var(--border);color:var(--muted)}.badge.on{color:var(--ok);border-color:#285e49}.badge.local{color:var(--accent);border-color:#2a536b}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.meta div{padding:9px;border:1px solid #1e2937;border-radius:8px}.meta b{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:3px}.field{margin-top:12px}.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}.input,.select{width:100%;background:#0a1119;color:var(--text);border:1px solid var(--border);padding:10px;border-radius:9px}.switch{display:flex;justify-content:space-between;align-items:center;margin-top:12px}.toggle{width:44px;height:24px;border-radius:20px;background:#273342;position:relative;cursor:pointer}.toggle:after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#aeb9c8;transition:.18s}.toggle.active{background:#245b58}.toggle.active:after{left:23px;background:#fff}.route{display:grid;grid-template-columns:1fr 1fr;gap:10px}.route-rule{border-top:1px solid var(--border);padding-top:14px;margin-top:14px}.status{margin-top:16px;padding:12px;border-radius:10px;background:#0b131c;border:1px solid var(--border);font-size:13px}.status.ok{border-color:#285e49}.note{font-size:12px;color:var(--muted);line-height:1.55}.footer{margin-top:18px;color:var(--muted);font-size:12px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.hide{display:none}@media(max-width:900px){.grid{grid-template-columns:1fr}.providers{grid-template-columns:1fr}.top{flex-direction:column}.actions{width:100%}.actions .btn{flex:1}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="top">
+    <div>
+      <div class="eyebrow">NEXUS-STRIKE / Intelligence</div>
+      <div class="title">LLM Control Center</div>
+      <div class="subtitle">Configure model profiles, privacy posture, routing order, and fallback behavior. Runtime secrets are never rendered or persisted by this page.</div>
+    </div>
+    <div class="actions">
+      <button class="btn" onclick="location.href='/'">Dashboard</button>
+      <button class="btn primary" onclick="saveProfile()">Save Browser Profile</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Provider Matrix</h2>
+      <div class="muted">Control-plane metadata</div>
+      <div id="providers" class="providers"></div>
+    </section>
+
+    <aside class="panel">
+      <h2>Routing Policy</h2>
+      <div class="muted">Deterministic policy layer</div>
+      <div class="field"><label>Preferred provider</label><select id="preferred" class="select"></select></div>
+      <div class="field"><label>Fallback order</label><input id="fallbacks" class="input" placeholder="ollama,openrouter,custom"></div>
+      <div class="field"><label>Model class</label><select id="modelClass" class="select"><option>reasoning</option><option>coding</option><option>fast</option><option>vision</option><option>local</option></select></div>
+      <div class="switch"><span>Require local execution</span><div id="localToggle" class="toggle" onclick="toggle('localToggle')"></div></div>
+      <div class="switch"><span>Require tool-calling</span><div id="toolToggle" class="toggle active" onclick="toggle('toolToggle')"></div></div>
+      <div class="field"><label>Maximum cost tier</label><select id="costTier" class="select"><option>free</option><option>standard</option><option>premium</option></select></div>
+      <div class="route-rule">
+        <div class="status ok">Policy validation: <strong id="policyStatus">ready</strong></div>
+        <p class="note">This UI profile is advisory. Mission authorization, scope, approval, and execution guardrails remain authoritative on the server.</p>
+      </div>
+    </aside>
+  </div>
+
+  <div class="grid" style="margin-top:18px">
+    <section class="panel">
+      <h2>Operational Profiles</h2>
+      <div class="route">
+        <div class="field"><label>Fast triage model</label><input id="fastModel" class="input" value="local-fast"></div>
+        <div class="field"><label>Deep reasoning model</label><input id="reasoningModel" class="input" value="local-reasoning"></div>
+        <div class="field"><label>Code analysis model</label><input id="codingModel" class="input" value="local-coding"></div>
+        <div class="field"><label>Vision model</label><input id="visionModel" class="input" value="local-vision"></div>
+      </div>
+      <div class="status"><span class="muted">Storage mode:</span> <span class="mono">browser-local profile</span></div>
+    </section>
+
+    <aside class="panel">
+      <h2>Runtime Safety</h2>
+      <p class="note">API keys, bearer tokens, provider secrets, and authorization material must remain in environment variables or an approved secret store. Do not paste secrets into this page.</p>
+      <div class="status"><strong>Server authority</strong><br><span class="muted">Provider availability and actual credentials are determined by the NEXUS runtime.</span></div>
+      <div class="footer">NEXUS-STRIKE — provider-aware, policy-driven AI security orchestration</div>
+    </aside>
+  </div>
+</div>
+<script>
+const PROVIDERS=[
+ {id:'ollama',name:'Ollama',model:'qwen2.5-coder:latest',class:'local',local:true,tools:true,privacy:'private',cost:'free'},
+ {id:'openai',name:'OpenAI',model:'gpt-4-turbo',class:'reasoning',local:false,tools:true,privacy:'standard',cost:'premium'},
+ {id:'anthropic',name:'Anthropic',model:'claude-3-opus',class:'reasoning',local:false,tools:true,privacy:'standard',cost:'premium'},
+ {id:'openrouter',name:'OpenRouter',model:'provider-selected',class:'reasoning',local:false,tools:true,privacy:'standard',cost:'standard'},
+ {id:'azure',name:'Azure OpenAI',model:'gpt-4',class:'reasoning',local:false,tools:true,privacy:'enterprise',cost:'premium'},
+ {id:'groq',name:'Groq',model:'mixtral',class:'fast',local:false,tools:true,privacy:'standard',cost:'standard'},
+ {id:'deepseek',name:'DeepSeek',model:'deepseek-chat',class:'reasoning',local:false,tools:true,privacy:'standard',cost:'standard'},
+ {id:'nvidia',name:'NVIDIA',model:'llama-3.1',class:'fast',local:false,tools:true,privacy:'standard',cost:'standard'},
+ {id:'omniroute',name:'Omniroute',model:'policy-selected',class:'reasoning',local:false,tools:true,privacy:'standard',cost:'standard'},
+ {id:'custom',name:'Custom OpenAI-compatible',model:'custom-model',class:'coding',local:false,tools:true,privacy:'custom',cost:'standard'}
+];
+function toggle(id){document.getElementById(id).classList.toggle('active');renderStatus()}
+function renderStatus(){document.getElementById('policyStatus').textContent='ready';}
+function renderProviders(){
+ const root=document.getElementById('providers');root.innerHTML='';
+ PROVIDERS.forEach(p=>{root.insertAdjacentHTML('beforeend',`<article class="provider"><div class="provider-head"><div class="provider-name">${p.name}</div><div><span class="badge ${p.local?'local':''}">${p.local?'LOCAL':'PROVIDER'}</span> <span class="badge on">Configured via runtime</span></div></div><div class="meta"><div><b>Model</b>${p.model}</div><div><b>Class</b>${p.class}</div><div><b>Privacy</b>${p.privacy}</div><div><b>Cost</b>${p.cost}</div></div><div class="switch"><span>Enabled in policy</span><div class="toggle active" data-provider="${p.id}" onclick="this.classList.toggle('active')"></div></div></article>`)});
+ const preferred=document.getElementById('preferred');preferred.innerHTML=PROVIDERS.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+}
+function saveProfile(){
+ const profile={preferred:document.getElementById('preferred').value,fallbacks:document.getElementById('fallbacks').value.split(',').map(s=>s.trim()).filter(Boolean),modelClass:document.getElementById('modelClass').value,requireLocal:document.getElementById('localToggle').classList.contains('active'),requireTools:document.getElementById('toolToggle').classList.contains('active'),costTier:document.getElementById('costTier').value,profiles:{fast:document.getElementById('fastModel').value,reasoning:document.getElementById('reasoningModel').value,coding:document.getElementById('codingModel').value,vision:document.getElementById('visionModel').value}};
+ localStorage.setItem('nexus-llm-profile',JSON.stringify(profile));
+ alert('Browser profile saved. Server-side credentials and runtime policy were not changed.');
+}
+function loadProfile(){
+ try{const p=JSON.parse(localStorage.getItem('nexus-llm-profile')||'null');if(!p)return;for(const [id,key] of [['preferred','preferred'],['fallbacks','fallbacks']]){if(p[key]!=null)document.getElementById(id).value=Array.isArray(p[key])?p[key].join(','):p[key]}if(p.modelClass)document.getElementById('modelClass').value=p.modelClass;if(p.costTier)document.getElementById('costTier').value=p.costTier;if(p.requireLocal)document.getElementById('localToggle').classList.add('active');if(p.requireTools===false)document.getElementById('toolToggle').classList.remove('active');if(p.profiles){for(const k of ['fast','reasoning','coding','vision'])if(p.profiles[k])document.getElementById(k+'Model').value=p.profiles[k]}}catch(e){console.warn('profile load failed',e)}
+}
+renderProviders();loadProfile();renderStatus();
+</script>
+</body>
+</html>
