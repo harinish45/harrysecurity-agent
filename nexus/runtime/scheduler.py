@@ -12,7 +12,7 @@ from threading import RLock
 from time import monotonic
 from typing import Callable
 
-from nexus.runtime.workers import WorkerJob
+from nexus.runtime.workers import WorkerJob, WorkerResult, WorkerState
 
 
 class JobState(str, Enum):
@@ -112,18 +112,18 @@ class JobScheduler:
             jobs = tuple(item for item in jobs if item.job.mission_id == mission_id)
         return sorted(jobs, key=lambda item: (item.priority, item.enqueued_at, item.job.job_id))
 
-    def dispatch(self, executor: Callable[[WorkerJob], object]) -> ScheduledJob | None:
+    def dispatch(self, executor: Callable[[WorkerJob], WorkerResult]) -> ScheduledJob | None:
         """Claim one job, invoke the executor, and normalize terminal state."""
         scheduled = self.claim()
         if scheduled is None:
             return None
         try:
             result = executor(scheduled.job)
-            if getattr(result, "state", None) is not None and str(getattr(result, "state")) == "WorkerState.COMPLETED":
+            if result.state is WorkerState.COMPLETED:
                 return self.complete(scheduled.job.job_id)
-            if getattr(result, "state", None) is not None and str(getattr(result, "state")) == "WorkerState.CANCELLED":
+            if result.state is WorkerState.CANCELLED:
                 return self.cancel(scheduled.job.job_id)
-            return self.fail(scheduled.job.job_id, error=getattr(result, "error", "worker failed") or "worker failed")
+            return self.fail(scheduled.job.job_id, error=result.error or "worker failed")
         except Exception as exc:
             return self.fail(scheduled.job.job_id, error=str(exc))
 
