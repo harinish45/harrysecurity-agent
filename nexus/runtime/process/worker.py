@@ -37,7 +37,7 @@ class LocalProcessWorker:
         self._publish(job, "worker.started", {"capability": job.capability, "command": command[0]})
         try:
             output = self._run(command, job.timeout_seconds)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             self._publish(job, "worker.failed", {"error": str(exc)})
             return WorkerResult(job.job_id, WorkerState.FAILED, error=str(exc))
 
@@ -58,17 +58,30 @@ class LocalProcessWorker:
         return WorkerResult(job.job_id, WorkerState.COMPLETED)
 
     def _run(self, argv: tuple[str, ...], timeout: int) -> ProcessOutput:
-        completed = subprocess.run(
-            argv,
-            check=False,
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        stdout = completed.stdout.encode("utf-8", "replace")[: self.max_output_bytes].decode("utf-8", "replace")
-        stderr = completed.stderr.encode("utf-8", "replace")[: self.max_output_bytes].decode("utf-8", "replace")
+        try:
+            completed = subprocess.run(
+                argv,
+                check=False,
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = self._bounded_text(exc.stdout)
+            stderr = self._bounded_text(exc.stderr)
+            return ProcessOutput(-1, stdout, stderr, timed_out=True)
+
+        stdout = self._bounded_text(completed.stdout)
+        stderr = self._bounded_text(completed.stderr)
         return ProcessOutput(completed.returncode, stdout, stderr)
+
+    def _bounded_text(self, value: str | bytes | None) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value[: self.max_output_bytes].decode("utf-8", "replace")
+        return value.encode("utf-8", "replace")[: self.max_output_bytes].decode("utf-8", "replace")
 
     @staticmethod
     def _validate_argv(argv: Sequence[str]) -> tuple[str, ...]:
