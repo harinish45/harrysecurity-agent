@@ -28,6 +28,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         python -m pip install -e ".[dev]"
+        mkdir -p reports
 
     - name: Static validation with Ruff
       run: ruff check . --select E9,F63,F7,F82 --output-format=github
@@ -42,19 +43,19 @@ jobs:
       env:
         PYTHONPATH: ${{ github.workspace }}
         NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
-      run: pytest tests/unit --tb=long -vv
+      run: pytest tests/unit --tb=long -vv --junitxml=reports/unit-${{ matrix.python-version }}.xml
 
     - name: Run integration tests
       env:
         PYTHONPATH: ${{ github.workspace }}
         NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
-      run: pytest tests/integration --tb=long -vv
+      run: pytest tests/integration --tb=long -vv --junitxml=reports/integration-${{ matrix.python-version }}.xml
 
     - name: Run complete test suite
       env:
         PYTHONPATH: ${{ github.workspace }}
         NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
-      run: pytest tests/ --tb=long -vv
+      run: pytest tests/ --tb=long -vv --junitxml=reports/all-${{ matrix.python-version }}.xml
 
     - name: Build package
       run: python -m build
