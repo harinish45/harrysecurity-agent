@@ -13,7 +13,9 @@ def test_tool_profile_api_and_page_are_mounted(monkeypatch):
     assert "tools" in payload
     assert "count" in payload
     assert payload["count"] >= 1
+    assert "network.port_scan" in payload["tools"]
 
     page = client.get("/tools/performance")
     assert page.status_code == 200
     assert "Tool Performance Fabric" in page.text
+    assert "max_concurrency" in page.text
