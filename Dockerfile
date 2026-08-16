@@ -1,82 +1,53 @@
-# ============================================================
-# NEXUS-STRIKE — Multi-stage Docker build
-# Stage 1: builder — install dependencies
-# Stage 2: runtime — minimal image with non-root user
-# ============================================================
+# NEXUS-STRIKE production image
+FROM python:3.11-slim AS runtime
 
-# ── Stage 1: Builder ──────────────────────────────────────────
-FROM python:3.10-slim AS builder
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-WORKDIR /build
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libffi-dev \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for layer caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-# Copy the package and install it
-COPY . .
-RUN pip install --no-cache-dir --prefix=/install .
-
-# ── Stage 2: Runtime ──────────────────────────────────────────
-FROM python:3.10-slim AS runtime
-
-LABEL org.opencontainers.image.title="NEXUS-STRIKE" \
-      org.opencontainers.image.description="The Ultimate AI-Powered Cybersecurity Platform" \
-      org.opencontainers.image.version="1.0.0" \
-      org.opencontainers.image.authors="HARINISH" \
-      org.opencontainers.image.licenses="MIT"
-
-# Install runtime dependencies (minimal)
+# Runtime packages required by networking/reporting dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     dnsutils \
     iputils-ping \
     netcat-openbsd \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
 RUN groupadd -r nexus && useradd -r -g nexus -m -d /home/nexus nexus
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /install /usr/local
+# Copy source before installing so pyproject.toml is the single dependency source.
+COPY pyproject.toml README.md ./
+COPY nexus ./nexus
+COPY scripts ./scripts
+COPY web ./web
+COPY docs ./docs
+COPY knowledge ./knowledge
+COPY prompts ./prompts
+COPY engagements ./engagements
+COPY reports ./reports
 
-# Copy application files
-COPY --from=builder /build/nexus /app/nexus
-COPY --from=builder /build/scripts /app/scripts
-COPY --from=builder /build/web /app/web
-COPY --from=builder /build/docs /app/docs
-COPY --from=builder /build/knowledge /app/knowledge
-COPY --from=builder /build/prompts /app/prompts
-COPY --from=builder /build/engagements /app/engagements
-COPY --from=builder /build/reports /app/reports
-COPY --from=builder /build/pyproject.toml /app/
-COPY --from=builder /build/requirements.txt /app/
-COPY --from=builder /build/README.md /app/
-
-# Create writable directories for the non-root user
-RUN mkdir -p /app/reports /app/engagements /app/logs \
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir . \
+    && mkdir -p /app/reports /app/engagements /app/logs \
     && chown -R nexus:nexus /app
 
-# Switch to non-root user
 USER nexus
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8765/ || exit 1
+LABEL org.opencontainers.image.title="NEXUS-STRIKE" \
+      org.opencontainers.image.description="AI-assisted cybersecurity assessment platform" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.authors="HARINISH" \
+      org.opencontainers.image.licenses="MIT"
 
-# Expose dashboard port
 EXPOSE 8765
 
-# Default command
-ENTRYPOINT ["nexus"]
-CMD ["--help"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8765/ || exit 1
+
+# The container is a dashboard service; CLI commands remain available through `docker exec`.
+CMD ["python", "-m", "web.server"]

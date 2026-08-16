@@ -8,8 +8,9 @@ if sys.platform == "win32":
 
 try:
     from nexus.cli import main
-except Exception:
+except (ImportError, AttributeError):
     from nexus.cli import app as main
+
 
 if __name__ == "__main__":
     main()
