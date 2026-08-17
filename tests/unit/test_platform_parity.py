@@ -1,5 +1,5 @@
 from nexus.platform.capabilities import CapabilityState, WorkflowMode, catalogue, feature_parity_matrix
-from nexus.platform.workflows import TaskGraph, TaskState, workflows
+from nexus.platform.workflows import TaskGraph, TaskState, WorkflowTask, workflows
 
 
 def test_capability_catalogue_has_unified_workflow_and_agent_roles():
@@ -15,7 +15,7 @@ def test_feature_parity_matrix_is_deterministic_and_machine_readable():
     assert matrix == feature_parity_matrix()
     assert len(matrix) >= 70
     assert {row["domain"] for row in matrix} >= {
-        "workflow", "orchestration", "intelligence", "reporting", "enterprise"
+        "workflow", "agents", "intelligence", "reporting", "enterprise"
     }
     assert all({"key", "title", "domain", "state", "implemented"}.issubset(row) for row in matrix)
 
@@ -31,9 +31,9 @@ def test_standard_workflow_is_dependency_ordered():
 
 def test_task_graph_rejects_cycles():
     graph = TaskGraph()
-    graph.add(__import__("nexus.platform.workflows", fromlist=["WorkflowTask"]).WorkflowTask("a", "A", "agent.recon"))
-    graph.tasks["a"] = graph.tasks["a"].__class__("a", "A", "agent.recon", depends_on=("b",), state=TaskState.PENDING)
-    graph.tasks["b"] = graph.tasks["a"].__class__("b", "B", "agent.recon", depends_on=("a",), state=TaskState.PENDING)
+    graph.add(WorkflowTask("a", "A", "agent.recon"))
+    graph.tasks["a"] = WorkflowTask("a", "A", "agent.recon", depends_on=("b",), state=TaskState.PENDING)
+    graph.tasks["b"] = WorkflowTask("b", "B", "agent.recon", depends_on=("a",), state=TaskState.PENDING)
     try:
         graph.critical_path()
     except ValueError as exc:
