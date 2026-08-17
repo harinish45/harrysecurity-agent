@@ -34,7 +34,43 @@ jobs:
         run: ruff check . --select E9,F63,F7,F82 --output-format=github
 
       - name: Bandit source scan
-        run: bandit -q -r nexus -x tests
+        shell: bash
+        run: |
+          set +e
+          bandit -r nexus -x tests -f json -o bandit-report.json
+          status=$?
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("bandit-report.json")
+          if path.exists():
+              data = json.loads(path.read_text(encoding="utf-8"))
+              results = data.get("results", [])
+              metrics = data.get("metrics", {})
+              print(f"Bandit findings: {len(results)}")
+              print(f"Files scanned: {len(metrics)}")
+              for item in results:
+                  print(
+                      "::error "
+                      f"file={item.get('filename')},line={item.get('line_number')},"
+                      f"title={item.get('issue_text')} "
+                      f"severity={item.get('issue_severity')} confidence={item.get('issue_confidence')}"
+                  )
+          else:
+              print("::error::Bandit did not produce bandit-report.json")
+          raise SystemExit(0)
+          PY
+          exit "$status"
+
+      - name: Upload Bandit diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Python dependency audit
         run: pip-audit
