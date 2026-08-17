@@ -1,7 +1,8 @@
 """
 NEXUS-STRIKE Tool Registry
 Central registry for all security tools across domains.
-Supports registration, lookup, domain filtering, metadata, and typed execution profiles.
+Supports registration, lookup, domain filtering, metadata, typed execution profiles,
+and contract assurance.
 """
 from typing import Callable, Dict, Any, List, Optional, Tuple
 
@@ -50,6 +51,18 @@ class ToolRegistry:
     def list_profiles(self) -> Dict[str, dict[str, object]]:
         """Return JSON-safe operational profiles for routing/scheduling UIs."""
         return {k: self._profiles[k].to_dict() for k in sorted(self._profiles)}
+
+    def assurance_report(self):
+        """Return a deterministic contract-health report for every registered tool."""
+        from nexus.tools.assurance import ToolAssurance
+
+        checks = ToolAssurance().audit(self._tools, self._profiles)
+        return {
+            "total": len(checks),
+            "healthy": sum(check.healthy for check in checks),
+            "unhealthy": sum(not check.healthy for check in checks),
+            "checks": checks,
+        }
 
     def list_by_domain(self, domain: str) -> List[str]:
         """List all tools in a specific domain."""
