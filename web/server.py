@@ -122,6 +122,43 @@ async def get_tools(request: Request):
     return {"domains": get_tool_domains(), "counts": counts, "total": sum(counts.values())}
 
 
+@app.get("/api/capabilities")
+async def get_capabilities(request: Request):
+    """Return the unified capability parity matrix for the local console."""
+    _require_token(request)
+    from nexus.platform.capabilities import catalogue, feature_parity_matrix
+    return {"coverage": catalogue.coverage(), "matrix": feature_parity_matrix()}
+
+
+@app.get("/api/workflows")
+async def get_workflows(request: Request):
+    """Return declarative workflow/task-graph templates; execution remains guarded."""
+    _require_token(request)
+    from nexus.platform.workflows import workflows
+    return {
+        "workflows": [
+            {
+                "mode": item.mode.value,
+                "title": item.title,
+                "objective": item.objective,
+                "tasks": [
+                    {
+                        "id": task.id,
+                        "title": task.title,
+                        "capability": task.capability,
+                        "depends_on": list(task.depends_on),
+                        "priority": task.priority,
+                        "requires_approval": task.requires_approval,
+                        "state": task.state.value,
+                    }
+                    for task in item.tasks
+                ],
+            }
+            for item in workflows.list()
+        ]
+    }
+
+
 async def _broadcast_scan_event(event: dict):
     stale = []
     for websocket in list(_ws_clients):
