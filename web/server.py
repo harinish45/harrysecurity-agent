@@ -13,7 +13,6 @@ from fastapi.staticfiles import StaticFiles
 
 from nexus.foundation.guardrails import InputGuard, LegalGuard, ScopeGuard
 from nexus.reporting.professional import ReportBranding, render_pdf
-from nexus.runtime.telemetry import telemetry_store
 from web.mission_api import router as mission_router
 
 app = FastAPI(title="NEXUS-STRIKE Dashboard")
@@ -150,20 +149,21 @@ async def get_stats(request: Request):
 @app.get("/api/telemetry/summary")
 async def get_telemetry_summary(request: Request):
     _require_token(request)
+    try:
+        from nexus.runtime.telemetry import telemetry_store
+    except ImportError:
+        return {"records": 0, "completed": 0, "failed": 0, "success_rate": 0.0,
+                "average_execution_ms": 0.0, "evidence": 0, "findings": 0}
     metrics = telemetry_store.snapshot()
     total = len(metrics)
     completed = sum(item.status == "completed" for item in metrics)
     failed = sum(item.status == "failed" for item in metrics)
     average = sum(item.execution_seconds for item in metrics) / total * 1000 if metrics else 0.0
-    return {
-        "records": total,
-        "completed": completed,
-        "failed": failed,
-        "success_rate": completed / total if total else 0.0,
-        "average_execution_ms": round(average, 2),
-        "evidence": sum(item.evidence_count for item in metrics),
-        "findings": sum(item.finding_count for item in metrics),
-    }
+    return {"records": total, "completed": completed, "failed": failed,
+            "success_rate": completed / total if total else 0.0,
+            "average_execution_ms": round(average, 2),
+            "evidence": sum(item.evidence_count for item in metrics),
+            "findings": sum(item.finding_count for item in metrics)}
 
 
 @app.get("/api/tools/profiles")
