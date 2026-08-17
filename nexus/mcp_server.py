@@ -108,11 +108,10 @@ def platform_status() -> dict[str, Any]:
 
 @mcp.tool()
 def list_agents_readonly() -> list[dict[str, Any]]:
-    """List registered agents without starting an agent or mission."""
-    agents = list_agents()
+    """List registered agent names without importing or starting them."""
     return [
-        {"name": getattr(agent, "name", str(agent)), "type": type(agent).__name__}
-        for agent in agents
+        {"name": name, "available": agent_class is not None}
+        for name, agent_class in list_agents()
     ]
 
 
