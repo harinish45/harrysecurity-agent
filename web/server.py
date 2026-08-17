@@ -12,12 +12,15 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from nexus.foundation.guardrails import InputGuard, LegalGuard, ScopeGuard
+from nexus.reporting.professional import ReportBranding, render_pdf
+from web.mission_api import router as mission_router
 
 app = FastAPI(title="NEXUS-STRIKE Dashboard")
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 REPORTS_DIR = Path(__file__).parent.parent / "reports"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.include_router(mission_router)
 
 DASHBOARD_TOKEN = os.environ.get("NEXUS_DASHBOARD_TOKEN", "").strip()
 _subprocess = subprocess
@@ -40,6 +43,15 @@ def _normalize_finding(item):
     return {"title": str(item)[:200], "severity": "info", "description": str(item)}
 
 
+def _latest_report_json() -> Path | None:
+    files = sorted(
+        [p for p in REPORTS_DIR.glob("*.json") if p.is_file()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ) if REPORTS_DIR.exists() else []
+    return files[0] if files else None
+
+
 def _report_path(filename: str) -> Path:
     candidate = (REPORTS_DIR / filename).resolve()
     reports_root = REPORTS_DIR.resolve()
@@ -48,12 +60,47 @@ def _report_path(filename: str) -> Path:
     return candidate
 
 
+def _professional_report_path() -> Path:
+    source = _latest_report_json()
+    if source is None:
+        raise HTTPException(status_code=404, detail="No assessment JSON report is available")
+    output = REPORTS_DIR / "professional-latest.pdf"
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+        branding = ReportBranding(
+            organization_name=os.environ.get("NEXUS_REPORT_ORG", "Security Assessment"),
+            report_title=os.environ.get("NEXUS_REPORT_TITLE", "Security Assessment Report"),
+            classification=os.environ.get("NEXUS_REPORT_CLASSIFICATION", "CONFIDENTIAL"),
+            logo_text=os.environ.get("NEXUS_REPORT_LOGO_TEXT", "NEXUS-STRIKE"),
+            accent=os.environ.get("NEXUS_REPORT_ACCENT", "#2463a6"),
+            footer=os.environ.get("NEXUS_REPORT_FOOTER", "Prepared by NEXUS-STRIKE"),
+        )
+        render_pdf(data, output, branding)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail=f"Professional report generation failed: {exc}") from exc
+    return output
+
+
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     html_path = TEMPLATES_DIR / "index.html"
     if html_path.exists():
         return html_path.read_text(encoding="utf-8")
     return HTMLResponse("<h1>NEXUS-STRIKE Dashboard</h1><p>Templates not found.</p>")
+
+
+@app.get("/console", response_class=HTMLResponse)
+async def professional_console():
+    html_path = STATIC_DIR / "pro-console.html"
+    if html_path.exists():
+        return html_path.read_text(encoding="utf-8")
+    raise HTTPException(status_code=404, detail="Professional console not found")
+
+
+@app.get("/reports/pro")
+async def professional_report(request: Request):
+    _require_token(request)
+    return FileResponse(_professional_report_path(), media_type="application/pdf", filename="NEXUS-STRIKE-Professional-Report.pdf")
 
 
 @app.get("/api/reports")
@@ -99,6 +146,33 @@ async def get_stats(request: Request):
             "findings": normalized}
 
 
+@app.get("/api/telemetry/summary")
+async def get_telemetry_summary(request: Request):
+    _require_token(request)
+    try:
+        from nexus.runtime.telemetry import telemetry_store
+    except ImportError:
+        return {"records": 0, "completed": 0, "failed": 0, "success_rate": 0.0,
+                "average_execution_ms": 0.0, "evidence": 0, "findings": 0}
+    metrics = telemetry_store.snapshot()
+    total = len(metrics)
+    completed = sum(item.status == "completed" for item in metrics)
+    failed = sum(item.status == "failed" for item in metrics)
+    average = sum(item.execution_seconds for item in metrics) / total * 1000 if metrics else 0.0
+    return {"records": total, "completed": completed, "failed": failed,
+            "success_rate": completed / total if total else 0.0,
+            "average_execution_ms": round(average, 2),
+            "evidence": sum(item.evidence_count for item in metrics),
+            "findings": sum(item.finding_count for item in metrics)}
+
+
+@app.get("/api/tools/profiles")
+async def get_tool_profiles(request: Request):
+    _require_token(request)
+    from nexus.tools.registry import tool_registry
+    return {"tools": tool_registry.list_profiles(), "count": tool_registry.count}
+
+
 @app.get("/api/agents")
 async def get_agents(request: Request):
     _require_token(request)
@@ -139,7 +213,6 @@ def _broadcast_from_worker(event: dict):
 
 
 def _websocket_auth_check(websocket: WebSocket, params: dict | None = None) -> bool:
-    """Validate credentials from query parameters or an Authorization header."""
     if not DASHBOARD_TOKEN:
         return True
     params = params or {}
