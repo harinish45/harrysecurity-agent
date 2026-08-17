@@ -10,9 +10,7 @@ from __future__ import annotations
 import importlib.util
 from typing import Any
 
-# MCP Python SDK 2.x renamed FastMCP to MCPServer and moved the module.
-# Keep the import explicit for the current stable SDK line.
-from mcp.server.mcpserver import MCPServer
+from mcp.server import MCPServer
 
 from nexus.agents.agent_registry import get_agent_count, list_agents
 from nexus.foundation.config import config
