@@ -97,7 +97,7 @@ workflows = WorkflowCatalog()
 def _standard_assessment_tasks() -> tuple[WorkflowTask, ...]:
     return (
         WorkflowTask("recon", "Asset discovery", "agent.recon", priority=100),
-        WorkflowTask("surface", "Attack-surface mapping", "planning.target_fingerprinting", depends_on=("recon",), priority=95),
+        WorkflowTask("surface", "Attack-surface mapping", "intelligence.target_fingerprinting", depends_on=("recon",), priority=95),
         WorkflowTask("assessment", "Vulnerability assessment", "agent.validation", depends_on=("surface",), priority=90, requires_approval=True),
         WorkflowTask("correlate", "Evidence correlation", "intelligence.evidence_correlation", depends_on=("assessment",), priority=80),
         WorkflowTask("report", "Professional reporting", "reporting.machine_readable", depends_on=("correlate",), priority=40),
