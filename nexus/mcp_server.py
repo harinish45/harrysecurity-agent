@@ -10,7 +10,9 @@ from __future__ import annotations
 import importlib.util
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+# MCP Python SDK 2.x renamed FastMCP to MCPServer and moved the module.
+# Keep the import explicit for the current stable SDK line.
+from mcp.server.mcpserver import MCPServer
 
 from nexus.agents.agent_registry import get_agent_count, list_agents
 from nexus.foundation.config import config
@@ -18,7 +20,7 @@ from nexus.intelligence.llm.router import LLMRouter
 from nexus.tools.registry import tool_registry
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     "NEXUS-STRIKE",
     instructions=(
         "NEXUS-STRIKE security assessment control plane. This server is read-only: "
