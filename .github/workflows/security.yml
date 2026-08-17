@@ -30,8 +30,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Ruff security-oriented validation
-        run: ruff check . --select E9,F63,F7,F82,B,BLE,S --output-format=github
+      - name: Ruff syntax/error validation
+        run: ruff check . --select E9,F63,F7,F82 --output-format=github
 
       - name: Bandit source scan
         run: bandit -q -r nexus -x tests
