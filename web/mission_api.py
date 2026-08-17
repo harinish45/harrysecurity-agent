@@ -106,8 +106,8 @@ async def replay_events(mission_id: str, request: Request, after_sequence: int =
                 "event_type": event.event_type,
                 "timestamp": event.timestamp,
                 "payload": event.payload,
-                "sequence": event.sequence,
+                "sequence": after_sequence + index + 1,
             }
-            for event in events
+            for index, event in enumerate(events)
         ],
     }
