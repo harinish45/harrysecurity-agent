@@ -2,9 +2,9 @@ from fastapi.testclient import TestClient
 
 
 def test_capability_and_workflow_endpoints_are_guarded(monkeypatch):
-    monkeypatch.delenv("NEXUS_DASHBOARD_TOKEN", raising=False)
     from web.server import app
 
+    monkeypatch.setattr("web.server.DASHBOARD_TOKEN", "")
     client = TestClient(app)
     capabilities = client.get("/api/capabilities")
     workflows = client.get("/api/workflows")
@@ -21,11 +21,9 @@ def test_capability_and_workflow_endpoints_are_guarded(monkeypatch):
 
 
 def test_capability_endpoint_requires_dashboard_token(monkeypatch):
-    monkeypatch.setenv("NEXUS_DASHBOARD_TOKEN", "secret-test-token")
-    import importlib
     import web.server as server
-    importlib.reload(server)
 
+    monkeypatch.setattr(server, "DASHBOARD_TOKEN", "secret-test-token")
     client = TestClient(server.app)
     assert client.get("/api/capabilities").status_code == 401
     assert client.get(
