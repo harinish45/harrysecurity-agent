@@ -17,7 +17,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Information Technology",
     "Intended Audience :: System Administrators",
-    "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -64,6 +63,7 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.8.0",
     "bandit>=1.7.0",
+    "pip-audit>=2.7.0",
     "build>=1.0.0",
     "twine>=5.0.0",
 ]
