@@ -1,4 +1,4 @@
-"""Mission lifecycle, events, and a small durable JSONL mission store.
+"""Mission lifecycle, events, and a small durable JSON mission store.
 
 The store is intentionally dependency-free so the local CLI and dashboard can use
 identical mission semantics. A database-backed repository can implement the same
@@ -60,6 +60,17 @@ class MissionEvent:
     actor: str = "system"
     payload: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def event_type(self) -> str:
+        """Dashboard/API-compatible alias for the canonical event type."""
+        return self.type
+
+    def sequence(self, events: list["MissionEvent"] | None = None) -> int:
+        """Return a one-based event sequence when an event collection is supplied."""
+        if events is None:
+            return 0
+        return events.index(self) + 1
+
     @classmethod
     def create(cls, mission_id: str, event_type: str, *, actor: str = "system", payload: dict[str, Any] | None = None) -> "MissionEvent":
         return cls(
@@ -120,16 +131,13 @@ class Mission:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Mission":
-        events = [MissionEvent(**event) for event in data.pop("events", [])]
-        return cls(events=events, status=MissionStatus(data.pop("status", MissionStatus.CREATED.value)), **data)
+        raw = dict(data)
+        events = [MissionEvent(**event) for event in raw.pop("events", [])]
+        return cls(events=events, status=MissionStatus(raw.pop("status", MissionStatus.CREATED.value)), **raw)
 
 
 class MissionStore:
-    """Atomic JSONL-backed mission store for single-host deployments.
-
-    It is deliberately small and deterministic. Production deployments can replace
-    this class with PostgreSQL/Redis without changing Mission or MissionEvent APIs.
-    """
+    """Atomic JSON-backed mission store for single-host deployments."""
 
     def __init__(self, root: str | Path = "engagements/missions") -> None:
         self.root = Path(root)
