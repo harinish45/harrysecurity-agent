@@ -11,6 +11,7 @@ import ssl
 from typing import Any
 from nexus.foundation.schema import Finding, STATUS_COMPLETED, STATUS_NO_FINDINGS, STATUS_FAILED, tool_result
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 WAF_SIGNATURES = {
     "Cloudflare": ["cf-ray", "cloudflare-nginx", "__cfduid"],
@@ -34,9 +35,7 @@ def run(target: str, **kwargs: Any) -> dict:
     
     try:
         url = target if "://" in target else f"http://{target}"
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(target, allow_insecure=True)
         
         # 1. Header analysis
         req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/0.2.0 (WAF Detector)"})

@@ -19,13 +19,23 @@ class PdfExport:
     3. ``wkhtmltopdf`` (CLI tool, legacy)
     """
 
-    def export(self, data: list[Any], output: str | Path, title: str = "NEXUS-STRIKE Security Assessment Report") -> Path:
+    def export(
+        self,
+        data: list[Any],
+        output: str | Path,
+        title: str = "NEXUS-STRIKE Security Assessment Report",
+        redact: bool = True,
+        include_visualizations: bool = True,
+    ) -> Path:
         path = Path(output)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Render HTML first
+        # Render HTML first — redaction and visualizations are handled once,
+        # here, by HtmlExport; PdfExport just rasterizes its output.
         html_path = path.with_suffix(".html")
-        HtmlExport().export(data, html_path, title=title)
+        HtmlExport().export(
+            data, html_path, title=title, redact=redact, include_visualizations=include_visualizations
+        )
         html_content = html_path.read_text(encoding="utf-8")
 
         # Try backends in order

@@ -21,6 +21,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 # Common S3 bucket naming patterns for company-name variations
 DEFAULT_PATTERNS = [
@@ -57,9 +58,7 @@ def _s3_request(bucket: str, object_path: str = "", timeout: int = 10) -> dict:
     """Perform an anonymous HTTP request against an S3 bucket."""
     # Try HTTPS first (default for S3), then HTTP as fallback
     url = f"https://{bucket}.s3.amazonaws.com/{object_path}"
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(url, allow_insecure=True)
     req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/1.0.0 (S3 Auditor)"})
     try:
         resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)

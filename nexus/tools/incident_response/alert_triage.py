@@ -18,7 +18,7 @@ def run(target: str, **kwargs) -> dict:
                 data = f.read()
             findings.append(f"File: {target}")
             findings.append(f"Size: {len(data)} bytes")
-            findings.append(f"MD5: {hashlib.md5(data).hexdigest()}")
+            findings.append(f"MD5: {hashlib.md5(data, usedforsecurity=False).hexdigest()}")
             findings.append(f"SHA256: {hashlib.sha256(data).hexdigest()}")
             # Check for suspicious patterns
             suspicious = [b"malware", b"backdoor", b"trojan", b"keylog", b"ransom", b"exploit"]

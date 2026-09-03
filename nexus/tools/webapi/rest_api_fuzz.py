@@ -10,6 +10,7 @@ import ssl
 from typing import Any
 from nexus.foundation.schema import Finding, STATUS_COMPLETED, STATUS_NO_FINDINGS, STATUS_FAILED, tool_result
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE"]
 CONTENT_TYPES = ["application/json", "application/xml", "application/x-www-form-urlencoded", "multipart/form-data"]
@@ -26,9 +27,7 @@ def run(target: str, **kwargs: Any) -> dict:
     
     try:
         url = target if "://" in target else f"http://{target}"
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(target, allow_insecure=True)
         
         # Fuzz HTTP methods
         for method in HTTP_METHODS:

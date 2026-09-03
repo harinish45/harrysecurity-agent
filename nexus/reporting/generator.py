@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from typing import Any, Iterable
 
-from nexus.foundation.schema import Finding, normalize_findings
+from nexus.foundation.schema import Finding, normalize_findings, redact_findings
 
 
 class ReportGenerator:
@@ -22,8 +22,11 @@ class ReportGenerator:
         target: str = "",
         mission_id: str = "assessment",
         engagement: dict[str, Any] | None = None,
+        redact: bool = True,
     ) -> str:
         normalised = self.normalize_findings(findings)
+        if redact:
+            normalised = redact_findings(normalised)
         counts = Counter(item["severity"] for item in normalised)
         engagement = engagement or {}
         created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

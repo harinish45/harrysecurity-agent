@@ -31,6 +31,7 @@ import urllib.parse
 import concurrent.futures
 from datetime import datetime
 from typing import Any
+from nexus.foundation.ssl_config import get_ssl_context
 
 # ---------------------------------------------------------------------------
 # Local imports
@@ -130,9 +131,7 @@ def _check_tls(host: str, port: int, timeout: float) -> dict:
     if port not in (443, 8443, 993, 995, 465, 636, 587):
         return {}
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(host, allow_insecure=True)
         with socket.create_connection((host, port), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as tls_sock:
                 cert = tls_sock.getpeercert(binary_form=True)
@@ -155,9 +154,7 @@ def _http_request(url: str, timeout: int = 10, method: str = "GET", data: bytes 
         url = f"http://{url}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/1.0"}, method=method, data=data)
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(url, allow_insecure=True)
         t0 = time.time()
         resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
         elapsed = round(time.time() - t0, 3)
@@ -339,9 +336,7 @@ def phase7_ssl_inspect(target: str, open_ports: list[dict]) -> list[str]:
     ssl_ports = [p["port"] for p in open_ports if p["port"] in (443, 8443, 465, 993, 995)]
     for port in ssl_ports[:3]:
         try:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            ctx = get_ssl_context(target, allow_insecure=True)
             with socket.create_connection((target, port), timeout=3) as raw:
                 with ctx.wrap_socket(raw, server_hostname=target) as s:
                     cert = s.getpeercert()

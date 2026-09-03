@@ -4,6 +4,7 @@ NEXUS-STRIKE — automotive tool: Automotive Firmware Analysis
 Domain: automotive
 """
 from nexus.tools.registry import tool_registry
+from nexus.tools.sandbox import run_subprocess
 
 
 def run(target: str, **kwargs) -> dict:
@@ -11,17 +12,16 @@ def run(target: str, **kwargs) -> dict:
     findings = []
     try:
         import os
-        import subprocess
         # Check for CAN bus interfaces
         try:
-            result = subprocess.run(["ls", "/dev/tty*"], capture_output=True, text=True, timeout=5)
+            result = run_subprocess(["ls", "/dev/tty*"], timeout=5)
             findings.append(f"Serial devices: {result.stdout[:200]}")
         except:
             pass
         # Check for CAN tools
         for tool in ["can-utils", "socketcan", "cantools"]:
             try:
-                result = subprocess.run(["which", tool], capture_output=True, text=True, timeout=2)
+                result = run_subprocess(["which", tool], timeout=2)
                 if result.returncode == 0:
                     findings.append(f"{tool}: available")
                 else:

@@ -11,7 +11,12 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
+from nexus.foundation.config import config
+from nexus.foundation.paths import PathTraversalError, safe_join
+from web.middleware import install_middleware, require_same_origin_signal
+
 app = FastAPI(title="NEXUS-STRIKE Dashboard")
+install_middleware(app)
 
 # Mount static files
 STATIC_DIR = Path(__file__).parent / "static"
@@ -20,9 +25,21 @@ REPORTS_DIR = Path(__file__).parent.parent / "reports"
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# ── Dashboard token auth (optional) ───────────────────────────────────────────
-# Set NEXUS_DASHBOARD_TOKEN to require Authorization: Bearer <token> on /api/*
+# ── Dashboard token auth ───────────────────────────────────────────────────
+# Set NEXUS_DASHBOARD_TOKEN to require Authorization: Bearer <token> on /api/*.
+# In production (NEXUS_ENV=production) a token is REQUIRED — the server
+# refuses to start without one rather than silently running the whole API
+# open to anyone who can reach the port. In development it stays optional
+# so `nexus dashboard` keeps working out of the box for local use.
 DASHBOARD_TOKEN = os.environ.get("NEXUS_DASHBOARD_TOKEN", "").strip()
+
+if config.is_production and not DASHBOARD_TOKEN:
+    raise RuntimeError(
+        "NEXUS_ENV=production but NEXUS_DASHBOARD_TOKEN is not set. "
+        "Refusing to start an unauthenticated dashboard in production — "
+        "set NEXUS_DASHBOARD_TOKEN (see .env.example) or run with "
+        "NEXUS_ENV=development for local-only use."
+    )
 
 
 def _require_token(request: Request):
@@ -76,10 +93,15 @@ async def get_reports(request: Request):
 async def get_report(filename: str, request: Request):
     """Serve a specific report file."""
     _require_token(request)
-    file_path = REPORTS_DIR / filename
+    try:
+        file_path = safe_join(REPORTS_DIR, filename)
+    except PathTraversalError:
+        # Same response as "not found" — don't distinguish a traversal
+        # attempt from a typo'd filename for an unauthenticated prober.
+        raise HTTPException(status_code=404, detail="Report not found")
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Report not found")
-    
+
     if filename.endswith(".pdf"):
         return FileResponse(file_path, media_type="application/pdf")
     elif filename.endswith(".json"):
@@ -223,13 +245,21 @@ async def websocket_scan(websocket: WebSocket):
 
 @app.websocket("/ws/steer")
 async def websocket_steer(websocket: WebSocket):
-    """WebSocket endpoint for live scan steering."""
+    """WebSocket endpoint for live scan steering.
+
+    NOTE: this is not yet wired to the scan engine — it acknowledges
+    messages but does not act on them. Kept minimal and clearly labeled
+    rather than removed, since the dashboard JS references it; do not
+    build UI features assuming it does anything beyond echo back an ack.
+    """
+    if not _websocket_auth_check(websocket, dict(websocket.query_params)):
+        await websocket.close(code=4401, reason="Unauthorized")
+        return
     await websocket.accept()
     try:
         while True:
             data = await websocket.receive_text()
-            # Echo back acknowledgment (real implementation would route to scan engine)
-            await websocket.send_text(f"Acknowledged: {data}")
+            await websocket.send_text(f"Acknowledged (not yet actioned): {data}")
     except Exception:
         pass
 
@@ -281,15 +311,47 @@ async def get_config(request: Request):
 async def update_config(payload: dict, request: Request):
     """Placeholder for future config write support."""
     _require_token(request)
+    require_same_origin_signal(request)
     return {"status": "accepted", "note": "Runtime config changes not yet persisted"}
+
+
+# Minimal environment for the spawned `nexus live` subprocess — NOT a blind
+# copy of the dashboard server's own os.environ, which could otherwise hand
+# the child process every LLM API key, DB credential, etc. the parent has
+# loaded, whether that scan needs them or not (CWE-200-adjacent exposure).
+_SCAN_ENV_ALLOWLIST = {
+    "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "TEMP", "TMP", "HOME", "USERPROFILE",
+    "LANG", "LC_ALL", "TZ", "NEXUS_ENV", "NEXUS_LOG_LEVEL", "NEXUS_LEGAL_ACK",
+    "NEXUS_ALLOWED_TARGETS", "NEXUS_MASTER_KEY", "NEXUS_VAULT_DIR",
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "LLM_PROVIDER",
+}
 
 
 @app.post("/api/scan/start")
 async def scan_start(payload: dict, request: Request):
     """Launch nexus live in a background subprocess for the given target."""
     _require_token(request)
+    require_same_origin_signal(request)
     global _active_scan
     target = payload.get("target", "127.0.0.1")
+
+    if not os.environ.get("NEXUS_LEGAL_ACK"):
+        # Used to be auto-injected here on every scan, which defeats its
+        # purpose as an explicit authorization gate — an operator must now
+        # actually set it (see .env.example) before the dashboard can scan.
+        raise HTTPException(
+            status_code=403,
+            detail="NEXUS_LEGAL_ACK is not set. Set it in the server's environment to confirm "
+                   "you have written authorization to scan targets before starting a scan.",
+        )
+
+    try:
+        from nexus.foundation.guardrails import InputGuard, ScopeGuard
+
+        InputGuard.validate(target, context={"source": "dashboard.scan_start"})
+        ScopeGuard.validate(target)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Target rejected: {exc}")
 
     if _active_scan["process"] and _active_scan["process"].poll() is None:
         return {"status": "already_running", "target": _active_scan["target"]}
@@ -301,12 +363,13 @@ async def scan_start(payload: dict, request: Request):
     await _broadcast_scan_event({"type": "phase", "target": target, "phase": 0, "message": "Scan starting…"})
 
     cmd = [_sys.executable, "-m", "nexus", "live", "--target", target]
+    scan_env = {k: v for k, v in os.environ.items() if k in _SCAN_ENV_ALLOWLIST}
     proc = _subprocess.Popen(
         cmd,
         stdout=_subprocess.PIPE,
         stderr=_subprocess.STDOUT,
         text=True,
-        env={**__import__("os").environ, "NEXUS_LEGAL_ACK": "I_HAVE_WRITTEN_AUTHORIZATION"},
+        env=scan_env,
     )
     _active_scan = {"process": proc, "target": target, "status": "running"}
     await _broadcast_scan_event({"type": "status", "status": "running", "target": target})
@@ -338,6 +401,7 @@ async def scan_start(payload: dict, request: Request):
 async def scan_stop(request: Request):
     """Terminate any running background scan."""
     _require_token(request)
+    require_same_origin_signal(request)
     global _active_scan
     proc = _active_scan.get("process")
     if proc and proc.poll() is None:

@@ -64,6 +64,15 @@ try:
         nexus_max_concurrent_tools: int = 5
         nexus_tool_timeout: int = 300
 
+        # === ENVIRONMENT / HARDENING ===
+        # "development" (default) keeps today's permissive local-dev behavior
+        # (dashboard usable with no token, insecure TLS allowed for private
+        # targets). "production" is a hard switch: web/server.py refuses to
+        # start with no dashboard token configured, etc. Every place that
+        # used to make an ad hoc "is this safe to relax" decision should key
+        # off `config.is_production` instead of inventing its own env check.
+        nexus_env: str = "development"
+
         # === GUARDRAILS ===
         nexus_allowed_targets: str = "localhost,127.0.0.1,::1"
         nexus_legal_ack: str = ""
@@ -76,6 +85,10 @@ try:
         # === DATABASE ===
         postgres_dsn: str = "postgresql://nexus:nexus@localhost:5432/nexus"
         redis_dsn: str = "redis://localhost:6379/0"
+
+        @property
+        def is_production(self) -> bool:
+            return self.nexus_env.strip().lower() == "production"
 
 except ImportError:
     class NexusConfig:
@@ -119,6 +132,7 @@ except ImportError:
             self.nexus_auto_approve = os.getenv("NEXUS_AUTO_APPROVE", "false").lower() in ("1","true","yes")
             self.nexus_max_concurrent_tools = int(os.getenv("NEXUS_MAX_CONCURRENT_TOOLS", "5"))
             self.nexus_tool_timeout = int(os.getenv("NEXUS_TOOL_TIMEOUT", "300"))
+            self.nexus_env = os.getenv("NEXUS_ENV", "development")
             self.nexus_allowed_targets = os.getenv("NEXUS_ALLOWED_TARGETS", "localhost,127.0.0.1,::1")
             self.nexus_legal_ack = os.getenv("NEXUS_LEGAL_ACK", "")
             self.nexus_rate_limit_calls = int(os.getenv("NEXUS_RATE_LIMIT_CALLS", "100"))
@@ -126,5 +140,9 @@ except ImportError:
             self.nexus_mcp_port = int(os.getenv("NEXUS_MCP_PORT", "8888"))
             self.postgres_dsn = os.getenv("POSTGRES_DSN", "postgresql://nexus:nexus@localhost:5432/nexus")
             self.redis_dsn = os.getenv("REDIS_DSN", "redis://localhost:6379/0")
+
+        @property
+        def is_production(self) -> bool:
+            return self.nexus_env.strip().lower() == "production"
 
 config = NexusConfig()

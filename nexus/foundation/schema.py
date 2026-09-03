@@ -4,6 +4,7 @@ Every tool, report, and export MUST use this schema and these status values.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -157,4 +158,83 @@ def normalize_findings(
                 tool_version=tool_version,
                 affected_asset=affected_asset,
             ).to_dict())
+    return out
+
+
+# ── Redaction ─────────────────────────────────────────────────────────────
+# Finding evidence (and, occasionally, raw tool output) can end up carrying
+# live secrets scraped straight off the target — an API key in a response
+# body, a bearer token in a captured header, a private key dumped by a
+# misconfigured service. Reports and exports should never reproduce those
+# verbatim. ``redact_findings()`` strips secret-shaped text out of
+# ``evidence``/``raw`` while leaving the rest of the finding untouched.
+
+_AWS_ACCESS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
+_PEM_PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN[^-]*PRIVATE KEY-----.*?-----END[^-]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+_BEARER_TOKEN_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9\-._~+/]+=*")
+_KV_SECRET_RE = re.compile(
+    r"(?i)\b(password|passwd|secret|token|api[_-]?key|credential)\s*[:=]\s*([^\s,;]+)"
+)
+
+DEFAULT_SECRET_PATTERNS = (
+    _PEM_PRIVATE_KEY_RE,
+    _AWS_ACCESS_KEY_RE,
+    _BEARER_TOKEN_RE,
+    _KV_SECRET_RE,
+)
+
+
+def _redact_text(value: str, extra_patterns: list) -> str:
+    text = _PEM_PRIVATE_KEY_RE.sub("[REDACTED]", value)
+    text = _AWS_ACCESS_KEY_RE.sub("[REDACTED]", text)
+    text = _BEARER_TOKEN_RE.sub(lambda m: f"{m.group(1)}[REDACTED]", text)
+    text = _KV_SECRET_RE.sub(lambda m: f"{m.group(1)}=[REDACTED]", text)
+    for pattern in extra_patterns:
+        text = pattern.sub("[REDACTED]", text)
+    return text
+
+
+def _redact_value(value: Any, extra_patterns: list) -> Any:
+    if isinstance(value, str):
+        return _redact_text(value, extra_patterns)
+    if isinstance(value, dict):
+        return {k: _redact_value(v, extra_patterns) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(v, extra_patterns) for v in value]
+    return value
+
+
+def redact_findings(findings: list[dict], *, patterns: Optional[list] = None) -> list[dict]:
+    """Return a new list of finding dicts with secret-shaped text stripped
+    out of the ``evidence`` field (and ``raw``, when it is a ``dict`` or
+    ``str``). Every other field — title, severity, remediation, references,
+    etc. — is copied through unchanged.
+
+    Built-in redaction rules (always applied):
+      - AWS access keys (``AKIA[0-9A-Z]{16}``)
+      - PEM private key blocks
+      - Bearer tokens (``Bearer <token>``)
+      - ``password``/``passwd``/``secret``/``token``/``api_key``/``credential``
+        ``key=value`` or ``key: value`` pairs (value only is redacted, the
+        key name is preserved as ``key=[REDACTED]``)
+
+    ``patterns`` — optional extra ``re.Pattern`` objects. Each one's full
+    match is replaced with ``[REDACTED]`` in addition to (not instead of)
+    the built-in rules above, letting callers extend the default list with
+    project- or environment-specific secret shapes.
+    """
+    extra_patterns = list(patterns) if patterns else []
+    out: list[dict[str, Any]] = []
+    for item in findings:
+        new_item = dict(item)
+        evidence = new_item.get("evidence")
+        if isinstance(evidence, str):
+            new_item["evidence"] = _redact_text(evidence, extra_patterns)
+        raw = new_item.get("raw")
+        if isinstance(raw, (dict, str)):
+            new_item["raw"] = _redact_value(raw, extra_patterns)
+        out.append(new_item)
     return out

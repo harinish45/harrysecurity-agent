@@ -18,6 +18,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 # Known-vulnerable service takeover fingerprints.
 # Each tuple: (service_name, cname_suffix_parts, signature_check)
@@ -136,9 +137,7 @@ def _check_takeover_signature(service_sig: dict, cname: str, hostname: str, time
     import urllib.request
     import ssl
 
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(hostname, allow_insecure=True)
 
     for scheme in ("https", "http"):
         url = f"{scheme}://{hostname}/"

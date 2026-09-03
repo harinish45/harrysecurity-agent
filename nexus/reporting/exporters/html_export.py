@@ -1,11 +1,14 @@
 """Branded HTML export — uses the canonical Finding schema."""
 from __future__ import annotations
 
+import logging
 from html import escape
 from pathlib import Path
 from typing import Any
 
-from nexus.foundation.schema import normalize_findings
+from nexus.foundation.schema import normalize_findings, redact_findings
+
+logger = logging.getLogger("nexus.reporting")
 
 
 class HtmlExport:
@@ -16,10 +19,20 @@ class HtmlExport:
         "evidence", "remediation", "references", "timestamp", "tool",
     ]
 
-    def export(self, data: list[Any], output: str | Path, title: str = "NEXUS-STRIKE Security Assessment Report") -> Path:
+    def export(
+        self,
+        data: list[Any],
+        output: str | Path,
+        title: str = "NEXUS-STRIKE Security Assessment Report",
+        redact: bool = True,
+        include_visualizations: bool = True,
+    ) -> Path:
         findings = normalize_findings(data)
+        if redact:
+            findings = redact_findings(findings)
         rows = self._build_rows(findings)
         summary = self._build_summary(findings)
+        visualizations = self._build_visualizations(findings) if include_visualizations else ""
         document = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -38,6 +51,10 @@ class HtmlExport:
   .card .label {{ font-size:.8rem; color:#5e6c84; text-transform:uppercase; letter-spacing:.5px }}
   .critical .count {{ color:#b42318 }} .high .count {{ color:#b54708 }}
   .medium .count {{ color:#dc6803 }} .low .count {{ color:#175cd3 }} .info .count {{ color:#5e6c84 }}
+  .visualizations {{ display:flex; flex-direction:column; gap:1.25rem; margin-bottom:2rem }}
+  .viz-block {{ background:#0a0d14; border-radius:8px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,.08) }}
+  .viz-block h2 {{ color:#e2e8f0; font-size:.85rem; text-transform:uppercase; letter-spacing:.5px; margin-bottom:.75rem }}
+  .viz-block svg {{ width:100%; height:auto; display:block }}
   table {{ width:100%; border-collapse:separate; border-spacing:0; background:#fff; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.08) }}
   th,td {{ padding:.75rem 1rem; text-align:left; vertical-align:top; border-bottom:1px solid #eef2f8 }}
   th {{ background:#eef2f8; font-weight:600; font-size:.8rem; text-transform:uppercase; letter-spacing:.5px; color:#5e6c84 }}
@@ -61,6 +78,8 @@ class HtmlExport:
 
   {summary}
 
+  {visualizations}
+
   <table>
     <thead><tr>
       <th>ID</th><th>Severity</th><th>Title</th><th>Asset</th><th>Evidence</th><th>Remediation</th>
@@ -76,6 +95,29 @@ class HtmlExport:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(document, encoding="utf-8")
         return path
+
+    def _build_visualizations(self, findings: list[dict]) -> str:
+        from nexus.reporting.visualizations.attack_graph_viz import AttackGraphViz
+        from nexus.reporting.visualizations.risk_heatmap import RiskHeatmap
+        from nexus.reporting.visualizations.timeline_viz import TimelineViz
+
+        blocks = []
+        for label, viz in (
+            ("Attack Graph", AttackGraphViz()),
+            ("Risk Heatmap", RiskHeatmap()),
+            ("Finding Timeline", TimelineViz()),
+        ):
+            try:
+                svg = viz.render(findings)
+            except Exception:
+                logger.warning("visualization %r failed to render; skipping", label, exc_info=True)
+                continue
+            if svg:
+                blocks.append(f'<div class="viz-block"><h2>{escape(label)}</h2>{svg}</div>')
+
+        if not blocks:
+            return ""
+        return f'<section class="visualizations">{"".join(blocks)}</section>'
 
     def _build_summary(self, findings: list[dict]) -> str:
         from collections import Counter

@@ -608,6 +608,70 @@ def view(
         raise typer.Exit(1)
 
 
+auth_app = typer.Typer(help="Manage dashboard/API user accounts (nexus/foundation/auth.py).")
+app.add_typer(auth_app, name="auth")
+
+
+@auth_app.command("create-admin")
+def auth_create_admin(
+    username: str = typer.Option(..., "--username", "-u", help="Admin username"),
+    password: str = typer.Option(
+        ..., "--password", "-p", prompt=True, hide_input=True, confirmation_prompt=True,
+        help="Admin password (min 12 characters). Omit to be prompted securely instead of passing it on the command line.",
+    ),
+):
+    """👤 Bootstrap the first admin account. There is no default account — this replaces it."""
+    from nexus.foundation.auth import AuthError, AuthManager, Role
+
+    try:
+        user = AuthManager().register_user(username, password, Role.ADMIN)
+    except AuthError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1)
+    console.print(f"[green]Created admin user '{user.username}' (id={user.user_id}).[/]")
+
+
+@auth_app.command("create-user")
+def auth_create_user(
+    username: str = typer.Option(..., "--username", "-u"),
+    role: str = typer.Option("viewer", "--role", "-r", help="One of: admin, operator, analyst, viewer"),
+    password: str = typer.Option(..., "--password", "-p", prompt=True, hide_input=True, confirmation_prompt=True),
+):
+    """👤 Create a user account with a given role."""
+    from nexus.foundation.auth import AuthError, AuthManager, Role
+
+    try:
+        role_enum = Role(role.lower())
+    except ValueError:
+        console.print(f"[red]Unknown role '{role}'. Choose one of: {', '.join(r.value for r in Role)}[/]")
+        raise typer.Exit(1)
+    try:
+        user = AuthManager().register_user(username, password, role_enum)
+    except AuthError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1)
+    console.print(f"[green]Created user '{user.username}' with role '{role_enum.value}'.[/]")
+
+
+@auth_app.command("list-users")
+def auth_list_users():
+    """👥 List configured user accounts (no secrets shown)."""
+    from nexus.foundation.auth import AuthManager
+
+    users = AuthManager()._load_users()
+    if not users:
+        console.print("[dim]No users configured yet. Run `nexus auth create-admin` first.[/]")
+        return
+    table = Table(title="NEXUS-STRIKE Users", box=box.ROUNDED)
+    table.add_column("Username")
+    table.add_column("Role")
+    table.add_column("Active")
+    table.add_column("Created")
+    for raw in users.values():
+        table.add_row(raw["username"], raw["role"], str(raw.get("is_active", True)), raw.get("created_at", ""))
+    console.print(table)
+
+
 def main():
     app()
 

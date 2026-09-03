@@ -22,6 +22,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 ERROR_PAYLOADS = {
     "mysql": ["'", '"', "1' AND 1=1--", "1' AND 1=2--", "1' OR '1'='1", "1' UNION SELECT 1--", "1' UNION SELECT 1,2,3--"],
@@ -79,9 +80,7 @@ def _http_request(url: str, timeout: int = 10, method: str = "GET", data: bytes 
             method=method,
             data=data,
         )
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(url, allow_insecure=True)
         t0 = time.time()
         resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
         elapsed = round(time.time() - t0, 3)

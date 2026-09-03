@@ -20,6 +20,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 # DSRC / 802.11p port commonly used by V2X infrastructure
@@ -68,9 +69,7 @@ def _check_certificate_validation(target: str, timeout: int = 5) -> list[Finding
         import urllib.request
 
         # Try connecting without verifying cert (should be rejected by a hardened endpoint)
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(target, allow_insecure=True)
 
         url = f"https://{target}/"
         try:

@@ -11,6 +11,55 @@ let scanPolling = null;
 let allFindings = [];
 let scanSocket = null;
 
+// ── Authenticated fetch ──────────────────────────────────────────
+// The server has always supported an optional NEXUS_DASHBOARD_TOKEN
+// (Authorization: Bearer <token>), but nothing in this file ever sent
+// that header — meaning a configured token silently broke the whole UI.
+// apiFetch() fixes that: it attaches a stored token (if any) and the
+// same-origin signal header the server now requires on state-changing
+// requests, and prompts once for a token on a 401 rather than failing
+// silently forever.
+const _rawFetch = window.fetch.bind(window);
+const TOKEN_STORAGE_KEY = 'nexus-dashboard-token';
+
+function getStoredToken() {
+    try {
+        return localStorage.getItem(TOKEN_STORAGE_KEY) || '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function setStoredToken(token) {
+    try {
+        if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        else localStorage.removeItem(TOKEN_STORAGE_KEY);
+    } catch (e) { /* private browsing / storage blocked — token just won't persist */ }
+}
+
+async function apiFetch(url, options = {}, _retried = false) {
+    const headers = new Headers(options.headers || {});
+    const token = getStoredToken();
+    if (token && !headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+    const method = (options.method || 'GET').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+        headers.set('X-Requested-With', 'NEXUS-Dashboard');
+    }
+
+    const response = await _rawFetch(url, { ...options, headers });
+
+    if (response.status === 401 && !_retried) {
+        const entered = window.prompt('Dashboard token required. Enter NEXUS_DASHBOARD_TOKEN:');
+        if (entered) {
+            setStoredToken(entered.trim());
+            return apiFetch(url, options, true);
+        }
+    }
+    return response;
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
@@ -183,9 +232,9 @@ async function onPageLoad(page) {
 async function loadStats() {
     try {
         const [statsRes, agentsRes, toolsRes] = await Promise.all([
-            fetch('/api/stats'),
-            fetch('/api/agents'),
-            fetch('/api/tools'),
+            apiFetch('/api/stats'),
+            apiFetch('/api/agents'),
+            apiFetch('/api/tools'),
         ]);
         const stats  = await statsRes.json();
         const agents = await agentsRes.json();
@@ -251,7 +300,7 @@ function initSeverityChart(counts) {
 // ── Reports ────────────────────────────────────────────────────
 async function loadReports() {
     try {
-        const res  = await fetch('/api/reports');
+        const res  = await apiFetch('/api/reports');
         const data = await res.json();
         const tbody = document.getElementById('reports-tbody');
         if (!tbody) return;
@@ -283,7 +332,7 @@ async function loadReportsGrid() {
     grid.innerHTML = '<div class="loading-cell">Loading reports…</div>';
 
     try {
-        const res  = await fetch('/api/reports');
+        const res  = await apiFetch('/api/reports');
         const data = await res.json();
 
         if (!data.reports || data.reports.length === 0) {
@@ -375,7 +424,7 @@ async function loadAgentTiers() {
     const container = document.getElementById('tier-cards');
     if (!container) return;
     try {
-        const res  = await fetch('/api/agents');
+        const res  = await apiFetch('/api/agents');
         const data = await res.json();
         if (!data.by_tier) return;
         container.innerHTML = Object.entries(data.by_tier).map(([tier, agents]) => `
@@ -391,7 +440,7 @@ async function loadIssues() {
     const list = document.getElementById('issues-list');
     if (!list) return;
     try {
-        const res  = await fetch('/api/findings');
+        const res  = await apiFetch('/api/findings');
         const data = await res.json();
         renderIssues(data.findings || [], 'all');
     } catch {
@@ -428,7 +477,7 @@ async function loadSkills() {
     const grid = document.getElementById('skills-list');
     if (!grid) return;
     try {
-        const res  = await fetch('/api/skills');
+        const res  = await apiFetch('/api/skills');
         const data = await res.json();
         const skills = data.functional || data.class_based || [];
         if (skills.length === 0) {
@@ -449,46 +498,37 @@ async function loadSkills() {
     }
 }
 
-// ── Tool Domains (Repositories page) ──────────────────────────
-async function loadToolDomains() {
-    const grid = document.getElementById('tool-domains-grid');
+// ── Tool Domains (shared by the Repositories page and the Domains page —
+// same data, same rendering, just a different target grid element) ────
+async function renderToolDomainsInto(gridId, emptyLabel, errorLabel) {
+    const grid = document.getElementById(gridId);
     if (!grid) return;
     try {
-        const res  = await fetch('/api/tools');
+        const res  = await apiFetch('/api/tools');
         const data = await res.json();
         const counts = data.counts || {};
         grid.innerHTML = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(([domain, count]) => `
             <div class="domain-card">
                 <span class="domain-name">${escHtml(domain.replace(/_/g,' '))}</span>
                 <span class="domain-count">${count}</span>
-            </div>`).join('') || '<div class="loading-cell">No tool data.</div>';
+            </div>`).join('') || `<div class="loading-cell">${emptyLabel}</div>`;
     } catch {
-        grid.innerHTML = '<div class="loading-cell">Failed to load tool data.</div>';
+        grid.innerHTML = `<div class="loading-cell">${errorLabel}</div>`;
     }
 }
 
-// ── Domains page ───────────────────────────────────────────────
+async function loadToolDomains() {
+    return renderToolDomainsInto('tool-domains-grid', 'No tool data.', 'Failed to load tool data.');
+}
+
 async function loadDomains() {
-    const grid = document.getElementById('domains-grid');
-    if (!grid) return;
-    try {
-        const res  = await fetch('/api/tools');
-        const data = await res.json();
-        const counts = data.counts || {};
-        grid.innerHTML = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(([domain, count]) => `
-            <div class="domain-card">
-                <span class="domain-name">${escHtml(domain.replace(/_/g,' '))}</span>
-                <span class="domain-count">${count}</span>
-            </div>`).join('') || '<div class="loading-cell">No domain data.</div>';
-    } catch {
-        grid.innerHTML = '<div class="loading-cell">Failed to load domains.</div>';
-    }
+    return renderToolDomainsInto('domains-grid', 'No domain data.', 'Failed to load domains.');
 }
 
 // ── Networks page ──────────────────────────────────────────────
 async function loadNetworkInfo() {
     try {
-        const res  = await fetch('/api/tools');
+        const res  = await apiFetch('/api/tools');
         const data = await res.json();
         const counts = data.counts || {};
         const networkDomains = ['network','reconnaissance','osint','wireless','iot'];
@@ -510,7 +550,7 @@ async function loadNetworkInfo() {
 // ── Knowledge page ─────────────────────────────────────────────
 async function loadKnowledge() {
     try {
-        const res  = await fetch('/api/agents');
+        const res  = await apiFetch('/api/agents');
         const data = await res.json();
         const tierSummary = document.getElementById('tier-summary');
         if (tierSummary && data.by_tier) {
@@ -528,7 +568,7 @@ async function loadSkillChips() {
     const container = document.getElementById('skill-chips');
     if (!container || container.children.length > 0) return;
     try {
-        const res  = await fetch('/api/skills');
+        const res  = await apiFetch('/api/skills');
         const data = await res.json();
         const skills = data.functional || [];
         container.innerHTML = skills.map(name => `
@@ -583,7 +623,7 @@ async function startScan() {
     btn.disabled = true;
 
     try {
-        const res  = await fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target:'127.0.0.1'}) });
+        const res  = await apiFetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target:'127.0.0.1'}) });
         const data = await res.json();
         console.log('Scan started:', data);
     } catch {
@@ -597,12 +637,12 @@ async function startScanFromPanel() {
     const target = document.getElementById('scan-target')?.value?.trim() || '127.0.0.1';
     const output = document.getElementById('scan-output');
     if (output) output.textContent = `🚀 Launching assessment against ${target}…\n`;
-    await fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target}) }).catch(() => {});
+    await apiFetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target}) }).catch(() => {});
 }
 
 async function stopScan() {
     const output = document.getElementById('scan-output');
-    await fetch('/api/scan/stop', { method:'POST' }).catch(() => {});
+    await apiFetch('/api/scan/stop', { method:'POST' }).catch(() => {});
     if (output) output.textContent += '\n⏹ Stop requested.';
 }
 

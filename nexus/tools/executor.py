@@ -1,10 +1,12 @@
 """The single, guarded entrypoint for tool execution."""
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import time
 from typing import Any
 
+from nexus.foundation.config import config
 from nexus.foundation.guardrails import (
     AuditGuard,
     EscalationGuard,
@@ -31,6 +33,15 @@ from nexus.tools.registry import tool_registry
 
 class ToolExecutionError(RuntimeError):
     """Raised when a tool does not honour the framework result contract."""
+
+
+# Shared across ToolExecutor instances so nexus_max_concurrent_tools is a
+# real global cap, not per-instance (a fresh unbounded pool per executor
+# would defeat the point of the setting).
+_EXECUTOR_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(1, int(getattr(config, "nexus_max_concurrent_tools", 5))),
+    thread_name_prefix="nexus-tool",
+)
 
 
 class ToolExecutor:
@@ -81,11 +92,32 @@ class ToolExecutor:
                 error=f"Guardrail blocked: {exc}",
             )
 
-        # ── Execute the tool ────────────────────────────────────────────
+        # ── Execute the tool, with a real timeout ────────────────────────
+        # nexus_tool_timeout used to be measured (time.monotonic()) but never
+        # enforced — a hung tool call would block the caller indefinitely.
+        # A thread-pool future gives the caller a bounded wait; note this
+        # can't force-kill a stuck native/C-extension call inside the
+        # worker thread (Python has no safe thread-kill), so a genuinely
+        # wedged tool still leaks a background thread — the fix for that
+        # class of tool is to shell out via run_subprocess() (nexus/tools/
+        # sandbox.py), which *can* be killed on timeout. This still turns
+        # "the dashboard hangs forever" into "the caller gets a prompt,
+        # truthful failure," which is the actual problem being solved here.
         tool = tool_registry.get(tool_name)
         started = time.monotonic()
+        timeout_s = getattr(config, "nexus_tool_timeout", 300)
+        future = _EXECUTOR_POOL.submit(tool, target=target, **kwargs)
         try:
-            result = tool(target=target, **kwargs)
+            result = future.result(timeout=timeout_s)
+        except concurrent.futures.TimeoutError:
+            elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+            AuditGuard.validate(action=f"{tool_name}.timeout", target=target, timeout_s=timeout_s)
+            return tool_result(
+                tool_name, target,
+                status=STATUS_FAILED,
+                error=f"Tool exceeded timeout of {timeout_s}s",
+                metadata={"execution_ms": elapsed_ms, "timed_out": True},
+            )
         except Exception as exc:
             elapsed_ms = round((time.monotonic() - started) * 1000, 2)
             return tool_result(

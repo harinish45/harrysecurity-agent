@@ -4,6 +4,7 @@ NEXUS-STRIKE — webapp tool: Api Security
 Domain: webapp
 """
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 def _extract_title(html: str) -> str:
@@ -28,9 +29,7 @@ def run(target: str, **kwargs) -> dict:
         url = parsed.geturl()
 
         # Permissive SSL — don't fail on self-signed / missing certs
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(target, allow_insecure=True)
 
         try:
             req = urllib.request.Request(

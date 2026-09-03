@@ -25,6 +25,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 # Top common weak HMAC secrets (representative subset of a larger wordlist)
 WEAK_SECRETS = [
@@ -82,9 +83,7 @@ def _make_hmac_token(header: dict, payload: dict, secret: str, alg: str = "HS256
 
 def _try_auth(url: str, token: str, timeout: int = 10) -> int:
     """Send an Authorization: Bearer request; return HTTP status (0 on failure)."""
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(url, allow_insecure=True)
     headers = {
         "Authorization": f"Bearer {token}",
         "User-Agent": "NEXUS-STRIKE/1.0.0 (JWT Attack Suite)",

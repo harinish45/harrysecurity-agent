@@ -4,6 +4,7 @@ NEXUS-STRIKE — reconnaissance tool: Asset Discovery
 Domain: reconnaissance
 """
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 def _extract_title(html: str) -> str:
@@ -23,9 +24,7 @@ def run(target: str, **kwargs) -> dict:
         import urllib.error
 
         # Build a permissive SSL context (ignore self-signed / untrusted certs)
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
+        ssl_ctx = get_ssl_context(target, allow_insecure=True)
 
         # DNS resolution
         try:

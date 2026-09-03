@@ -4,6 +4,7 @@ NEXUS-STRIKE — reconnaissance tool: Shodan Search
 Domain: reconnaissance
 """
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 def run(target: str, **kwargs) -> dict:
@@ -20,9 +21,7 @@ def run(target: str, **kwargs) -> dict:
             m = _re.search(r'<title[^>]*>([^<]+)</title>', html, _re.IGNORECASE)
             return m.group(1).strip() if m else ''
 
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
+        ssl_ctx = get_ssl_context(target, allow_insecure=True)
         # DNS resolution
         try:
             ip = socket.gethostbyname(target)

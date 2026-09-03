@@ -21,6 +21,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 def _normalize_url(target: str, original_url: str) -> str:
@@ -192,9 +193,7 @@ def run(
     to_visit: list[str] = [start_url]
     crawled_count = 0
 
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(target, allow_insecure=True)
 
     while to_visit and crawled_count < max_pages:
         url = to_visit.pop(0)

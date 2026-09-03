@@ -4,6 +4,7 @@ NEXUS-STRIKE — vuln_assessment tool: Patch Verification
 Domain: vuln_assessment
 """
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 def run(target: str, **kwargs) -> dict:
@@ -29,9 +30,7 @@ def run(target: str, **kwargs) -> dict:
                 scheme = "https" if port in (443, 8443) else "http"
                 url = f"{scheme}://{target}:{port}/"
                 try:
-                    ctx = ssl.create_default_context()
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
+                    ctx = get_ssl_context(target, allow_insecure=True)
                     req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
                     resp = urllib.request.urlopen(req, timeout=5, context=ctx)
                     server = resp.headers.get("Server", "unknown")

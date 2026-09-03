@@ -4,16 +4,16 @@ NEXUS-STRIKE — wireless tool: Lora
 Domain: wireless
 """
 from nexus.tools.registry import tool_registry
+from nexus.tools.sandbox import run_subprocess
 
 
 def run(target: str, **kwargs) -> dict:
     """wireless tool: Lora"""
     findings = []
     try:
-        import subprocess
         for tool in ["airodump-ng", "wash", "nmcli", "iw"]:
             try:
-                result = subprocess.run(["which", tool], capture_output=True, text=True, timeout=2)
+                result = run_subprocess(["which", tool], timeout=2)
                 if result.returncode == 0:
                     findings.append(f"{tool}: available")
                 else:

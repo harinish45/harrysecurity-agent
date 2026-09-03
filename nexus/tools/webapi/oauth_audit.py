@@ -22,13 +22,12 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 def _http_get(url: str, timeout: int = 10) -> dict:
     """Perform a GET and return {'status', 'body', 'headers', 'final_url'}."""
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(url, allow_insecure=True)
     req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/1.0.0 (OAuth Auditor)"})
     try:
         resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)

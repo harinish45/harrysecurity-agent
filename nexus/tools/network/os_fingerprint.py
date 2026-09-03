@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import socket
 import struct
-import subprocess
 import time
 from typing import Any, Optional
 
@@ -21,6 +20,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.tools.sandbox import run_subprocess, SandboxError
 
 
 def _tcp_probe(host: str, port: int, timeout: float = 2.0) -> Optional[dict]:
@@ -99,19 +99,18 @@ def _tcp_probe(host: str, port: int, timeout: float = 2.0) -> Optional[dict]:
 def _nmap_os_detection(host: str, timeout: int = 30) -> Optional[list[dict]]:
     """Use nmap OS detection if available."""
     try:
-        result = subprocess.run(
+        result = run_subprocess(
             ["nmap", "-O", "--host-timeout", f"{timeout}s", "-Pn", host],
-            capture_output=True,
             timeout=timeout + 5,
         )
         if result.returncode == 0:
-            output = result.stdout.decode("utf-8", errors="replace")
+            output = result.stdout
             os_matches = []
             for line in output.split("\n"):
                 if "OS details" in line or "Running:" in line:
                     os_matches.append({"raw": line.strip()})
             return os_matches if os_matches else None
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, SandboxError):
         pass
     return None
 

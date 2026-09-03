@@ -59,6 +59,15 @@ dependencies = [
     # Data Processing
     "pyyaml>=6.0",
     "orjson>=3.9.0",
+    "networkx>=3.0",
+
+    # Auth / Secrets
+    "bcrypt>=4.0",
+    "pyotp>=2.9",
+    # >=45 for ML-DSA (post-quantum signing) support in
+    # nexus/advanced/pq_signing.py; older versions still work for the
+    # secrets vault (Fernet), just without that one optional feature.
+    "cryptography>=45.0",
 
     # Testing
     "pytest>=8.2.0",
@@ -66,6 +75,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+advanced = [
+    # nexus/advanced/notarization.py — optional; that module degrades to a
+    # clear NotarizationError (not a crash) if this isn't installed.
+    "opentimestamps-client>=0.7.0",
+]
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",

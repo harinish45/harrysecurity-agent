@@ -1,5 +1,6 @@
 from nexus.agents.base_agent import BaseAgent
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 class WebappAgent(BaseAgent):
     name = "webapp_agent"
@@ -26,9 +27,7 @@ class WebappAgent(BaseAgent):
             import ssl
             url = target if "://" in target else f"http://{target}"
             try:
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
+                ctx = get_ssl_context(url, allow_insecure=True)
                 req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
                 resp = urllib.request.urlopen(req, timeout=5, context=ctx)
                 findings.append(f"HTTP {resp.status}: Server={resp.headers.get('Server', 'unknown')}")

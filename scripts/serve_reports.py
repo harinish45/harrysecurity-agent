@@ -545,10 +545,10 @@ def view_report(filename: str):
     hero = f"""
     <div class="report-hero">
       <h1>Security Assessment Report</h1>
-      <div class="target">🎯 {info['target']}</div>
+      <div class="target">🎯 {html.escape(str(info['target']))}</div>
       <div class="meta-row">
-        <div class="meta-item"><span class="meta-label">Mission</span><span class="meta-value">{info['mission']}</span></div>
-        <div class="meta-item"><span class="meta-label">Generated</span><span class="meta-value">{info['generated']}</span></div>
+        <div class="meta-item"><span class="meta-label">Mission</span><span class="meta-value">{html.escape(str(info['mission']))}</span></div>
+        <div class="meta-item"><span class="meta-label">Generated</span><span class="meta-value">{html.escape(str(info['generated']))}</span></div>
         <div class="meta-item"><span class="meta-label">LLM Provider</span><span class="meta-value">Groq / Llama 3.1</span></div>
       </div>
     </div>"""
@@ -556,12 +556,12 @@ def view_report(filename: str):
     # Stats
     stats = f"""
     <div class="stats-row">
-      <div class="stat-card total"><div class="stat-num">{info['findings_total']}</div><div class="stat-label">Total Findings</div></div>
-      <div class="stat-card crit"><div class="stat-num">{info['critical']}</div><div class="stat-label">Critical</div></div>
-      <div class="stat-card high"><div class="stat-num">{info['high']}</div><div class="stat-label">High</div></div>
-      <div class="stat-card med"><div class="stat-num">{info['medium']}</div><div class="stat-label">Medium</div></div>
-      <div class="stat-card low"><div class="stat-num">{info['low']}</div><div class="stat-label">Low</div></div>
-      <div class="stat-card info"><div class="stat-num">{info['info_count']}</div><div class="stat-label">Info</div></div>
+      <div class="stat-card total"><div class="stat-num">{html.escape(str(info['findings_total']))}</div><div class="stat-label">Total Findings</div></div>
+      <div class="stat-card crit"><div class="stat-num">{html.escape(str(info['critical']))}</div><div class="stat-label">Critical</div></div>
+      <div class="stat-card high"><div class="stat-num">{html.escape(str(info['high']))}</div><div class="stat-label">High</div></div>
+      <div class="stat-card med"><div class="stat-num">{html.escape(str(info['medium']))}</div><div class="stat-label">Medium</div></div>
+      <div class="stat-card low"><div class="stat-num">{html.escape(str(info['low']))}</div><div class="stat-label">Low</div></div>
+      <div class="stat-card info"><div class="stat-num">{html.escape(str(info['info_count']))}</div><div class="stat-label">Info</div></div>
     </div>"""
 
     # Findings
@@ -574,11 +574,11 @@ def view_report(filename: str):
             warn_count += 1
         finding_html += f"""
         <div class="finding {fc}">
-          <div class="finding-title">{f['title']}</div>
+          <div class="finding-title">{html.escape(str(f['title']))}</div>
           <div class="finding-meta">
-            <span class="badge {f['sev'].lower()}">{f['sev']}</span>
-            <span class="finding-tool">{f['tool']}</span>
-            <span>{f['asset']}</span>
+            <span class="badge {f['sev'].lower()}">{html.escape(str(f['sev']))}</span>
+            <span class="finding-tool">{html.escape(str(f['tool']))}</span>
+            <span>{html.escape(str(f['asset']))}</span>
           </div>
         </div>"""
 

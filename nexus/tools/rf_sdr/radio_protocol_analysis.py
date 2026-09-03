@@ -4,17 +4,17 @@ NEXUS-STRIKE — rf_sdr tool: Radio Protocol Analysis
 Domain: rf_sdr
 """
 from nexus.tools.registry import tool_registry
+from nexus.tools.sandbox import run_subprocess
 
 
 def run(target: str, **kwargs) -> dict:
     """rf_sdr tool: Radio Protocol Analysis"""
     findings = []
     try:
-        import subprocess
         # Check for SDR tools
         for tool in ["rtl_test", "hackrf_info", "gqrx", "gnuradio"]:
             try:
-                result = subprocess.run(["which", tool], capture_output=True, text=True, timeout=2)
+                result = run_subprocess(["which", tool], timeout=2)
                 if result.returncode == 0:
                     findings.append(f"{tool}: available")
                 else:

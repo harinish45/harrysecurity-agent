@@ -5,14 +5,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nexus.foundation.schema import normalize_findings
+from nexus.foundation.schema import normalize_findings, redact_findings
 
 
 class SarifExport:
     """Export findings in SARIF 2.1.0 for code-scanning platforms."""
 
-    def export(self, data: list[Any], output: str | Path) -> Path:
+    def export(self, data: list[Any], output: str | Path, redact: bool = True) -> Path:
         findings = normalize_findings(data)
+        if redact:
+            findings = redact_findings(findings)
         rules = []
         results = []
         seen_rules: set[str] = set()

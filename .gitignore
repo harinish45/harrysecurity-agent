@@ -5,6 +5,9 @@ dist/
 build/
 .venv/
 .env
+secrets/*.txt
+vault/
+.nexus/
 .vscode/
 .idea/
 *.zip

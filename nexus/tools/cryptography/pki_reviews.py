@@ -4,6 +4,7 @@ NEXUS-STRIKE — cryptography tool: Pki Reviews
 Domain: cryptography
 """
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 def run(target: str, **kwargs) -> dict:
@@ -15,9 +16,7 @@ def run(target: str, **kwargs) -> dict:
         ports = kwargs.get("ports", [443, 8443, 465, 993, 995])
         for port in ports:
             try:
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
+                ctx = get_ssl_context(target, allow_insecure=True)
                 with socket.create_connection((target, port), timeout=3) as raw:
                     with ctx.wrap_socket(raw, server_hostname=target) as s:
                         cert = s.getpeercert()
