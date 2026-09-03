@@ -13,6 +13,18 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture
+def isolated_auth_vault(tmp_path, monkeypatch):
+    """Redirect nexus.foundation.auth's module-level vault reference to an
+    isolated per-test SecretsManager, so login tests never touch a real
+    ~/.nexus install and don't leak users between tests."""
+    from nexus.foundation.secrets import SecretsManager
+
+    vault = SecretsManager(vault_dir=tmp_path)
+    monkeypatch.setattr("nexus.foundation.auth.vault", vault)
+    return vault
+
+
 def test_dashboard_root_returns_html(client):
     """GET / should return the dashboard HTML page."""
     response = client.get("/")
@@ -197,3 +209,135 @@ def test_ws_steer_requires_token_when_configured():
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+# ── Per-user login / RBAC (nexus/foundation/auth.py wired into the API) ──
+
+def test_login_with_valid_credentials_issues_a_session(client, isolated_auth_vault):
+    from nexus.foundation.auth import Role, auth_manager
+
+    auth_manager.register_user("dashtest_operator", "correct-horse-battery", Role.OPERATOR)
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "dashtest_operator", "password": "correct-horse-battery"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "dashtest_operator"
+    assert data["role"] == "operator"
+    assert data["token"]
+
+
+def test_login_with_wrong_password_rejected(client, isolated_auth_vault):
+    from nexus.foundation.auth import Role, auth_manager
+
+    auth_manager.register_user("dashtest_wrongpw", "correct-horse-battery", Role.VIEWER)
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "dashtest_wrongpw", "password": "not-the-right-password"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 401
+
+
+def test_login_requires_csrf_header(client, isolated_auth_vault):
+    from nexus.foundation.auth import Role, auth_manager
+
+    auth_manager.register_user("dashtest_csrf", "correct-horse-battery", Role.VIEWER)
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "dashtest_csrf", "password": "correct-horse-battery"},
+    )
+    assert response.status_code == 403
+
+
+def test_session_token_authenticates_api_calls(client, isolated_auth_vault):
+    from nexus.foundation.auth import Role, auth_manager
+
+    auth_manager.register_user("dashtest_me", "correct-horse-battery", Role.VIEWER)
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "dashtest_me", "password": "correct-horse-battery"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    token = login.json()["token"]
+
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    data = me.json()
+    assert data["session"] is True
+    assert data["username"] == "dashtest_me"
+    assert data["role"] == "viewer"
+
+
+def test_viewer_role_cannot_start_a_scan(client, isolated_auth_vault):
+    """A viewer-role session must be denied by real RBAC (403), distinct
+    from the 401 an invalid/missing token would get."""
+    from nexus.foundation.auth import Role, auth_manager
+
+    auth_manager.register_user("dashtest_viewer_scan", "correct-horse-battery", Role.VIEWER)
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "dashtest_viewer_scan", "password": "correct-horse-battery"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    token = login.json()["token"]
+
+    response = client.post(
+        "/api/scan/start",
+        json={"target": "127.0.0.1"},
+        headers={"Authorization": f"Bearer {token}", "X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 403
+    assert "SCAN_CREATE" in response.json()["detail"] or "scan:create" in response.json()["detail"]
+
+
+def test_operator_role_passes_the_permission_check(client, isolated_auth_vault, monkeypatch):
+    """An operator-role session has scan:create — the RBAC check itself
+    must let it through. It may still be rejected further down the route
+    for an unrelated reason (NEXUS_LEGAL_ACK not set is also a 403 in this
+    route, deliberately, but a DIFFERENT one) — the point here is
+    specifically that the permission check doesn't produce the
+    RBAC-denied response the viewer-role test above gets."""
+    from nexus.foundation.auth import Role, auth_manager
+
+    monkeypatch.delenv("NEXUS_LEGAL_ACK", raising=False)
+    auth_manager.register_user("dashtest_operator_scan", "correct-horse-battery", Role.OPERATOR)
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "dashtest_operator_scan", "password": "correct-horse-battery"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    token = login.json()["token"]
+
+    response = client.post(
+        "/api/scan/start",
+        json={"target": "127.0.0.1"},
+        headers={"Authorization": f"Bearer {token}", "X-Requested-With": "NEXUS-Dashboard"},
+    )
+    detail = response.json().get("detail", "")
+    assert "scan:create" not in detail
+    assert "lacks permission" not in detail
+
+
+def test_logout_revokes_the_session(client, isolated_auth_vault):
+    from nexus.foundation.auth import Role, auth_manager
+
+    auth_manager.register_user("dashtest_logout", "correct-horse-battery", Role.VIEWER)
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "dashtest_logout", "password": "correct-horse-battery"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    token = login.json()["token"]
+
+    logout = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}", "X-Requested-With": "NEXUS-Dashboard"})
+    assert logout.status_code == 200
+
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    # Session revoked -> falls through to "no session" handling: either
+    # open (no DASHBOARD_TOKEN configured in tests) or 401 if one is set.
+    assert me.status_code in (200, 401)
+    if me.status_code == 200:
+        assert me.json()["session"] is False

@@ -42,13 +42,120 @@ if config.is_production and not DASHBOARD_TOKEN:
     )
 
 
-def _require_token(request: Request):
-    """Raise 401 if NEXUS_DASHBOARD_TOKEN is set and the request is unauthenticated."""
-    if not DASHBOARD_TOKEN:
-        return
+def _bearer_token(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {DASHBOARD_TOKEN}":
-        raise HTTPException(status_code=401, detail="Missing or invalid dashboard token")
+    return auth[7:] if auth.startswith("Bearer ") else ""
+
+
+def _require_token(request: Request):
+    """Raise 401 unless the request is authenticated by EITHER:
+
+    - the shared NEXUS_DASHBOARD_TOKEN (legacy, operator-configured secret —
+      treated as full/operator-equivalent access, same as before this file
+      had any per-user auth at all), or
+    - a valid nexus.foundation.auth session token issued by POST
+      /api/auth/login. When it's the latter, the resolved Session is
+      attached to request.state.session so _require_permission() below can
+      do real RBAC checks; a DASHBOARD_TOKEN request has no Session object
+      (request.state.session stays None) since it isn't tied to any one
+      user account.
+    """
+    request.state.session = None
+    token = _bearer_token(request)
+
+    if DASHBOARD_TOKEN and token == DASHBOARD_TOKEN:
+        return
+
+    if token:
+        from nexus.foundation.auth import auth_manager
+
+        session = auth_manager.validate_session(token)
+        if session is not None:
+            request.state.session = session
+            return
+
+    if not DASHBOARD_TOKEN:
+        # No shared token configured (development default) and no valid
+        # per-user session either — stay open, matching the pre-existing
+        # behavior for NEXUS_DASHBOARD_TOKEN being unset.
+        return
+
+    raise HTTPException(status_code=401, detail="Missing or invalid dashboard token")
+
+
+def _require_permission(request: Request, permission) -> None:
+    """Real per-user RBAC check — only meaningful for requests authenticated
+    via a personal login session (see _require_token). A request using the
+    shared NEXUS_DASHBOARD_TOKEN is NOT subject to this check: that token is
+    an operator-configured secret that predates per-user accounts and is
+    treated as already fully trusted, same as it always was. Call
+    _require_token(request) first on every route that uses this."""
+    session = getattr(request.state, "session", None)
+    if session is None:
+        return  # shared-token or auth-disabled request — unchanged behavior
+    from nexus.foundation.auth import auth_manager
+
+    try:
+        auth_manager.require_permission(session, permission)
+    except Exception as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+
+@app.post("/api/auth/login")
+async def auth_login(payload: dict, request: Request):
+    """Authenticate against nexus.foundation.auth (bcrypt + optional TOTP)
+    and return a per-user session token. Bootstrap the first account with
+    `nexus auth create-admin` — there is no default account."""
+    require_same_origin_signal(request)
+    from nexus.foundation.auth import AuthenticationError, auth_manager
+
+    username = str(payload.get("username", ""))
+    password = str(payload.get("password", ""))
+    totp_code = payload.get("totp_code")
+
+    try:
+        session = auth_manager.authenticate(username, password, totp_code=totp_code)
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    return {
+        "token": session.token,
+        "username": session.username,
+        "role": session.role.value,
+        "expires_at": session.expires_at.isoformat(),
+    }
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    _require_token(request)
+    require_same_origin_signal(request)
+    session = getattr(request.state, "session", None)
+    if session is not None:
+        from nexus.foundation.auth import auth_manager
+
+        auth_manager.revoke_session(session.token)
+    return {"status": "logged_out"}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    """Report the caller's own identity. A DASHBOARD_TOKEN-authenticated
+    request (no personal session) reports authenticated=true with no
+    username/role, since that token isn't tied to any one account."""
+    _require_token(request)  # already gates this route; reaching here means allowed
+    session = getattr(request.state, "session", None)
+    if session is None:
+        # Allowed via the shared DASHBOARD_TOKEN, or no token is configured
+        # at all (open development mode) — either way, not tied to one account.
+        return {"authenticated": True, "session": False}
+    return {
+        "authenticated": True,
+        "session": True,
+        "username": session.username,
+        "role": session.role.value,
+        "expires_at": session.expires_at.isoformat(),
+    }
 
 
 def _normalize_finding(item):
@@ -312,6 +419,9 @@ async def update_config(payload: dict, request: Request):
     """Placeholder for future config write support."""
     _require_token(request)
     require_same_origin_signal(request)
+    from nexus.foundation.auth import Permission
+
+    _require_permission(request, Permission.CONFIG_WRITE)
     return {"status": "accepted", "note": "Runtime config changes not yet persisted"}
 
 
@@ -332,6 +442,9 @@ async def scan_start(payload: dict, request: Request):
     """Launch nexus live in a background subprocess for the given target."""
     _require_token(request)
     require_same_origin_signal(request)
+    from nexus.foundation.auth import Permission
+
+    _require_permission(request, Permission.SCAN_CREATE)
     global _active_scan
     target = payload.get("target", "127.0.0.1")
 
@@ -402,6 +515,9 @@ async def scan_stop(request: Request):
     """Terminate any running background scan."""
     _require_token(request)
     require_same_origin_signal(request)
+    from nexus.foundation.auth import Permission
+
+    _require_permission(request, Permission.SCAN_STOP)
     global _active_scan
     proc = _active_scan.get("process")
     if proc and proc.poll() is None:
