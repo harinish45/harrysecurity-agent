@@ -33,7 +33,7 @@ jobs:
       run: |
         ruff check . || echo "Ruff check completed with warnings"
 
-    # Advisory for now — see docs/PRODUCTION_CHECKLIST.md for the plan to
+    # Advisory for now — see docs/production_readiness.md for the plan to
     # promote these to blocking once the current findings are triaged.
     # The codebase has an existing, untriaged baseline, so flipping either
     # scanner to blocking now would break CI on pre-existing findings
@@ -41,12 +41,12 @@ jobs:
     - name: Security scan with Bandit (advisory)
       run: |
         pip install bandit
-        bandit -r nexus -ll || echo "Bandit found issues — review before the next hardening pass (see docs/PRODUCTION_CHECKLIST.md)"
+        bandit -r nexus -ll || echo "Bandit found issues — review before the next hardening pass (see docs/production_readiness.md)"
 
     - name: Dependency vulnerability scan with pip-audit (advisory)
       run: |
         pip install pip-audit
-        pip-audit -r requirements.txt || echo "pip-audit found issues — review before the next hardening pass (see docs/PRODUCTION_CHECKLIST.md)"
+        pip-audit -r requirements.txt || echo "pip-audit found issues — review before the next hardening pass (see docs/production_readiness.md)"
 
     - name: Verify Nexus Tools
       env:
