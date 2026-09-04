@@ -44,6 +44,7 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 from nexus.foundation.config import config
+from nexus.foundation.guardrails import LegalGuard, ScopeGuard
 from nexus.foundation.logging import logger
 from nexus.intelligence.llm.router import LLMRouter
 
@@ -301,13 +302,10 @@ def phase6_sqli_detection(target: str, open_ports: list[dict]) -> list[str]:
         print("  [-] No HTTP ports to test")
         return findings
 
-    try:
-        from nexus.tools.webapp.sqli import run as sqli_run
-    except ImportError:
-        sqli_run = None
+    from nexus.tools.registry import tool_registry
 
-    if not sqli_run:
-        print("  [-] webapp.sqli not importable")
+    if "webapp.sqli" not in tool_registry.list_tools():
+        print("  [-] webapp.sqli not registered")
         return findings
 
     for port in http_ports[:3]:
@@ -315,8 +313,14 @@ def phase6_sqli_detection(target: str, open_ports: list[dict]) -> list[str]:
         test_url = f"{scheme}://{target}:{port}/?id=1"
         print(f"  [*] Testing {test_url} for SQLi...")
         try:
-            result = sqli_run(target=test_url)
-            if result.get("findings"):
+            # Routed through the guardrailed registry (not a raw import) —
+            # this is an active SQL-injection probe, so it must go through
+            # RateGuard/EscalationGuard/AuditGuard like every other tool call.
+            result = tool_registry.run("webapp.sqli", target=test_url)
+            if result.get("status") == "failed" and "approval" in (result.get("error") or "").lower():
+                print(f"  [-] SQLi test on port {port} requires approval: {result.get('error')}")
+                print("      Set ESCALATION_APPROVED=true to allow active SQLi probing.")
+            elif result.get("findings"):
                 for f in result["findings"]:
                     text = f.get("evidence", f.get("title", str(f)))
                     findings.append(text)
@@ -422,6 +426,22 @@ def run_assessment(target_ip: str, target_host: str | None = None) -> dict:
     global TARGET, TARGET_HOST
     TARGET = target_ip
     TARGET_HOST = target_host or target_ip
+
+    # This is a real, standalone entrypoint (invoked directly via `nexus live`,
+    # not only through the dashboard's own pre-check in web/server.py's
+    # /api/scan/start) that actively probes a target, including firing SQL
+    # injection payloads in phase 6.5 — it must not be reachable without
+    # scope/legal validation of its own, the same as every other mission path.
+    try:
+        ScopeGuard.validate(TARGET)
+        LegalGuard.validate(target=TARGET)
+    except Exception as exc:
+        print(f"\n[!] Guardrail blocked this scan: {exc}")
+        return {
+            "findings": [], "llm_blocks": [], "phases": [], "cve_text": "", "sql_findings": [],
+            "open_ports": [], "services": {}, "all_findings": [],
+            "_meta": {"target": TARGET, "target_host": TARGET_HOST, "status": "blocked", "error": str(exc)},
+        }
 
     started = time.time()
     findings: list[str] = []
