@@ -88,6 +88,15 @@ def test_api_report_not_found(client):
     assert response.status_code == 404
 
 
+def test_dashboard_has_a_frontend_for_agent_run(client):
+    """/api/agent/run existed with zero frontend until now — the Pentests
+    page must actually offer a way to reach it."""
+    response = client.get("/")
+    assert 'id="agent-name"' in response.text
+    assert 'id="agent-target"' in response.text
+    assert "runAgent()" in response.text
+
+
 def test_markdown_reports_are_listed_and_served(client, tmp_path, monkeypatch):
     """OrchestrationEngine._generate_report() writes .md — the reports
     list/serve endpoints used to only recognise .pdf/.json, so a mission

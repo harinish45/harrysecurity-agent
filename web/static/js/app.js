@@ -432,7 +432,48 @@ async function loadAgentTiers() {
                 <div class="tier-name">${tier}</div>
                 <div class="tier-count">${agents.length}</div>
             </div>`).join('');
+
+        const datalist = document.getElementById('agent-name-list');
+        if (datalist) {
+            const allNames = Object.values(data.by_tier).flat();
+            datalist.innerHTML = allNames.map(name => `<option value="${escHtml(name)}"></option>`).join('');
+        }
     } catch {}
+}
+
+// ── Run a single agent (Pentests page) ─────────────────────────
+async function runAgent() {
+    const agent = document.getElementById('agent-name')?.value?.trim();
+    const target = document.getElementById('agent-target')?.value?.trim();
+    const output = document.getElementById('agent-run-output');
+    if (!agent || !target) {
+        if (output) output.textContent = '⚠ Enter both an agent name and a target.';
+        return;
+    }
+    if (output) output.textContent = `🎯 Running ${agent} against ${target}…\n`;
+    try {
+        const res = await apiFetch('/api/agent/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent, target }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            if (output) output.textContent = `❌ ${data.detail || 'Request failed'}`;
+            return;
+        }
+        const findings = data.findings || [];
+        let text = `✅ Status: ${data.status || 'unknown'}\nFindings: ${findings.length}\n\n`;
+        for (const f of findings.slice(0, 20)) {
+            const title = (f && typeof f === 'object') ? (f.title || JSON.stringify(f)) : String(f);
+            const sev = (f && typeof f === 'object') ? (f.severity || 'info') : 'info';
+            text += `[${sev}] ${title}\n`;
+        }
+        if (findings.length > 20) text += `… and ${findings.length - 20} more\n`;
+        if (output) output.textContent = text;
+    } catch (e) {
+        if (output) output.textContent = `❌ Request failed: ${e}`;
+    }
 }
 
 // ── Issues ─────────────────────────────────────────────────────
@@ -627,7 +668,9 @@ async function startScan() {
         const data = await res.json();
         console.log('Scan started:', data);
     } catch {
-        // nexus live handles scans via CLI — API is stub
+        // A rejected request here (guardrail block, missing NEXUS_LEGAL_ACK,
+        // scope violation) is surfaced by the scan-output log via the /ws/scan
+        // WebSocket, not by this catch — /api/scan/start is a real endpoint.
     } finally {
         setTimeout(() => { text.textContent = '▶ Start Scan'; btn.disabled = false; }, 3000);
     }

@@ -181,6 +181,19 @@
                         <span class="muted">No scan running. Configure target and press Launch.</span>
                     </div>
                 </div>
+                <div class="scan-control-panel">
+                    <h2>Run a Single Agent</h2>
+                    <p class="subtitle">Invoke any registered agent directly (recon_agent, task_planner_agent, mission_commander_agent, …) outside a full mission</p>
+                    <div class="scan-form">
+                        <input type="text" id="agent-name" placeholder="Agent name (e.g. recon_agent)" class="form-input" list="agent-name-list" autocomplete="off">
+                        <datalist id="agent-name-list"></datalist>
+                        <input type="text" id="agent-target" placeholder="Target IP or domain" class="form-input">
+                        <button class="btn btn-scan-lg" onclick="runAgent()">▶ Run Agent</button>
+                    </div>
+                    <div id="agent-run-output" class="scan-output">
+                        <span class="muted">No agent run yet. Pick a name from the Agent Mesh below and a target.</span>
+                    </div>
+                </div>
                 <div class="agents-grid" id="agents-grid">
                     <h3>Agent Status</h3>
                     <div id="tier-cards" class="tier-cards"></div>
