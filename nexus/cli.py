@@ -109,24 +109,32 @@ def run(
     console.print(f"[bold]Mode:[/] {mode}")
     console.print(f"[bold]Objective:[/] {objective}")
     console.print(f"[bold]Phases planned:[/] {len(result.get('plan', []))}")
+    console.print(f"[bold]Execution strategy:[/] {result.get('execution_strategy', 'sequential')}")
     console.print(f"[bold]Findings:[/] {len(result.get('findings', []))}")
+    quality = result.get("quality_assessment") or {}
+    if quality.get("overall_risk_score") is not None:
+        console.print(f"[bold]Overall risk score:[/] {quality['overall_risk_score']}/10")
     console.print(f"[bold]LLM Provider:[/] {result.get('llm_provider', {}).get('active_provider', 'unknown')}")
     if result.get("report_path"):
         console.print(f"[bold]Report:[/] {result['report_path']}")
 
-    # Show plan
+    # Show the plan and which agent actually ran, and how it went, for each phase.
     if result.get("plan"):
-        plan_table = Table(title="Mission Plan", box=box.ROUNDED)
+        plan_table = Table(title="Mission Plan & Execution", box=box.ROUNDED)
         plan_table.add_column("Phase", style="cyan")
         plan_table.add_column("Agent", style="green")
         plan_table.add_column("Task", style="white")
+        plan_table.add_column("Status", style="yellow")
+        results_by_agent = {r.get("agent"): r for r in result.get("results", [])}
         for i, phase in enumerate(result["plan"], 1):
-            plan_table.add_row(str(i), phase.get("agent", "?"), phase.get("task", "?")[:60])
+            agent_name = phase.get("agent", "?")
+            phase_result = results_by_agent.get(agent_name, {})
+            plan_table.add_row(str(i), agent_name, phase.get("task", "?")[:60], phase_result.get("status", "?"))
         console.print(plan_table)
 
-    console.print("[yellow]💡 Full agent execution with real tools coming in Phase 2+[/]")
     console.print("[dim]Run [bold]nexus tools[/] to see all registered tools[/]")
     console.print("[dim]Run [bold]nexus agents[/] to see all registered agents[/]")
+    console.print("[dim]Run [bold]nexus agent run <name> --target <target>[/] to invoke one directly[/]")
     console.print("[dim]Run [bold]nexus providers[/] to see LLM provider status[/]")
 
 
@@ -312,27 +320,36 @@ def tools(
 
 @app.command()
 def agents(
-    tier: str = typer.Option(None, "--tier", "-t", help="Filter by tier (orchestrator, offensive, defensive, etc.)"),
+    tier: str = typer.Option(None, "--tier", "-t", help="Filter by tier (orchestrator, offensive, defensive, analysis, specialized, support)"),
 ):
     """🤖 List all registered agents in the Agent Mesh."""
+    from nexus.agents.agent_registry import get_agent_tiers, get_agents_by_tier
+
     all_agents = list_agents()
 
     if tier:
-        filtered = [a for a in all_agents if a.endswith(f"_{tier}") or a.startswith(tier)]
-        table = Table(title=f"Agent Mesh — {tier} ({len(filtered)} agents)", box=box.ROUNDED)
+        tier = tier.lower().strip()
+        valid_tiers = get_agent_tiers()
+        if tier not in valid_tiers:
+            console.print(f"[red]Unknown tier '{tier}'. Valid tiers: {', '.join(valid_tiers)}[/]")
+            raise typer.Exit(1)
+        names_in_tier = set(get_agents_by_tier()[tier])
+        agents_to_show = [(name, cls) for name, cls in all_agents if name in names_in_tier]
+        table = Table(title=f"Agent Mesh — {tier} ({len(agents_to_show)} agents)", box=box.ROUNDED)
     else:
-        table = Table(title=f"Agent Mesh ({get_agent_count()} agents across 6 tiers)", box=box.ROUNDED)
+        agents_to_show = all_agents
+        table = Table(title=f"Agent Mesh ({get_agent_count()} agents across {len(get_agent_tiers())} tiers)", box=box.ROUNDED)
 
     table.add_column("Agent Name", style="cyan")
     table.add_column("Status", style="green")
 
-    agents_to_show = filtered if tier else all_agents
     for name, cls in agents_to_show:
         table.add_row(name, "✅ Registered")
 
     console.print(table)
     console.print(f"\n[dim]Total: {len(agents_to_show)} agents | "
-                  f"Run [bold]nexus agents --tier <name>[/] to filter[/]")
+                  f"Run [bold]nexus agents --tier <name>[/] to filter | "
+                  f"Run [bold]nexus agent run <name> --target <target>[/] to invoke one directly[/]")
 
 
 @app.command()
@@ -605,6 +622,79 @@ def view(
     except ImportError as exc:
         console.print(f"[red]Dashboard dependencies missing: {exc}[/]")
         console.print("[dim]Install with: pip install fastapi uvicorn[standard] websockets jinja2[/]")
+        raise typer.Exit(1)
+
+
+agent_app = typer.Typer(help="Invoke a single agent directly (nexus/agents/agent_registry.py).")
+app.add_typer(agent_app, name="agent")
+
+
+@agent_app.command("run")
+def agent_run(
+    agent_name: str = typer.Argument(..., help="Registered agent name, e.g. recon_agent — see `nexus agents`"),
+    target: str = typer.Option(..., "--target", "-t", help="Target domain, IP, or URL"),
+    task: str = typer.Option(None, "--task", help="Task description passed to the agent"),
+    engagement: Path = typer.Option(None, "--engagement", "-e", exists=True, readable=True, help="Engagement JSON created by `nexus engage`"),
+):
+    """🎯 Run one agent's real run() against a target, outside a full mission.
+
+    Every nexus.agents.* class has a real, working run() — this is the direct
+    entrypoint to it, useful for testing a single agent or for orchestrator-
+    tier agents (mission_commander_agent, task_planner_agent,
+    agent_router_agent) whose own specialty is planning/routing rather than
+    being one phase of a mission themselves.
+    """
+    from nexus.agents.agent_registry import get_agent
+    from nexus.foundation.guardrails import EscalationGuard, LegalGuard, ScopeGuard
+
+    try:
+        agent_cls = get_agent(agent_name)
+    except KeyError:
+        console.print(f"[red]Unknown agent '{agent_name}'. Run [bold]nexus agents[/] to list valid names.[/]")
+        raise typer.Exit(1)
+
+    if engagement is not None:
+        try:
+            engagement_record = json.loads(engagement.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise typer.BadParameter(f"Invalid engagement JSON: {exc}") from exc
+        scope = engagement_record.get("scope")
+        if isinstance(scope, list) and all(isinstance(s, str) for s in scope):
+            config.nexus_allowed_targets = ",".join(scope)
+
+    try:
+        ScopeGuard.validate(target)
+        LegalGuard.validate(target=target)
+        EscalationGuard.validate(f"agent_{agent_name}", "execute")
+    except Exception as exc:
+        console.print(f"[red]❌ Guardrail blocked: {exc}[/]")
+        raise typer.Exit(1)
+
+    task_description = task or f"Run {agent_name} against {target}"
+    console.print(f"[cyan]Running {agent_name} -> {task_description}[/]")
+
+    async def _run():
+        agent = agent_cls()
+        return await agent.run(task_description, target=target)
+
+    result = asyncio.run(_run())
+
+    console.print(f"\n[bold]Status:[/] {result.get('status', 'unknown')}")
+    findings = result.get("findings") or []
+    console.print(f"[bold]Findings:[/] {len(findings)}")
+    if result.get("summary"):
+        console.print(f"[bold]Summary:[/] {result['summary']}")
+    if result.get("error"):
+        console.print(f"[red]Error:[/] {result['error']}")
+
+    for f in findings[:20]:
+        title = f.get("title") if isinstance(f, dict) else str(f)
+        severity = f.get("severity", "info") if isinstance(f, dict) else "info"
+        console.print(f"  • [{severity}] {title}")
+    if len(findings) > 20:
+        console.print(f"  ... and {len(findings) - 20} more")
+
+    if result.get("status") == "failed":
         raise typer.Exit(1)
 
 

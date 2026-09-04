@@ -16,8 +16,7 @@ class TaskPlannerAgent(BaseAgent):
 
         for tool_name in ("reconnaissance.asset_discovery", "reconnaissance.dns_recon", "reconnaissance.whois_lookup"):
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(target=target)
+                result = tool_registry.run(tool_name, target=target)
                 tools_used.append(tool_name)
                 if result.get("findings"):
                     findings.extend(result["findings"])

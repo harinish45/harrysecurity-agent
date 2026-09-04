@@ -37,8 +37,7 @@ class AgentRouterAgent(BaseAgent):
 
         for tool_name, purpose in recon_tools.items():
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(target=target or "scope-unknown")
+                result = tool_registry.run(tool_name, target=target or "scope-unknown")
                 tools_used.append(tool_name)
                 if result.get("findings"):
                     findings.extend(result["findings"])

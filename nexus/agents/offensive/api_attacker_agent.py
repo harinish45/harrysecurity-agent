@@ -15,8 +15,7 @@ class ApiAttackerAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("webapp.api_security")
-            result = tool(target=target)
+            result = tool_registry.run("webapp.api_security", target=target)
             tools_used.append("webapp.api_security")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class ApiAttackerAgent(BaseAgent):
             findings.append({"title": f"API security error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("webapp.rest_api_testing")
-            result = tool(target=target)
+            result = tool_registry.run("webapp.rest_api_testing", target=target)
             tools_used.append("webapp.rest_api_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class ApiAttackerAgent(BaseAgent):
             findings.append({"title": f"REST API testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("webapp.browser_agent")
-            result = tool(target=target)
+            result = tool_registry.run("webapp.browser_agent", target=target)
             tools_used.append("webapp.browser_agent")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class ApiAttackerAgent(BaseAgent):
             findings.append({"title": f"Browser agent error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("webapp.rate_limit")
-            result = tool(target=target)
+            result = tool_registry.run("webapp.rate_limit", target=target)
             tools_used.append("webapp.rate_limit")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class ApiAttackerAgent(BaseAgent):
             findings.append({"title": f"Rate limit testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("webapp.auth_test")
-            result = tool(target=target)
+            result = tool_registry.run("webapp.auth_test", target=target)
             tools_used.append("webapp.auth_test")
             if result.get("findings"):
                 findings.extend(result["findings"])

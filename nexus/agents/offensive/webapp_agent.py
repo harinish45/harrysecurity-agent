@@ -14,8 +14,7 @@ class WebappAgent(BaseAgent):
         for tool_name in ["webapp.sqli", "webapp.xss", "webapp.lfi", 
                           "webapp.cmdi", "webapp.ssrf", "webapp.dir_enum"]:
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(target=target)
+                result = tool_registry.run(tool_name, target=target)
                 if result.get("findings"):
                     findings.extend(result["findings"])
             except (KeyError, Exception) as e:

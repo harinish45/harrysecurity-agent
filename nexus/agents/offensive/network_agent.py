@@ -13,8 +13,7 @@ class NetworkAgent(BaseAgent):
         for tool_name in ["network.port_scan", "network.banner_grab", 
                           "network.host_discovery", "network.firewall_detect"]:
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(target=target)
+                result = tool_registry.run(tool_name, target=target)
                 if result.get("findings"):
                     findings.extend(result["findings"])
             except (KeyError, Exception) as e:

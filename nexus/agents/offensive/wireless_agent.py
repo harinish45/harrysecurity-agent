@@ -15,8 +15,7 @@ class WirelessAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("wireless.wifi_audit")
-            result = tool(target=target)
+            result = tool_registry.run("wireless.wifi_audit", target=target)
             tools_used.append("wireless.wifi_audit")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class WirelessAgent(BaseAgent):
             findings.append({"title": f"WiFi audit error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("wireless.bluetooth")
-            result = tool(target=target)
+            result = tool_registry.run("wireless.bluetooth", target=target)
             tools_used.append("wireless.bluetooth")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class WirelessAgent(BaseAgent):
             findings.append({"title": f"Bluetooth testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("wireless.ble")
-            result = tool(target=target)
+            result = tool_registry.run("wireless.ble", target=target)
             tools_used.append("wireless.ble")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class WirelessAgent(BaseAgent):
             findings.append({"title": f"BLE testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("wireless.handshake_capture")
-            result = tool(target=target)
+            result = tool_registry.run("wireless.handshake_capture", target=target)
             tools_used.append("wireless.handshake_capture")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class WirelessAgent(BaseAgent):
             findings.append({"title": f"Handshake capture error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("wireless.deauth_test")
-            result = tool(target=target)
+            result = tool_registry.run("wireless.deauth_test", target=target)
             tools_used.append("wireless.deauth_test")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class WirelessAgent(BaseAgent):
             findings.append({"title": f"Deauth test error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("wireless.rogue_ap")
-            result = tool(target=target)
+            result = tool_registry.run("wireless.rogue_ap", target=target)
             tools_used.append("wireless.rogue_ap")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -69,8 +63,7 @@ class WirelessAgent(BaseAgent):
             findings.append({"title": f"Rogue AP error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("wireless.evil_twin")
-            result = tool(target=target)
+            result = tool_registry.run("wireless.evil_twin", target=target)
             tools_used.append("wireless.evil_twin")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -78,8 +71,7 @@ class WirelessAgent(BaseAgent):
             findings.append({"title": f"Evil twin error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("wireless.wpa_test")
-            result = tool(target=target)
+            result = tool_registry.run("wireless.wpa_test", target=target)
             tools_used.append("wireless.wpa_test")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -87,8 +79,7 @@ class WirelessAgent(BaseAgent):
             findings.append({"title": f"WPA test error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("wireless.wps_attack")
-            result = tool(target=target)
+            result = tool_registry.run("wireless.wps_attack", target=target)
             tools_used.append("wireless.wps_attack")
             if result.get("findings"):
                 findings.extend(result["findings"])

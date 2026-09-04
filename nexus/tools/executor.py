@@ -63,6 +63,7 @@ class ToolExecutor:
         target: str,
         *,
         engagement: dict[str, Any] | None = None,
+        timeout: float | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         if not isinstance(target, str) or not target.strip():
@@ -105,7 +106,7 @@ class ToolExecutor:
         # truthful failure," which is the actual problem being solved here.
         tool = tool_registry.get(tool_name)
         started = time.monotonic()
-        timeout_s = getattr(config, "nexus_tool_timeout", 300)
+        timeout_s = timeout if timeout is not None else getattr(config, "nexus_tool_timeout", 300)
         future = _EXECUTOR_POOL.submit(tool, target=target, **kwargs)
         try:
             result = future.result(timeout=timeout_s)

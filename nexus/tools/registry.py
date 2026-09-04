@@ -23,13 +23,33 @@ class ToolRegistry:
         }
 
     def get(self, name: str) -> Callable:
-        """Get a tool function by name."""
+        """Get the raw tool function by name (bypasses guardrails).
+
+        Internal use only — nexus.tools.executor.ToolExecutor.run() calls this
+        to fetch the function it then runs behind the full guardrail chain,
+        and tests use it to smoke-test tools directly. Agent and mission code
+        must call `run()` below instead, so every tool invocation gets
+        guardrail enforcement (scope/legal/rate/audit) — calling this
+        directly from agent code skips all of that.
+        """
         if name not in self._tools:
             raise KeyError(
                 f"Tool '{name}' not found. "
                 f"Available tools: {', '.join(sorted(self._tools)[:10])}..."
             )
         return self._tools[name]
+
+    def run(self, name: str, target: str, **kwargs: Any) -> dict:
+        """Execute a tool through the guardrailed ToolExecutor.
+
+        This is the safe entrypoint for agents and orchestration code: unlike
+        `get()`, it enforces InputGuard/ScopeGuard/LegalGuard/EscalationGuard/
+        RateGuard/AuditGuard and normalizes the result to the canonical
+        schema, exactly like a dashboard-triggered scan does.
+        """
+        from nexus.tools.executor import ToolExecutor
+
+        return ToolExecutor().run(name, target=target, **kwargs)
 
     def list_tools(self) -> Dict[str, dict]:
         """List all registered tools with metadata."""

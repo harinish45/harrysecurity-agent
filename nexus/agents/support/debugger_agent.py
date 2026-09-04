@@ -17,8 +17,7 @@ class DebuggerAgent(BaseAgent):
 
         if any(w in task_lower for w in ["error", "trace", "debug", "crash", "exception", "stack"]):
             try:
-                debug_tool = tool_registry.get("reverse_engineering.debugging")
-                result = debug_tool(task=task, target=target)
+                result = tool_registry.run("reverse_engineering.debugging", task=task, target=target)
                 tools_used.append("reverse_engineering.debugging")
                 if result.get("findings"):
                     findings.extend(result["findings"])
@@ -27,8 +26,7 @@ class DebuggerAgent(BaseAgent):
 
         if any(w in task_lower for w in ["memory", "dump", "forensics", "leak"]):
             try:
-                mem_tool = tool_registry.get("forensics.memory_forensics")
-                result = mem_tool(task=task, target=target)
+                result = tool_registry.run("forensics.memory_forensics", task=task, target=target)
                 tools_used.append("forensics.memory_forensics")
                 if result.get("findings"):
                     findings.extend(result["findings"])
@@ -38,8 +36,7 @@ class DebuggerAgent(BaseAgent):
         if any(w in task_lower for w in ["malware", "behavior", "api", "monitor"]):
             for tool_name in ("malware.behavior_analysis", "malware.api_monitoring"):
                 try:
-                    tool_fn = tool_registry.get(tool_name)
-                    result = tool_fn(task=task, target=target)
+                    result = tool_registry.run(tool_name, task=task, target=target)
                     tools_used.append(tool_name)
                     if result.get("findings"):
                         findings.extend(result["findings"])

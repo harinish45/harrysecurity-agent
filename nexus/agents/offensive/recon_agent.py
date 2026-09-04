@@ -13,8 +13,7 @@ class ReconAgent(BaseAgent):
         for tool_name in ["reconnaissance.dns_recon", "reconnaissance.subdomain_enum", 
                           "reconnaissance.tech_fingerprint", "reconnaissance.whois_lookup"]:
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(target=target)
+                result = tool_registry.run(tool_name, target=target)
                 if result.get("findings"):
                     findings.extend(result["findings"])
             except (KeyError, Exception) as e:

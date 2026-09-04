@@ -19,8 +19,7 @@ class CoderAgent(BaseAgent):
 
         if any(w in task_lower for w in ["generate", "create", "write", "script", "tool", "automation"]):
             try:
-                script_tool = tool_registry.get("automation.python_scripting")
-                result = script_tool(task=task, target=target)
+                result = tool_registry.run("automation.python_scripting", task=task, target=target)
                 tools_used.append("automation.python_scripting")
                 if result.get("findings"):
                     findings.extend(result["findings"])
@@ -31,8 +30,7 @@ class CoderAgent(BaseAgent):
         if any(w in task_lower for w in ["review", "audit", "secure", "scan", "secret"]):
             for tool_name in ("appsec.secure_code_review", "appsec.secret_scanning"):
                 try:
-                    tool_fn = tool_registry.get(tool_name)
-                    result = tool_fn(target=target or "codebase")
+                    result = tool_registry.run(tool_name, target=target or "codebase")
                     tools_used.append(tool_name)
                     if result.get("findings"):
                         review_issues.extend(result["findings"])
@@ -42,8 +40,7 @@ class CoderAgent(BaseAgent):
 
         if not tools_used and any(w in task_lower for w in ["custom", "develop", "build"]):
             try:
-                custom_tool = tool_registry.get("automation.custom_tool_development")
-                result = custom_tool(task=task, target=target)
+                result = tool_registry.run("automation.custom_tool_development", task=task, target=target)
                 tools_used.append("automation.custom_tool_development")
                 if result.get("findings"):
                     findings.extend(result["findings"])

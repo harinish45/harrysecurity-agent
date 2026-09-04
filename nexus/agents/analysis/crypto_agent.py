@@ -16,8 +16,7 @@ class CryptoAgent(BaseAgent):
 
         # Certificate validation
         try:
-            cert_val = tool_registry.get("cryptography.certificate_validation")
-            result = cert_val(target=target)
+            result = tool_registry.run("cryptography.certificate_validation", target=target)
             tools_used.append("cryptography.certificate_validation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class CryptoAgent(BaseAgent):
 
         # Cryptanalysis
         try:
-            cryptanalysis = tool_registry.get("cryptography.cryptanalysis")
-            result = cryptanalysis(target=target)
+            result = tool_registry.run("cryptography.cryptanalysis", target=target)
             tools_used.append("cryptography.cryptanalysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class CryptoAgent(BaseAgent):
 
         # Crypto hash analysis
         try:
-            hash_analysis = tool_registry.get("cryptography.crypto_hash_analysis")
-            result = hash_analysis(target=target)
+            result = tool_registry.run("cryptography.crypto_hash_analysis", target=target)
             tools_used.append("cryptography.crypto_hash_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class CryptoAgent(BaseAgent):
 
         # Key management
         try:
-            key_mgmt = tool_registry.get("cryptography.key_management")
-            result = key_mgmt(target=target)
+            result = tool_registry.run("cryptography.key_management", target=target)
             tools_used.append("cryptography.key_management")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -56,8 +52,7 @@ class CryptoAgent(BaseAgent):
 
         # PKI reviews
         try:
-            pki = tool_registry.get("cryptography.pki_reviews")
-            result = pki(target=target)
+            result = tool_registry.run("cryptography.pki_reviews", target=target)
             tools_used.append("cryptography.pki_reviews")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -66,8 +61,7 @@ class CryptoAgent(BaseAgent):
 
         # TLS testing
         try:
-            tls = tool_registry.get("cryptography.tls_testing")
-            result = tls(target=target)
+            result = tool_registry.run("cryptography.tls_testing", target=target)
             tools_used.append("cryptography.tls_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])

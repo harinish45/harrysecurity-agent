@@ -16,8 +16,7 @@ class ThreatHuntAgent(BaseAgent):
 
         # Threat hunting (blue team)
         try:
-            hunt_blue = tool_registry.get("blue_team.threat_hunting_blue")
-            result = hunt_blue(target=target)
+            result = tool_registry.run("blue_team.threat_hunting_blue", target=target)
             tools_used.append("blue_team.threat_hunting_blue")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class ThreatHuntAgent(BaseAgent):
 
         # Threat feeds
         try:
-            feeds = tool_registry.get("threat_intel.threat_feeds")
-            result = feeds(target=target)
+            result = tool_registry.run("threat_intel.threat_feeds", target=target)
             tools_used.append("threat_intel.threat_feeds")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class ThreatHuntAgent(BaseAgent):
 
         # UEBA
         try:
-            ueba = tool_registry.get("soc.ueba")
-            result = ueba(target=target)
+            result = tool_registry.run("soc.ueba", target=target)
             tools_used.append("soc.ueba")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class ThreatHuntAgent(BaseAgent):
 
         # Threat hunting (IR)
         try:
-            hunt_ir = tool_registry.get("incident_response.threat_hunting")
-            result = hunt_ir(target=target)
+            result = tool_registry.run("incident_response.threat_hunting", target=target)
             tools_used.append("incident_response.threat_hunting")
             if result.get("findings"):
                 findings.extend(result["findings"])

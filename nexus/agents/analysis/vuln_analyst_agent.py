@@ -13,8 +13,7 @@ class VulnAnalystAgent(BaseAgent):
         # Run vulnerability assessment tools
         for tool_name in ["vuln_assessment.vuln_scan", "vuln_assessment.cve_lookup"]:
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(target=target)
+                result = tool_registry.run(tool_name, target=target)
                 if result.get("findings"):
                     findings_out.extend(result["findings"])
             except (KeyError, Exception) as e:

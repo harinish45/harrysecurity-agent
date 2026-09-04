@@ -25,8 +25,7 @@ class SearcherAgent(BaseAgent):
 
         for tool_name, source_name in recon_tools:
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(target=target)
+                result = tool_registry.run(tool_name, target=target)
                 tools_used.append(tool_name)
                 sources.append(source_name)
                 if result.get("findings"):

@@ -15,8 +15,7 @@ class RedteamAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("red_team.initial_access_simulation")
-            result = tool(target=target)
+            result = tool_registry.run("red_team.initial_access_simulation", target=target)
             tools_used.append("red_team.initial_access_simulation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class RedteamAgent(BaseAgent):
             findings.append({"title": f"Initial access simulation error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("red_team.lateral_movement_simulation")
-            result = tool(target=target)
+            result = tool_registry.run("red_team.lateral_movement_simulation", target=target)
             tools_used.append("red_team.lateral_movement_simulation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class RedteamAgent(BaseAgent):
             findings.append({"title": f"Lateral movement simulation error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("red_team.persistence_simulation")
-            result = tool(target=target)
+            result = tool_registry.run("red_team.persistence_simulation", target=target)
             tools_used.append("red_team.persistence_simulation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class RedteamAgent(BaseAgent):
             findings.append({"title": f"Persistence simulation error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("red_team.credential_access_simulation")
-            result = tool(target=target)
+            result = tool_registry.run("red_team.credential_access_simulation", target=target)
             tools_used.append("red_team.credential_access_simulation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class RedteamAgent(BaseAgent):
             findings.append({"title": f"Credential access simulation error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("red_team.exfiltration_simulation")
-            result = tool(target=target)
+            result = tool_registry.run("red_team.exfiltration_simulation", target=target)
             tools_used.append("red_team.exfiltration_simulation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class RedteamAgent(BaseAgent):
             findings.append({"title": f"Exfiltration simulation error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("red_team.defense_evasion_simulation")
-            result = tool(target=target)
+            result = tool_registry.run("red_team.defense_evasion_simulation", target=target)
             tools_used.append("red_team.defense_evasion_simulation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -69,8 +63,7 @@ class RedteamAgent(BaseAgent):
             findings.append({"title": f"Defense evasion simulation error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("red_team.discovery_simulation")
-            result = tool(target=target)
+            result = tool_registry.run("red_team.discovery_simulation", target=target)
             tools_used.append("red_team.discovery_simulation")
             if result.get("findings"):
                 findings.extend(result["findings"])

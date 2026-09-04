@@ -16,8 +16,7 @@ class SocAgent(BaseAgent):
 
         # Alert investigation
         try:
-            alert = tool_registry.get("soc.alert_investigation")
-            result = alert(target=target)
+            result = tool_registry.run("soc.alert_investigation", target=target)
             tools_used.append("soc.alert_investigation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class SocAgent(BaseAgent):
 
         # Log correlation
         try:
-            log = tool_registry.get("soc.log_correlation")
-            result = log(target=target)
+            result = tool_registry.run("soc.log_correlation", target=target)
             tools_used.append("soc.log_correlation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class SocAgent(BaseAgent):
 
         # SIEM monitoring
         try:
-            siem = tool_registry.get("soc.siem_monitoring")
-            result = siem(target=target)
+            result = tool_registry.run("soc.siem_monitoring", target=target)
             tools_used.append("soc.siem_monitoring")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class SocAgent(BaseAgent):
 
         # SOAR automation
         try:
-            soar = tool_registry.get("soc.soar_automation")
-            result = soar(target=target)
+            result = tool_registry.run("soc.soar_automation", target=target)
             tools_used.append("soc.soar_automation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -56,8 +52,7 @@ class SocAgent(BaseAgent):
 
         # Dashboard creation
         try:
-            dash = tool_registry.get("soc.dashboard_creation")
-            result = dash(target=target)
+            result = tool_registry.run("soc.dashboard_creation", target=target)
             tools_used.append("soc.dashboard_creation")
             if result.get("findings"):
                 findings.extend(result["findings"])

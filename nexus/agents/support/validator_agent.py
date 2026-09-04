@@ -23,8 +23,7 @@ class ValidatorAgent(BaseAgent):
 
         for tool_name in compliance_tools:
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(target=target, findings=findings)
+                result = tool_registry.run(tool_name, target=target, findings=findings)
                 tools_used.append(tool_name)
                 if result.get("findings"):
                     validation_results.extend(result["findings"])
@@ -33,8 +32,7 @@ class ValidatorAgent(BaseAgent):
 
         for tool_name in ("appsec.sca", "appsec.dependency_analysis"):
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(target=target)
+                result = tool_registry.run(tool_name, target=target)
                 tools_used.append(tool_name)
                 if result.get("findings"):
                     validation_results.extend(result["findings"])
@@ -43,8 +41,7 @@ class ValidatorAgent(BaseAgent):
 
         remediation_status = kwargs.get("remediation_status", {}) or {}
         try:
-            rem_tool = tool_registry.get("vuln_assessment.remediation_validation")
-            result = rem_tool(target=target, findings=findings, remediation_status=remediation_status)
+            result = tool_registry.run("vuln_assessment.remediation_validation", target=target, findings=findings, remediation_status=remediation_status)
             tools_used.append("vuln_assessment.remediation_validation")
             if result.get("findings"):
                 validation_results.extend(result["findings"])

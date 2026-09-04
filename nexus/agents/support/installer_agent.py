@@ -49,8 +49,7 @@ class InstallerAgent(BaseAgent):
 
         for tool_name in automation_tools:
             try:
-                tool_fn = tool_registry.get(tool_name)
-                result = tool_fn(task=task, target=target)
+                result = tool_registry.run(tool_name, task=task, target=target)
                 tools_used.append(tool_name)
                 if result.get("findings"):
                     pass

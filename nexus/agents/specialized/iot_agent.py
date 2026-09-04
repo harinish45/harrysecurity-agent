@@ -15,8 +15,7 @@ class IotAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("iot.smart_device_assessment")
-            result = tool(target=target)
+            result = tool_registry.run("iot.smart_device_assessment", target=target)
             tools_used.append("iot.smart_device_assessment")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class IotAgent(BaseAgent):
             findings.append({"title": f"Smart device assessment error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("iot.can_bus_testing")
-            result = tool(target=target)
+            result = tool_registry.run("iot.can_bus_testing", target=target)
             tools_used.append("iot.can_bus_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class IotAgent(BaseAgent):
             findings.append({"title": f"CAN bus testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("iot.firmware_extraction")
-            result = tool(target=target)
+            result = tool_registry.run("iot.firmware_extraction", target=target)
             tools_used.append("iot.firmware_extraction")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class IotAgent(BaseAgent):
             findings.append({"title": f"Firmware extraction error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("iot.embedded_linux")
-            result = tool(target=target)
+            result = tool_registry.run("iot.embedded_linux", target=target)
             tools_used.append("iot.embedded_linux")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class IotAgent(BaseAgent):
             findings.append({"title": f"Embedded Linux error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("iot.jtag_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("iot.jtag_analysis", target=target)
             tools_used.append("iot.jtag_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class IotAgent(BaseAgent):
             findings.append({"title": f"JTAG analysis error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("iot.uart_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("iot.uart_analysis", target=target)
             tools_used.append("iot.uart_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])

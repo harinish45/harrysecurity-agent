@@ -38,16 +38,14 @@ class QualityAssessorAgent(BaseAgent):
             })
 
         try:
-            risk_tool = tool_registry.get("vuln_assessment.risk_scoring")
-            risk_result = risk_tool(target=target, findings=findings)
+            risk_result = tool_registry.run("vuln_assessment.risk_scoring", target=target, findings=findings)
             if risk_result.get("findings"):
                 validated.extend(risk_result["findings"])
         except Exception as e:
             validated.append({"title": f"Risk scoring error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            prior_tool = tool_registry.get("vuln_assessment.prioritization")
-            prior_result = prior_tool(target=target, findings=findings)
+            prior_result = tool_registry.run("vuln_assessment.prioritization", target=target, findings=findings)
             if prior_result.get("findings"):
                 validated.extend(prior_result["findings"])
         except Exception as e:

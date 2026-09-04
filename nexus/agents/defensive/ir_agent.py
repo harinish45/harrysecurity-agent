@@ -16,8 +16,7 @@ class IrAgent(BaseAgent):
 
         # Alert triage
         try:
-            triage = tool_registry.get("incident_response.alert_triage")
-            result = triage(target=target)
+            result = tool_registry.run("incident_response.alert_triage", target=target)
             tools_used.append("incident_response.alert_triage")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class IrAgent(BaseAgent):
 
         # Incident investigation
         try:
-            investigation = tool_registry.get("incident_response.incident_investigation")
-            result = investigation(target=target)
+            result = tool_registry.run("incident_response.incident_investigation", target=target)
             tools_used.append("incident_response.incident_investigation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class IrAgent(BaseAgent):
 
         # Eradication
         try:
-            eradication = tool_registry.get("incident_response.eradication")
-            result = eradication(target=target)
+            result = tool_registry.run("incident_response.eradication", target=target)
             tools_used.append("incident_response.eradication")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class IrAgent(BaseAgent):
 
         # Malware containment
         try:
-            containment = tool_registry.get("incident_response.malware_containment")
-            result = containment(target=target)
+            result = tool_registry.run("incident_response.malware_containment", target=target)
             tools_used.append("incident_response.malware_containment")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -56,8 +52,7 @@ class IrAgent(BaseAgent):
 
         # Recovery
         try:
-            recovery = tool_registry.get("incident_response.recovery")
-            result = recovery(target=target)
+            result = tool_registry.run("incident_response.recovery", target=target)
             tools_used.append("incident_response.recovery")
             if result.get("findings"):
                 findings.extend(result["findings"])

@@ -15,8 +15,7 @@ class PhysicalPenAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("hardware.rfid_testing")
-            result = tool(target=target)
+            result = tool_registry.run("hardware.rfid_testing", target=target)
             tools_used.append("hardware.rfid_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class PhysicalPenAgent(BaseAgent):
             findings.append({"title": f"RFID testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("hardware.usb_attacks")
-            result = tool(target=target)
+            result = tool_registry.run("hardware.usb_attacks", target=target)
             tools_used.append("hardware.usb_attacks")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class PhysicalPenAgent(BaseAgent):
             findings.append({"title": f"USB attack error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("hardware.rubber_ducky_testing")
-            result = tool(target=target)
+            result = tool_registry.run("hardware.rubber_ducky_testing", target=target)
             tools_used.append("hardware.rubber_ducky_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class PhysicalPenAgent(BaseAgent):
             findings.append({"title": f"Rubber ducky testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("hardware.fault_injection")
-            result = tool(target=target)
+            result = tool_registry.run("hardware.fault_injection", target=target)
             tools_used.append("hardware.fault_injection")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class PhysicalPenAgent(BaseAgent):
             findings.append({"title": f"Fault injection error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("hardware.secure_boot_testing")
-            result = tool(target=target)
+            result = tool_registry.run("hardware.secure_boot_testing", target=target)
             tools_used.append("hardware.secure_boot_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class PhysicalPenAgent(BaseAgent):
             findings.append({"title": f"Secure boot testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("hardware.side_channel_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("hardware.side_channel_analysis", target=target)
             tools_used.append("hardware.side_channel_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])

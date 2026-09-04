@@ -16,8 +16,7 @@ class CodeReviewAgent(BaseAgent):
 
         # SAST
         try:
-            sast = tool_registry.get("appsec.sast")
-            result = sast(target=target)
+            result = tool_registry.run("appsec.sast", target=target)
             tools_used.append("appsec.sast")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class CodeReviewAgent(BaseAgent):
 
         # Secure code review
         try:
-            scr = tool_registry.get("appsec.secure_code_review")
-            result = scr(target=target)
+            result = tool_registry.run("appsec.secure_code_review", target=target)
             tools_used.append("appsec.secure_code_review")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class CodeReviewAgent(BaseAgent):
 
         # Secret scanning
         try:
-            sec_scan = tool_registry.get("appsec.secret_scanning")
-            result = sec_scan(target=target)
+            result = tool_registry.run("appsec.secret_scanning", target=target)
             tools_used.append("appsec.secret_scanning")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class CodeReviewAgent(BaseAgent):
 
         # SCA
         try:
-            sca = tool_registry.get("appsec.sca")
-            result = sca(target=target)
+            result = tool_registry.run("appsec.sca", target=target)
             tools_used.append("appsec.sca")
             if result.get("findings"):
                 findings.extend(result["findings"])
