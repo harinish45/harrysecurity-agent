@@ -35,6 +35,23 @@ def test_report_includes_assessment_context_and_severity_summary():
     assert output.read_text(encoding="utf-8") == report
 
 
+def test_report_never_renders_a_blank_finding_id():
+    """Regression test: Finding.id used to default to "" for the common case
+    (a plain dict finding, no explicit id) — every finding section header
+    rendered as "###  — CRITICAL" (double space, id missing) and every
+    remediation-table row had a blank Finding ID column."""
+    report = ReportGenerator().generate(
+        [{"title": "SQL injection in login form", "severity": "critical"}],
+        target="example.com",
+        mission_id="test-mission-ids",
+    )
+    assert "###  —" not in report
+    assert "### F-" in report
+    # The remediation table's Finding ID column must not be blank either.
+    table_row = next(line for line in report.splitlines() if "SQL injection in login form" in line and line.startswith("|"))
+    assert "| P1 | F-" in table_row
+
+
 def test_portable_exporters_create_valid_artifacts():
     tmp = _make_tmpdir()
     findings = [{"severity": "high", "title": "<unsafe markup>", "evidence": "proof"}]

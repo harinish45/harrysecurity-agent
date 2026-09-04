@@ -180,14 +180,21 @@ async def read_root():
         return html_path.read_text(encoding="utf-8")
     return HTMLResponse("<h1>NEXUS-STRIKE Dashboard</h1><p>Templates not found.</p>")
 
+_SERVABLE_REPORT_TYPES = {
+    ".pdf": "application/pdf",
+    ".json": "application/json",
+    ".md": "text/markdown",
+}
+
+
 @app.get("/api/reports")
 async def get_reports(request: Request):
-    """List all available PDF and JSON reports."""
+    """List all available report files (PDF, JSON, or Markdown)."""
     _require_token(request)
     reports = []
     if REPORTS_DIR.exists():
         for f in REPORTS_DIR.iterdir():
-            if f.suffix in (".pdf", ".json"):
+            if f.suffix in _SERVABLE_REPORT_TYPES:
                 reports.append({
                     "name": f.name,
                     "size": f.stat().st_size,
@@ -209,11 +216,10 @@ async def get_report(filename: str, request: Request):
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Report not found")
 
-    if filename.endswith(".pdf"):
-        return FileResponse(file_path, media_type="application/pdf")
-    elif filename.endswith(".json"):
-        return FileResponse(file_path, media_type="application/json")
-    raise HTTPException(status_code=400, detail="Unsupported file type")
+    media_type = _SERVABLE_REPORT_TYPES.get(file_path.suffix)
+    if media_type is None:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+    return FileResponse(file_path, media_type=media_type)
 
 @app.get("/api/stats")
 async def get_stats(request: Request):

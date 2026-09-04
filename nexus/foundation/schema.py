@@ -5,6 +5,7 @@ Every tool, report, and export MUST use this schema and these status values.
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -75,6 +76,15 @@ class Finding:
     def __post_init__(self) -> None:
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if not self.id:
+            # The docstring above promises this is "Auto-assigned" — it wasn't,
+            # which left every Finding built from a plain dict (the common
+            # case: most agents return {"title": ..., "severity": ...} with no
+            # id) with id="" all the way through to the rendered report
+            # ("### — CRITICAL", blank Finding ID column). A random suffix
+            # (not sequential) avoids collisions between Finding objects built
+            # independently across concurrent FlowController batches.
+            self.id = f"F-{uuid.uuid4().hex[:8].upper()}"
         sev = self.severity.lower()
         if sev not in self.SEVERITY_ORDER:
             self.severity = "info"

@@ -31,7 +31,9 @@ import urllib.error
 import urllib.parse
 import concurrent.futures
 from datetime import datetime
+from pathlib import Path
 from typing import Any
+from nexus.foundation.paths import safe_slug
 from nexus.foundation.ssl_config import get_ssl_context
 
 # ---------------------------------------------------------------------------
@@ -415,6 +417,29 @@ def phase9_final_report(target: str, host: str, findings: list[str], analysis: s
     return report
 
 
+def _write_report(result: dict) -> Path | None:
+    """Persist the assessment result as JSON under reports/ so the
+    dashboard's /api/stats, /api/findings, and /api/reports — which all read
+    the most recent *.json file there — actually see what a live scan found.
+
+    Before this, `nexus live` (what /api/scan/start actually spawns) only
+    ever printed its result to stdout: the dashboard's "Start Scan" button
+    never populated any of the pages that are supposed to show its results.
+    """
+    reports_dir = Path("reports")
+    try:
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        meta = result.get("_meta", {})
+        target = meta.get("target", "unknown")
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = reports_dir / f"live-{safe_slug(target)}-{timestamp}.json"
+        path.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+        return path
+    except OSError as exc:
+        print(f"\n[!] Could not write report to disk: {exc}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
@@ -528,7 +553,7 @@ def run_assessment(target_ip: str, target_host: str | None = None) -> dict:
     print(f"  LLM blocks: {len(llm_blocks)}")
     print("#" * 68)
 
-    return {
+    result = {
         "findings": findings,
         "llm_blocks": llm_blocks,
         "phases": phases,
@@ -549,6 +574,11 @@ def run_assessment(target_ip: str, target_host: str | None = None) -> dict:
             "cve_count": len(enriched_cves),
         },
     }
+    report_path = _write_report(result)
+    if report_path:
+        print(f"  Report    : {report_path}")
+        print("#" * 68)
+    return result
 
 
 # ---------------------------------------------------------------------------

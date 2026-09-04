@@ -42,6 +42,33 @@ def test_run_assessment_blocked_for_out_of_scope_target(monkeypatch):
     assert result["_meta"]["status"] == "blocked"
 
 
+def test_write_report_persists_json_under_reports_dir(tmp_path, monkeypatch):
+    """Before this, run_assessment()'s result only ever went to stdout —
+    /api/stats, /api/findings, and /api/reports (which all read the most
+    recent reports/*.json) never saw anything a live scan found."""
+    monkeypatch.chdir(tmp_path)
+    result = {"findings": ["x"], "_meta": {"target": "127.0.0.1"}}
+
+    path = live_agent._write_report(result)
+
+    assert path is not None
+    assert path.exists()
+    assert path.parent.name == "reports"
+    import json
+    assert json.loads(path.read_text(encoding="utf-8")) == result
+
+
+def test_blocked_run_does_not_write_a_report(tmp_path, monkeypatch):
+    """A scan blocked by guardrails must not leave a fake "completed" report
+    on disk for /api/stats to pick up."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("NEXUS_LEGAL_ACK", raising=False)
+
+    live_agent.run_assessment("127.0.0.1", "127.0.0.1")
+
+    assert not (tmp_path / "reports").exists()
+
+
 def test_sqli_phase_routes_through_the_guardrailed_registry(monkeypatch):
     """The SQLi probe must go through tool_registry.run() (guardrailed), not
     a raw import of the tool function — proven here by the escalation

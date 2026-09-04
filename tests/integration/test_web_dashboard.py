@@ -88,6 +88,26 @@ def test_api_report_not_found(client):
     assert response.status_code == 404
 
 
+def test_markdown_reports_are_listed_and_served(client, tmp_path, monkeypatch):
+    """OrchestrationEngine._generate_report() writes .md — the reports
+    list/serve endpoints used to only recognise .pdf/.json, so a mission
+    report was never visible and 400'd if you guessed the URL."""
+    import web.server as server
+
+    monkeypatch.setattr(server, "REPORTS_DIR", tmp_path)
+    (tmp_path / "mission-001.md").write_text("# Security Assessment Report\n", encoding="utf-8")
+
+    listing = client.get("/api/reports")
+    assert listing.status_code == 200
+    names = [r["name"] for r in listing.json()["reports"]]
+    assert "mission-001.md" in names
+
+    served = client.get("/api/reports/mission-001.md")
+    assert served.status_code == 200
+    assert served.headers["content-type"].startswith("text/markdown")
+    assert "Security Assessment Report" in served.text
+
+
 def test_launch_dashboard_importable():
     """launch_dashboard function must be importable from web.server."""
     from web.server import launch_dashboard
