@@ -148,11 +148,40 @@ def test_scan_start_requires_legal_ack(client, monkeypatch):
 def test_scan_start_rejects_out_of_scope_target(client, monkeypatch):
     """/api/scan/start must validate the target through ScopeGuard before
     spawning anything, not rely solely on the subprocess's own executor
-    chain to reject it after the fact."""
+    chain to reject it after the fact.
+
+    Pins NEXUS_ALLOWED_TARGETS explicitly rather than trusting whatever a
+    real developer .env has configured — pydantic-settings loads .env
+    directly into the shared config singleton regardless of the shell
+    environment, and a broad scope there (e.g. a 0.0.0.0/0 entry left over
+    from manual testing) would make this "rejected" assertion pass for the
+    wrong reason (DNS resolution failure on a fake hostname) while a real,
+    resolvable target would actually be let through."""
+    from nexus.foundation.config import config
+
     monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+    monkeypatch.setattr(config, "nexus_allowed_targets", "127.0.0.1,localhost")
+
     response = client.post(
         "/api/scan/start",
         json={"target": "definitely-not-an-allowed-target.invalid"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 400
+
+
+def test_scan_start_rejects_a_real_out_of_scope_ip(client, monkeypatch):
+    """Same as above but with a literal, resolvable public IP — exercises
+    the CIDR-membership check directly instead of the DNS-failure path,
+    which a hostname-only test can't distinguish from a real scope block."""
+    from nexus.foundation.config import config
+
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+    monkeypatch.setattr(config, "nexus_allowed_targets", "127.0.0.1,localhost")
+
+    response = client.post(
+        "/api/scan/start",
+        json={"target": "8.8.8.8"},
         headers={"X-Requested-With": "NEXUS-Dashboard"},
     )
     assert response.status_code == 400
@@ -341,3 +370,90 @@ def test_logout_revokes_the_session(client, isolated_auth_vault):
     assert me.status_code in (200, 401)
     if me.status_code == 200:
         assert me.json()["session"] is False
+
+
+@pytest.fixture(autouse=True)
+def _pinned_scope_for_agent_run(monkeypatch):
+    """Every /api/agent/run test below targets 127.0.0.1 — pin scope
+    explicitly rather than trusting a real developer .env's
+    NEXUS_ALLOWED_TARGETS (see test_scan_start_rejects_out_of_scope_target)."""
+    from nexus.foundation.config import config
+
+    monkeypatch.setattr(config, "nexus_allowed_targets", "127.0.0.1,localhost")
+
+
+def test_agent_run_requires_csrf_header(client, monkeypatch):
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+    response = client.post("/api/agent/run", json={"agent": "recon_agent", "target": "127.0.0.1"})
+    assert response.status_code == 403
+    assert "X-Requested-With" in response.json()["detail"]
+
+
+def test_agent_run_rejects_unknown_agent(client, monkeypatch):
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+    response = client.post(
+        "/api/agent/run",
+        json={"agent": "not-a-real-agent", "target": "127.0.0.1"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 404
+
+
+def test_agent_run_requires_legal_ack(client, monkeypatch):
+    monkeypatch.delenv("NEXUS_LEGAL_ACK", raising=False)
+    response = client.post(
+        "/api/agent/run",
+        json={"agent": "recon_agent", "target": "127.0.0.1"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 403
+    assert "NEXUS_LEGAL_ACK" in response.json()["detail"]
+
+
+def test_agent_run_invokes_the_real_agent(client, monkeypatch):
+    """End-to-end: the dashboard endpoint must actually call the named
+    agent's real run(), not stub anything out."""
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+    response = client.post(
+        "/api/agent/run",
+        json={"agent": "recon_agent", "target": "127.0.0.1"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["agent"] == "recon_agent"
+    assert "findings" in body
+
+
+def test_agent_run_reaches_orchestrator_tier_agents(client, monkeypatch):
+    """mission_commander_agent / task_planner_agent / agent_router_agent are
+    only reachable through this endpoint (and the CLI) — not through a
+    mission's FlowController, since their job is planning/routing, not being
+    one phase of a mission themselves."""
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+    response = client.post(
+        "/api/agent/run",
+        json={"agent": "task_planner_agent", "target": "127.0.0.1", "task": "plan an assessment"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 200
+    assert response.json()["agent"] == "task_planner_agent"
+
+
+def test_viewer_role_cannot_run_an_agent(client, isolated_auth_vault):
+    from nexus.foundation.auth import Role, auth_manager
+
+    auth_manager.register_user("dashtest_viewer_agent", "correct-horse-battery", Role.VIEWER)
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "dashtest_viewer_agent", "password": "correct-horse-battery"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    token = login.json()["token"]
+
+    response = client.post(
+        "/api/agent/run",
+        json={"agent": "recon_agent", "target": "127.0.0.1"},
+        headers={"Authorization": f"Bearer {token}", "X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 403

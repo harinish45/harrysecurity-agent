@@ -541,6 +541,58 @@ async def scan_status(request: Request):
     }
 
 
+@app.post("/api/agent/run")
+async def agent_run(payload: dict, request: Request):
+    """Run one agent's real run() against a target directly — the dashboard
+    equivalent of `nexus agent run <name> --target <t>`. This is the only
+    way the orchestrator-tier planning/routing agents (mission_commander_
+    agent, task_planner_agent, agent_router_agent) are reachable from the
+    dashboard: their job is to produce a plan or a routing decision, not to
+    be one phase of a FlowController-run mission themselves, so they aren't
+    wired into /api/scan/start.
+    """
+    _require_token(request)
+    require_same_origin_signal(request)
+    from nexus.foundation.auth import Permission
+
+    _require_permission(request, Permission.SCAN_CREATE)
+
+    from nexus.agents.agent_registry import get_agent
+    from nexus.foundation.guardrails import EscalationGuard, LegalGuard, ScopeGuard
+
+    agent_name = str(payload.get("agent", ""))
+    target = str(payload.get("target", ""))
+    task = str(payload.get("task") or f"Run {agent_name} against {target}")
+
+    try:
+        agent_cls = get_agent(agent_name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown agent '{agent_name}'")
+
+    if not os.environ.get("NEXUS_LEGAL_ACK"):
+        raise HTTPException(
+            status_code=403,
+            detail="NEXUS_LEGAL_ACK is not set. Set it in the server's environment to confirm "
+                   "you have written authorization to scan targets before running an agent.",
+        )
+
+    try:
+        ScopeGuard.validate(target)
+        LegalGuard.validate(target=target)
+        EscalationGuard.validate(f"agent_{agent_name}", "execute")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Guardrail blocked: {exc}")
+
+    agent = agent_cls()
+    result = await agent.run(task, target=target)
+    # Normalise: agents built on tool_result() key their own name under
+    # "tool" (matching the tool-execution schema they reuse), not "agent" —
+    # this is the one place a caller shouldn't need to know which internal
+    # convention a given agent happens to follow.
+    result.setdefault("agent", agent_name)
+    return result
+
+
 def _open_browser_safe(url: str) -> None:
     """Open the browser safely; never crash in headless environments."""
     try:

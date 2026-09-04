@@ -53,6 +53,12 @@ pip install fastapi uvicorn[standard] websockets
 - `POST /api/scan/start` — launch a scan against `{"target": "..."}`.
 - `POST /api/scan/stop` — terminate the active scan.
 - `GET /api/scan/status` — current scan status.
+- `POST /api/agent/run` — run one agent directly against
+  `{"agent": "...", "target": "...", "task": "..." (optional)}`, outside a
+  full mission. The only way to reach the orchestrator-tier planning/routing
+  agents (`mission_commander_agent`, `task_planner_agent`,
+  `agent_router_agent`) from the dashboard — a mission's FlowController
+  dispatches phases to specialist agents, not to these.
 - `WS /ws/scan` — real-time scan progress/output streaming.
 - `WS /ws/steer` — accepted for future live scan steering; currently
   acknowledges messages only and does not act on them.
