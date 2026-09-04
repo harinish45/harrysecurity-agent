@@ -44,12 +44,7 @@ class DebuggerAgent(BaseAgent):
                     findings.append({"title": f"{tool_name} error: {e}", "severity": "low", "confidence": "medium"})
 
         root_causes = [f for f in findings if "error" in f.get("title", "").lower() or "cause" in f.get("title", "").lower()]
-        suggested_fixes = [
-            "Review stack trace and identify failing function",
-            "Check input validation and error handling",
-            "Verify environment variables and configuration",
-            "Enable verbose logging for additional context",
-        ]
+        suggested_fixes = self._suggest_fixes(task_lower, tools_used, root_causes)
 
         return tool_result(
             self.name, target or "unknown",
@@ -63,3 +58,20 @@ class DebuggerAgent(BaseAgent):
                 "execution_traced": len(tools_used) > 0,
             },
         )
+
+    @staticmethod
+    def _suggest_fixes(task_lower: str, tools_used: list, root_causes: list) -> list:
+        """Rule-based, conditioned on what was actually investigated —
+        not a fixed list returned unconditionally regardless of task/findings."""
+        fixes = []
+        if "reverse_engineering.debugging" in tools_used:
+            fixes.append("Review the stack trace at the failing frame and confirm inputs match its preconditions")
+        if "forensics.memory_forensics" in tools_used:
+            fixes.append("Check for unclosed handles/references around the flagged allocation and confirm it's released on every code path")
+        if "malware.behavior_analysis" in tools_used or "malware.api_monitoring" in tools_used:
+            fixes.append("Diff observed API/behavior sequence against the expected baseline for this component")
+        if root_causes:
+            fixes.append(f"Start with the {len(root_causes)} finding(s) flagged as a likely root cause before broader investigation")
+        if not fixes:
+            fixes.append("No debugging-specific tool matched this task — narrow the task description (error/trace, memory/leak, or malware/behavior) to run a targeted check")
+        return fixes
