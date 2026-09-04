@@ -3,6 +3,7 @@
 NEXUS-STRIKE — webapp tool: Api Security
 Domain: webapp
 """
+from nexus.foundation.net import safe_urlopen
 from nexus.tools.registry import tool_registry
 from nexus.foundation.ssl_config import get_ssl_context
 
@@ -35,7 +36,7 @@ def run(target: str, **kwargs) -> dict:
             req = urllib.request.Request(
                 url, headers={"User-Agent": "NexusStrike/1.0"}
             )
-            resp = urllib.request.urlopen(req, timeout=6, context=ctx)
+            resp = safe_urlopen(req, timeout=6, context=ctx)
             server = resp.headers.get("Server", "unknown")
             powered_by = resp.headers.get("X-Powered-By", "")
             csp = resp.headers.get("Content-Security-Policy", "missing")

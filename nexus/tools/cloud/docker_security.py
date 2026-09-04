@@ -3,6 +3,7 @@
 NEXUS-STRIKE — cloud tool: Docker Security
 Domain: cloud
 """
+from nexus.foundation.net import safe_urlopen
 from nexus.tools.registry import tool_registry
 
 
@@ -23,7 +24,7 @@ def run(target: str, **kwargs) -> dict:
             url = f"{scheme}://{target}/"
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-                resp = urllib.request.urlopen(req, timeout=5)
+                resp = safe_urlopen(req, timeout=5)
                 findings.append(f"{scheme}://{target}: status={resp.status}")
             except Exception as e:
                 findings.append(f"{scheme}://{target}: {str(e)[:60]}")

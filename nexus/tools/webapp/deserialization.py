@@ -5,6 +5,7 @@ Domain: webapp
 Real deserialization detection: sends Java/PHP/Python serialized objects, detects gadget chain errors.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 import urllib.request
 import ssl
 import base64
@@ -40,7 +41,7 @@ def run(target: str, **kwargs: Any) -> dict:
                     },
                     method="POST"
                 )
-                resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+                resp = safe_urlopen(req, timeout=10, context=ctx)
                 body = resp.read(65536).decode("utf-8", errors="replace")
                 
                 # Check for common deserialization error patterns

@@ -5,6 +5,7 @@ Domain: webapp
 JWT vulnerability suite: alg=none bypass, RS256→HS256 confusion, kid injection, weak HMAC secret brute force.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import base64
 import hashlib
@@ -91,7 +92,7 @@ def _try_auth(url: str, token: str, timeout: int = 10) -> int:
     }
     try:
         req = urllib.request.Request(url, headers=headers, method="GET")
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         return resp.status
     except urllib.error.HTTPError as e:
         return e.code

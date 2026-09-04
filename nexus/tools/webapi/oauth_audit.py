@@ -5,6 +5,7 @@ Domain: webapi
 OAuth/OIDC misconfiguration scanner: state param, redirect URI validation, PKCE, token handling.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import json
 import re
@@ -30,7 +31,7 @@ def _http_get(url: str, timeout: int = 10) -> dict:
     ctx = get_ssl_context(url, allow_insecure=True)
     req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/1.0.0 (OAuth Auditor)"})
     try:
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {
             "status": resp.status,

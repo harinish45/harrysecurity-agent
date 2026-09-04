@@ -5,6 +5,7 @@ Domain: webapp
 Real Server-Side Request Forgery (SSRF) detector.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 import urllib.request
 import urllib.parse
 import ssl
@@ -48,7 +49,7 @@ def run(target: str, **kwargs: Any) -> dict:
                         method="GET"
                     )
                     t0 = time.time()
-                    resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+                    resp = safe_urlopen(req, timeout=5, context=ctx)
                     elapsed = time.time() - t0
                     body = resp.read(65536).decode("utf-8", errors="replace")
                     

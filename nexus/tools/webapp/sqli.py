@@ -5,6 +5,7 @@ Domain: webapp
 Advanced SQL Injection detection with error-based, boolean-based, and time-based techniques.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import socket
@@ -82,7 +83,7 @@ def _http_request(url: str, timeout: int = 10, method: str = "GET", data: bytes 
         )
         ctx = get_ssl_context(url, allow_insecure=True)
         t0 = time.time()
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         elapsed = round(time.time() - t0, 3)
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {"status": resp.status, "headers": dict(resp.headers), "body": body, "time": elapsed, "error": None}

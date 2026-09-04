@@ -5,6 +5,7 @@ Domain: webapp
 Local File Inclusion / Path Traversal detection with signature matching.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import ssl
@@ -78,7 +79,7 @@ def _http_request(url: str, timeout: int = 10) -> dict:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         ctx = get_ssl_context(url, allow_insecure=True)
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {"status": resp.status, "body": body, "error": None}
     except urllib.error.HTTPError as e:

@@ -5,6 +5,7 @@ Domain: webapi
 GraphQL security checks: introspection, batching DoS, and query depth abuse.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import json
 import ssl
@@ -58,7 +59,7 @@ def _post_graphql(url: str, query: str, timeout: int = 15, variables: dict = Non
     import time
     try:
         t0 = time.time()
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {"status": resp.status, "body": body, "time": round(time.time() - t0, 3)}
     except urllib.error.HTTPError as e:

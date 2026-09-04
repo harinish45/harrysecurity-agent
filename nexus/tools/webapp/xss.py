@@ -5,6 +5,7 @@ Domain: webapp
 Advanced XSS detection with reflected, stored, and DOM-based techniques.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import socket
@@ -61,7 +62,7 @@ def _http_request(url: str, timeout: int = 10, method: str = "GET", data: bytes 
             data=data,
         )
         ctx = get_ssl_context(url, allow_insecure=True)
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {"status": resp.status, "headers": dict(resp.headers), "body": body, "error": None}
     except urllib.error.HTTPError as e:

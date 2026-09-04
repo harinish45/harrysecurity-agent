@@ -3,6 +3,7 @@
 NEXUS-STRIKE — reconnaissance tool: Asset Discovery
 Domain: reconnaissance
 """
+from nexus.foundation.net import safe_urlopen
 from nexus.tools.registry import tool_registry
 from nexus.foundation.ssl_config import get_ssl_context
 
@@ -40,7 +41,7 @@ def run(target: str, **kwargs) -> dict:
                 req = urllib.request.Request(
                     url, headers={"User-Agent": "NexusStrike/1.0"}
                 )
-                resp = urllib.request.urlopen(req, timeout=6, context=ssl_ctx)
+                resp = safe_urlopen(req, timeout=6, context=ssl_ctx)
                 server = resp.headers.get("Server", "unknown")
                 body = resp.read(4096).decode("utf-8", errors="replace")
                 title = _extract_title(body)

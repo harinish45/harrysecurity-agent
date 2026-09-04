@@ -5,6 +5,7 @@ Domain: webapp
 Directory and file enumeration with recursive scanning and status code analysis.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import concurrent.futures
 import re
@@ -50,7 +51,7 @@ def _http_request(url: str, timeout: int = 5) -> dict:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         ctx = get_ssl_context(url, allow_insecure=True)
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         body = resp.read(8192).decode("utf-8", errors="replace")
         return {"status": resp.status, "body": body, "size": len(body)}
     except urllib.error.HTTPError as e:

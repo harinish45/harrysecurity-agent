@@ -3,6 +3,7 @@
 NEXUS-STRIKE — iam tool: Oauth Testing
 Domain: iam
 """
+from nexus.foundation.net import safe_urlopen
 from nexus.tools.registry import tool_registry
 
 
@@ -23,7 +24,7 @@ def run(target: str, **kwargs) -> dict:
             url = f"http://{target}{ep}"
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-                resp = urllib.request.urlopen(req, timeout=3)
+                resp = safe_urlopen(req, timeout=3)
                 findings.append(f"{ep}: status={resp.status}")
             except urllib.error.HTTPError as e:
                 findings.append(f"{ep}: HTTP {e.code}")

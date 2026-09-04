@@ -3,6 +3,7 @@
 NEXUS-STRIKE — compliance tool: Nist 800 53 Audit
 Domain: compliance
 """
+from nexus.foundation.net import safe_urlopen
 from nexus.tools.registry import tool_registry
 
 
@@ -22,7 +23,7 @@ def run(target: str, **kwargs) -> dict:
         url = f"http://{target}/"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = urllib.request.urlopen(req, timeout=5)
+            resp = safe_urlopen(req, timeout=5)
             headers = dict(resp.headers)
             security_headers = ["X-Frame-Options", "X-Content-Type-Options", "Strict-Transport-Security", "Content-Security-Policy"]
             for h in security_headers:

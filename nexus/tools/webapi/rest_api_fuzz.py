@@ -5,6 +5,7 @@ Domain: webapi
 Real REST API fuzzer (wordlist of HTTP methods, content-types, auth headers).
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 import urllib.request
 import ssl
 from typing import Any
@@ -33,7 +34,7 @@ def run(target: str, **kwargs: Any) -> dict:
         for method in HTTP_METHODS:
             try:
                 req = urllib.request.Request(url, method=method, headers={"User-Agent": "NEXUS-STRIKE/0.2.0"})
-                resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+                resp = safe_urlopen(req, timeout=5, context=ctx)
                 if method not in ["GET", "POST", "OPTIONS"] and resp.status not in [401, 403, 405]:
                     findings.append(Finding(
                         title=f"Unrestricted HTTP Method: {method}",
@@ -57,7 +58,7 @@ def run(target: str, **kwargs: Any) -> dict:
             try:
                 headers = {"User-Agent": "NEXUS-STRIKE/0.2.0", **auth_header}
                 req = urllib.request.Request(url, headers=headers, method="GET")
-                resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+                resp = safe_urlopen(req, timeout=5, context=ctx)
                 if resp.status == 200:
                     findings.append(Finding(
                         title="Weak or Default Credentials Accepted",

@@ -6,6 +6,7 @@ V2X (Vehicle-to-Everything) protocol security testing — evaluates DSRC/C-V2X
 message authenticity, certificate chains, and misbehavior detection.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import socket
 import struct
@@ -74,7 +75,7 @@ def _check_certificate_validation(target: str, timeout: int = 5) -> list[Finding
         url = f"https://{target}/"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike-V2X/1.0"})
-            with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
+            with safe_urlopen(req, context=ctx, timeout=timeout) as resp:
                 if resp.status == 200:
                     findings.append(Finding(
                         title="V2X endpoint accepts unverified TLS connections",

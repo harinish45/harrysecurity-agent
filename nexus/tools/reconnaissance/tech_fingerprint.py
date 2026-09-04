@@ -5,6 +5,7 @@ Domain: reconnaissance
 Technology fingerprinting via HTTP headers, HTML analysis, and response patterns.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import urllib.request
@@ -108,7 +109,7 @@ def run(
 
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/0.2.0"})
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+        with safe_urlopen(req, timeout=timeout, context=ctx) as resp:
             headers = dict(resp.headers)
             html = resp.read().decode("utf-8", errors="replace")
             status = resp.status

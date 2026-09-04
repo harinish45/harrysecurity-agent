@@ -5,6 +5,7 @@ Domain: reconnaissance
 Real WAF detection via response header analysis + payload testing.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 import urllib.request
 import urllib.parse
 import ssl
@@ -39,7 +40,7 @@ def run(target: str, **kwargs: Any) -> dict:
         
         # 1. Header analysis
         req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/0.2.0 (WAF Detector)"})
-        resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+        resp = safe_urlopen(req, timeout=10, context=ctx)
         headers_lower = {k.lower(): v.lower() for k, v in resp.headers.items()}
         
         for waf_name, signatures in WAF_SIGNATURES.items():
@@ -61,7 +62,7 @@ def run(target: str, **kwargs: Any) -> dict:
             test_url = f"{url}?q={urllib.parse.quote(payload)}"
             try:
                 req_probe = urllib.request.Request(test_url, headers={"User-Agent": "NEXUS-STRIKE/0.2.0"})
-                resp_probe = urllib.request.urlopen(req_probe, timeout=10, context=ctx)
+                resp_probe = safe_urlopen(req_probe, timeout=10, context=ctx)
                 if resp_probe.status in [403, 406, 419, 503]:
                     if not waf_detected:
                         waf_detected.append("Unknown WAF")

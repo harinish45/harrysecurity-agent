@@ -3,6 +3,7 @@
 NEXUS-STRIKE Command Line Interface
 Rich CLI with commands for running missions, managing tools/agents, and configuring providers.
 """
+from nexus.foundation.net import safe_urlopen
 import asyncio
 import importlib
 import inspect
@@ -245,7 +246,7 @@ def preflight(
         parsed = urlparse(config.ollama_base_url)
         if parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
             try:
-                with urllib.request.urlopen(f"{config.ollama_base_url.rstrip('/')}/models", timeout=2):
+                with safe_urlopen(f"{config.ollama_base_url.rstrip('/')}/models", timeout=2):
                     reachable = True
             except OSError:
                 reachable = False

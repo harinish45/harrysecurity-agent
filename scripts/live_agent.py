@@ -18,6 +18,7 @@ Phases:
 Target override via --target or target_ip parameter.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import os
 import sys
@@ -157,7 +158,7 @@ def _http_request(url: str, timeout: int = 10, method: str = "GET", data: bytes 
         req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/1.0"}, method=method, data=data)
         ctx = get_ssl_context(url, allow_insecure=True)
         t0 = time.time()
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         elapsed = round(time.time() - t0, 3)
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {"status": resp.status, "headers": dict(resp.headers), "body": body, "time": elapsed, "error": None}

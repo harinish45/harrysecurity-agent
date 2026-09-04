@@ -3,6 +3,7 @@
 NEXUS-STRIKE — soc tool: Log Correlation
 Domain: soc
 """
+from nexus.foundation.net import safe_urlopen
 from nexus.tools.registry import tool_registry
 
 
@@ -21,7 +22,7 @@ def run(target: str, **kwargs) -> dict:
             try:
                 import urllib.request
                 req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-                resp = urllib.request.urlopen(req, timeout=3)
+                resp = safe_urlopen(req, timeout=3)
                 findings.append(f"{ep}: status={resp.status}")
             except urllib.error.HTTPError as e:
                 findings.append(f"{ep}: HTTP {e.code}")

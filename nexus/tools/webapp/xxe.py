@@ -5,6 +5,7 @@ Domain: webapp
 Real XXE detection: sends XXE payload to detected XML parsers, detects error-based XXE.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 import urllib.request
 import urllib.parse
 import ssl
@@ -39,7 +40,7 @@ def run(target: str, **kwargs: Any) -> dict:
                     },
                     method="POST"
                 )
-                resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+                resp = safe_urlopen(req, timeout=10, context=ctx)
                 body = resp.read(65536).decode("utf-8", errors="replace")
                 
                 # Check for common XXE error patterns or leaked file contents

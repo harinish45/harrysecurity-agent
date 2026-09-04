@@ -5,6 +5,7 @@ Domain: webapp
 Website crawler with header analysis, link extraction, and form discovery.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import socket
@@ -147,7 +148,7 @@ def _check_robots_txt(base_url: str) -> Optional[str]:
         netloc = urllib.parse.urlparse(base_url).netloc
         url = f"{scheme}://{netloc}/robots.txt"
         req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/0.2.0"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with safe_urlopen(req, timeout=5) as resp:
             if resp.status == 200:
                 return resp.read().decode("utf-8", errors="replace")[:5000]
     except Exception:
@@ -204,7 +205,7 @@ def run(
 
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/0.2.0"})
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            with safe_urlopen(req, timeout=timeout, context=ctx) as resp:
                 html = resp.read().decode("utf-8", errors="replace")
                 headers = dict(resp.headers)
 

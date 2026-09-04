@@ -3,6 +3,7 @@
 NEXUS-STRIKE — webapp tool: Auth Test
 Domain: webapp
 """
+from nexus.foundation.net import safe_urlopen
 from nexus.tools.registry import tool_registry
 from nexus.foundation.ssl_config import get_ssl_context
 
@@ -19,7 +20,7 @@ def run(target: str, **kwargs) -> dict:
         ctx = get_ssl_context(target, allow_insecure=True)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+            resp = safe_urlopen(req, timeout=5, context=ctx)
             import re as _re
             def _title(h):
                 m = _re.search(r'<title[^>]*>([^<]+)</title>', h, _re.IGNORECASE)
