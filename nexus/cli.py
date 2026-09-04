@@ -699,6 +699,304 @@ def agent_run(
         raise typer.Exit(1)
 
 
+advanced_app = typer.Typer(help="Run the advanced/experimental capability modules (nexus/advanced/*.py) directly — these had no CLI or dashboard path before.")
+app.add_typer(advanced_app, name="advanced")
+
+
+def _load_findings(path: Path) -> list:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"Invalid findings JSON: {exc}") from exc
+    if isinstance(data, dict) and "findings" in data:
+        data = data["findings"]
+    if not isinstance(data, list):
+        raise typer.BadParameter("Findings file must contain a JSON list of finding objects (or {\"findings\": [...]})")
+    return data
+
+
+def _print_json(obj) -> None:
+    # Plain print, not console.print() — the module-level `console` forces
+    # ANSI styling (force_terminal=True) even when piped, which would
+    # otherwise mangle this into invalid JSON for anyone scripting against
+    # `nexus advanced <cmd> | jq ...`.
+    print(json.dumps(obj, indent=2, default=str))
+
+
+_ADVANCED_MODULES = [
+    ("threat_modeling", "ThreatModeler", "real"),
+    ("triage", "Triage", "real"),
+    ("asm_monitor", "AttackSurfaceMonitor", "real"),
+    ("supply_chain", "SupplyChainScanner", "real"),
+    ("patch_validation", "PatchValidator", "real"),
+    ("notarization", "EvidenceNotary", "real"),
+    ("pq_signing", "PQSigner", "real"),
+    ("honeypot", "CanaryListener", "real"),
+    ("ga_fuzzer", "GeneticFuzzer", "real"),
+    ("neurosymbolic", "NeuroSymbolicExplainer", "real"),
+    ("threat_radar", "ThreatRadar", "real"),
+    ("adversarial_ml", "AdversarialMLDefense", "not implemented — see module docstring"),
+    ("rl_simulation", "AdversarialSimulation", "not implemented — see module docstring"),
+    ("federated_learning", "FederatedThreatLearning", "not implemented — see module docstring"),
+    ("deepfake_detection", "DeepfakeDetector", "not implemented — see module docstring"),
+]
+
+
+@advanced_app.command("list")
+def advanced_list():
+    """List all advanced/experimental modules and whether each is real or an honest stub."""
+    table = Table(title="Advanced Capability Modules", box=box.ROUNDED)
+    table.add_column("Module", style="cyan")
+    table.add_column("Class", style="green")
+    table.add_column("Status")
+    for mod, cls, status in _ADVANCED_MODULES:
+        table.add_row(mod, cls, status)
+    console.print(table)
+    console.print(
+        "\n[dim]11 real, working commands below (`nexus advanced --help`); 4 modules "
+        "intentionally raise NotImplementedError with a stated reason rather than "
+        "fake a capability — see nexus/advanced/<name>.py docstrings.[/]"
+    )
+
+
+@advanced_app.command("attack-paths")
+def advanced_attack_paths(
+    findings: Path = typer.Option(..., "--findings", exists=True, readable=True, help='JSON file: a list of finding dicts, or {"findings": [...]}'),
+    critical_asset: list[str] = typer.Option(None, "--critical-asset", help="Repeatable: an asset name to weight as critical"),
+):
+    """Predict likely next attack-chain steps from a set of findings."""
+    from nexus.advanced.threat_modeling import ThreatModeler
+
+    _print_json(ThreatModeler().predict_attack_paths(_load_findings(findings), critical_assets=critical_asset or None))
+
+
+@advanced_app.command("triage")
+def advanced_triage(
+    findings: Path = typer.Option(..., "--findings", exists=True, readable=True),
+    dedupe: bool = typer.Option(False, "--dedupe", help="Deduplicate near-identical findings instead of prioritizing"),
+    critical_asset: list[str] = typer.Option(None, "--critical-asset"),
+):
+    """Prioritize or (with --dedupe) deduplicate a set of findings."""
+    from nexus.advanced.triage import Triage
+
+    data = _load_findings(findings)
+    triage = Triage()
+    result = triage.deduplicate(data) if dedupe else triage.prioritize(data, critical_assets=critical_asset or None)
+    _print_json(result)
+
+
+@advanced_app.command("supply-chain")
+def advanced_supply_chain(
+    requirements: Path = typer.Option(Path("requirements.txt"), "--requirements", help="requirements.txt to audit via pip-audit"),
+):
+    """Scan a requirements file for known-vulnerable dependencies via pip-audit."""
+    from nexus.advanced.supply_chain import SupplyChainScanner
+
+    _print_json(SupplyChainScanner().scan(str(requirements)))
+
+
+@advanced_app.command("verify-patch")
+def advanced_verify_patch(
+    finding: Path = typer.Option(..., "--finding", exists=True, readable=True, help="JSON file: a single finding object with tool/affected_asset/title"),
+):
+    """Re-run the original (tool, target) for one finding and check whether it still reproduces — a regression check, not auto-patching."""
+    from nexus.advanced.patch_validation import PatchValidator
+
+    data = json.loads(finding.read_text(encoding="utf-8"))
+    _print_json(PatchValidator().verify_fix(data))
+
+
+@advanced_app.command("notarize")
+def advanced_notarize(file: Path = typer.Argument(..., exists=True, readable=True)):
+    """Create a Bitcoin-anchored OpenTimestamps (.ots) receipt for a file."""
+    from nexus.advanced.notarization import EvidenceNotary
+
+    receipt = EvidenceNotary().notarize(str(file))
+    console.print(f"[green]Notarized:[/] {receipt}")
+
+
+@advanced_app.command("verify-notarization")
+def advanced_verify_notarization(file: Path = typer.Argument(..., exists=True, readable=True)):
+    """Check the OpenTimestamps notarization status of a file."""
+    from nexus.advanced.notarization import EvidenceNotary
+
+    _print_json(EvidenceNotary().verify(str(file)))
+
+
+@advanced_app.command("pq-sign")
+def advanced_pq_sign(file: Path = typer.Argument(..., exists=True, readable=True)):
+    """Sign a file's bytes with ML-DSA-65 (post-quantum, FIPS 204)."""
+    from nexus.advanced.pq_signing import PQSigner
+
+    signature = PQSigner().sign_evidence(str(file))
+    sig_path = file.with_name(file.name + ".sig")
+    sig_path.write_bytes(signature)
+    console.print(f"[green]Signed:[/] {sig_path}")
+
+
+@advanced_app.command("pq-verify")
+def advanced_pq_verify(
+    file: Path = typer.Argument(..., exists=True, readable=True),
+    signature: Path = typer.Argument(..., exists=True, readable=True),
+):
+    """Verify an ML-DSA-65 signature (from `nexus advanced pq-sign`) against a file."""
+    from nexus.advanced.pq_signing import PQSigner
+
+    if PQSigner().verify_evidence(str(file), signature.read_bytes()):
+        console.print("[green]Signature valid.[/]")
+    else:
+        console.print("[red]Signature INVALID.[/]")
+        raise typer.Exit(1)
+
+
+@advanced_app.command("explain")
+def advanced_explain(
+    findings: Path = typer.Option(..., "--findings", exists=True, readable=True),
+):
+    """Explain a set of findings in plain English, fact-checked against a symbolic graph built from those same findings (catches an LLM claiming something the findings don't support)."""
+    from nexus.advanced.neurosymbolic import NeuroSymbolicExplainer
+
+    _print_json(NeuroSymbolicExplainer().explain(_load_findings(findings)))
+
+
+@advanced_app.command("threat-radar")
+def advanced_threat_radar(
+    software: str = typer.Argument(..., help="Software name to query, e.g. 'openssl'"),
+    version: str = typer.Option(None, "--version"),
+):
+    """Query the public NVD CVE API for CVEs matching a software name/version."""
+    from nexus.advanced.threat_radar import ThreatRadar
+
+    _print_json(ThreatRadar().check_software(software, version))
+
+
+@advanced_app.command("kev-check")
+def advanced_kev_check(cve: list[str] = typer.Argument(..., help="One or more CVE IDs")):
+    """Check which of the given CVE IDs are in CISA's Known Exploited Vulnerabilities catalog."""
+    from nexus.advanced.threat_radar import ThreatRadar
+
+    _print_json(ThreatRadar().check_kev(list(cve)))
+
+
+@advanced_app.command("fuzz")
+def advanced_fuzz(
+    seed: list[str] = typer.Option(..., "--seed", help="Repeatable: a seed input string"),
+    generations: int = typer.Option(20, "--generations"),
+    population_size: int = typer.Option(30, "--population-size"),
+):
+    """Run the genetic-algorithm fuzzer offline against a demo fitness function.
+
+    The module never talks to a target itself (see nexus/advanced/ga_fuzzer.py's
+    docstring) — a real run supplies its own fitness_fn that actually probes a
+    target from Python. This command's fitness function is a harmless offline
+    demo (rewards fuzzing-metacharacter diversity) so `nexus advanced fuzz` is
+    runnable without wiring a live target through the CLI.
+    """
+    from nexus.advanced.ga_fuzzer import GeneticFuzzer
+
+    def _demo_fitness(candidate: str) -> float:
+        interesting = set("'\"`;|&$(){}[]<>\\/%#")
+        return float(len(set(candidate) & interesting))
+
+    fuzzer = GeneticFuzzer(seed_inputs=list(seed), fitness_fn=_demo_fitness)
+    _print_json(fuzzer.evolve(generations=generations, population_size=population_size))
+
+
+@advanced_app.command("honeypot")
+def advanced_honeypot(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(0, "--port", help="0 = pick a free port"),
+    duration: float = typer.Option(30.0, "--duration", help="Seconds to listen before stopping"),
+):
+    """Run a canary TCP listener for a fixed duration, logging any connection attempts."""
+    import time as _time
+
+    from nexus.advanced.honeypot import CanaryListener
+
+    listener = CanaryListener(host=host, port=port)
+    bound = listener.start()
+    console.print(f"[cyan]Canary listening on {host}:{bound} for {duration}s...[/]")
+    try:
+        _time.sleep(duration)
+    finally:
+        listener.stop()
+    console.print("[green]Canary stopped.[/]")
+
+
+@advanced_app.command("asm-baseline")
+def advanced_asm_baseline(
+    target: list[str] = typer.Option(..., "--target", "-t", help="Repeatable: a target to baseline"),
+    tool: list[str] = typer.Option(..., "--tool", help="Repeatable: a fully-qualified tool name, e.g. reconnaissance.dns_recon"),
+):
+    """Run a fixed set of tools against a fixed set of targets and record it as a baseline.
+
+    Continuous re-checking (check_for_changes/run_forever) needs a long-running
+    process by design (see nexus/advanced/asm_monitor.py's docstring) — invoke
+    the module directly from Python for that, this command covers the one-shot
+    baseline half.
+    """
+    import os
+
+    from nexus.foundation.guardrails import EscalationGuard, LegalGuard, ScopeGuard
+
+    if not os.environ.get("NEXUS_LEGAL_ACK"):
+        console.print("[red]NEXUS_LEGAL_ACK is not set — set it to confirm you have written authorization to scan these targets.[/]")
+        raise typer.Exit(1)
+    try:
+        for t in target:
+            ScopeGuard.validate(t)
+            LegalGuard.validate(target=t)
+        EscalationGuard.validate("asm_baseline", "execute")
+    except Exception as exc:
+        console.print(f"[red]Guardrail blocked: {exc}[/]")
+        raise typer.Exit(1)
+
+    from nexus.advanced.asm_monitor import AttackSurfaceMonitor
+
+    monitor = AttackSurfaceMonitor(targets=list(target))
+    baseline = monitor.run_baseline(list(tool))
+    _print_json({f"{k[0]}::{k[1]}": v for k, v in baseline.items()})
+
+
+compliance_app = typer.Typer(help="Compliance control mappings and gap-analysis reports (nexus/compliance/*.py) — an illustrative evidence-mapping tool, not a certification claim.")
+app.add_typer(compliance_app, name="compliance")
+
+_COMPLIANCE_FRAMEWORKS = ["SOC2", "ISO27001", "NIST_CSF", "GDPR", "HIPAA", "PCI_DSS"]
+
+
+@compliance_app.command("frameworks")
+def compliance_frameworks():
+    """List the supported compliance frameworks and each one's control count."""
+    from nexus.compliance.frameworks import get_mappings
+
+    table = Table(title="Compliance Frameworks", box=box.ROUNDED)
+    table.add_column("Framework", style="cyan")
+    table.add_column("Controls mapped", style="green")
+    for fw in _COMPLIANCE_FRAMEWORKS:
+        table.add_row(fw, str(len(get_mappings(fw))))
+    console.print(table)
+
+
+@compliance_app.command("report")
+def compliance_report(
+    framework: str = typer.Argument(..., help=f"One of: {', '.join(_COMPLIANCE_FRAMEWORKS)}"),
+    output: Path = typer.Option(None, "--output", "-o", help="Write the report to this path instead of printing it"),
+):
+    """Generate a gap-analysis report for a framework from real, currently-collectible evidence (audit-log chain verification, RBAC config, TLS config, redaction status) — not a certification."""
+    from nexus.compliance.reports import generate_compliance_report
+
+    if framework.upper() not in _COMPLIANCE_FRAMEWORKS:
+        console.print(f"[red]Unknown framework '{framework}'. Choose one of: {', '.join(_COMPLIANCE_FRAMEWORKS)}[/]")
+        raise typer.Exit(1)
+
+    report = generate_compliance_report(framework.upper())
+    if output:
+        output.write_text(report, encoding="utf-8")
+        console.print(f"[green]Written:[/] {output}")
+    else:
+        console.print(report)
+
+
 auth_app = typer.Typer(help="Manage dashboard/API user accounts (nexus/foundation/auth.py).")
 app.add_typer(auth_app, name="auth")
 

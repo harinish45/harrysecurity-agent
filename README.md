@@ -91,11 +91,24 @@ nexus COMMAND [OPTIONS]
 
 Commands:
   live          Run the live AI agent (port scan + web vuln + AI report)
-  run           Launch a full security assessment mission
+  run           Launch a full security assessment mission (dependency-batched,
+                concurrent FlowController dispatch to real agents)
+  agent         Run a single agent directly — `agent run <name> --target <t>`
+  advanced      Run an advanced/experimental module directly — attack-path
+                prediction, triage, supply-chain scan, patch re-verification,
+                evidence notarization/PQ-signing, threat-radar (NVD/CISA KEV),
+                genetic-algorithm fuzzing, honeypot, ASM baseline, and more
+                (`advanced list` for the full set — 11 real, 4 honest stubs)
+  compliance    Generate a control-mapping gap-analysis report — SOC2,
+                ISO27001, NIST_CSF, GDPR, HIPAA, PCI_DSS (illustrative, not a
+                certification)
+  auth          Manage dashboard/API user accounts
+  view          Launch the web dashboard
+  skills        List/run registered security skills
   engage        Create an authorised-engagement record before scanning
   preflight     Verify host readiness and security controls
-  tools         List all 266 registered security tools across 29 domains
-  agents        List all registered AI agents
+  tools         List all registered security tools across 29 domains
+  agents        List all registered AI agents (`--tier` to filter)
   providers     Show LLM provider configuration status
   export-report Export findings to a portable report file
   config-show   Show current NEXUS-STRIKE configuration
@@ -108,6 +121,9 @@ nexus live --target <ip>                  # Quick scan
 nexus live --target <ip> --ports 80,443,8080  # Custom ports
 nexus run  --target <ip> --mode autonomous --objective vuln_scan
 nexus run  --target <ip> --engagement ./my_engagement.json
+nexus agent run recon_agent --target <ip>
+nexus advanced threat-radar openssl --version 3.0.0
+nexus compliance report SOC2
 nexus preflight --strict
 ```
 
