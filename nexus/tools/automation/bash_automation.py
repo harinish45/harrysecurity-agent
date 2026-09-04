@@ -10,26 +10,15 @@ def run(target: str, **kwargs) -> dict:
     """automation tool: Bash Automation"""
     findings = []
     try:
-        import os
-        import subprocess
-        # Run a basic system check
+        # Intentionally generic: this automation-domain tool does not
+        # execute scripts or read local files. It used to treat `target`
+        # as a local filesystem path and read whatever file was there —
+        # an unsandboxed local file read (CWE-22-adjacent) with no scope
+        # or path validation, reachable via tool_registry.run(target=<any
+        # local path>). Removed rather than "fixed" with path validation,
+        # since reading a local file was never a legitimate check for a
+        # security tool assessing a remote target.
         findings.append(f"Target: {target}")
-        findings.append(f"Working directory: {os.getcwd()}")
-        # Check if target is a script
-        if os.path.isfile(target):
-            findings.append(f"Target is a file: {target}")
-            with open(target, "r", errors="replace") as f:
-                content = f.read()
-            findings.append(f"File size: {len(content)} chars")
-            # Check for security issues
-            if "eval(" in content:
-                findings.append("WARNING: eval() found in script")
-            if "exec(" in content:
-                findings.append("WARNING: exec() found in script")
-            if "os.system(" in content:
-                findings.append("WARNING: os.system() found in script")
-        else:
-            findings.append(f"Target {target} is not a file")
     except Exception as e:
         findings.append(f"Error: {e}")
     return {"tool": "automation.bash_automation", "domain": "automation", "target": target, "status": "completed", "findings": findings}

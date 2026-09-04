@@ -41,7 +41,7 @@ jobs:
     - name: Security scan with Bandit (advisory)
       run: |
         pip install bandit
-        bandit -r nexus -ll || echo "Bandit found issues — review before the next hardening pass (see docs/production_readiness.md)"
+        bandit -r nexus scripts web -ll || echo "Bandit found issues — review before the next hardening pass (see docs/production_readiness.md)"
 
     - name: Dependency vulnerability scan with pip-audit (advisory)
       run: |
