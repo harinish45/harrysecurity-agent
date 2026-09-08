@@ -56,51 +56,72 @@ def run(
                                  help="LLM provider: openai, anthropic, openrouter, ollama, groq, deepseek, omniroute, custom"),
 ):
     """🚀 Launch a security assessment mission."""
-    engagement_record = None
-    if engagement is not None:
-        try:
-            engagement_record = json.loads(engagement.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise typer.BadParameter(f"Invalid engagement JSON: {exc}") from exc
-        scope = engagement_record.get("scope")
-        authorization = engagement_record.get("authorization_reference")
-        if not isinstance(scope, list) or not all(isinstance(item, str) and item.strip() for item in scope):
-            raise typer.BadParameter("Engagement record requires a non-empty string scope list")
-        if not isinstance(authorization, str) or not authorization.strip():
-            raise typer.BadParameter("Engagement record requires an authorization reference")
-        config.nexus_allowed_targets = ",".join(scope)
-        from nexus.foundation.guardrails.scope_guard import ScopeGuard
-        ScopeGuard.validate(target)
+    result = _launch_mission(target, engagement, mode, mission, objective, provider)
+    _display_mission_result(result, target, mode, objective, mission)
+
+
+def _resolve_engagement(engagement: Path | None, target: str) -> dict | None:
+    if engagement is None:
+        return None
+    try:
+        engagement_record = json.loads(engagement.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"Invalid engagement JSON: {exc}") from exc
+    scope = engagement_record.get("scope")
+    authorization = engagement_record.get("authorization_reference")
+    if not isinstance(scope, list) or not all(isinstance(item, str) and item.strip() for item in scope):
+        raise typer.BadParameter("Engagement record requires a non-empty string scope list")
+    if not isinstance(authorization, str) or not authorization.strip():
+        raise typer.BadParameter("Engagement record requires an authorization reference")
+    config.nexus_allowed_targets = ",".join(scope)
+    from nexus.foundation.guardrails.scope_guard import ScopeGuard
+    ScopeGuard.validate(target)
+    return engagement_record
+
+
+def _launch_mission(
+    target: str,
+    engagement: Path | None,
+    mode: str,
+    mission: str,
+    objective: str,
+    provider: str | None,
+    allowed_domains: list[str] | None = None,
+) -> dict:
+    """Shared mission-launch path for `nexus run` and every mode command
+    (`nexus pentest`/`bounty`/`ctf`/`redteam`/`blueteam`/`compliance assess`)
+    — same guardrails, same OrchestrationEngine, only `mode`/`objective`/
+    `allowed_domains` differ per mode."""
+    engagement_record = _resolve_engagement(engagement, target)
 
     console.print(Panel.fit(
         "🏴‍☠️ [bold green]NEXUS-STRIKE[/] v0.1.0 — Ultimate AI-Powered Cybersecurity Platform",
         style="bold green",
     ))
 
-    # Show provider info
     router = LLMRouter(provider=provider)
     provider_info = router.get_provider_info()
     console.print(f"[dim]LLM Provider: [cyan]{provider_info['active_provider']}[/] | "
                   f"Model: [cyan]{provider_info['model']}[/] | "
                   f"Available: [cyan]{', '.join(provider_info['available_providers'])}[/][/]")
 
-    # Run the orchestration engine
     from nexus.orchestration.engine import OrchestrationEngine
     engine = OrchestrationEngine(llm_provider=provider)
 
     async def _run():
-        result = await engine.run_mission(
+        return await engine.run_mission(
             target=target,
             mission_id=mission,
             mode=mode,
             objective=objective,
             engagement=engagement_record,
+            allowed_domains=allowed_domains,
         )
-        return result
 
-    result = asyncio.run(_run())
+    return asyncio.run(_run())
 
-    # Display results
+
+def _display_mission_result(result: dict, target: str, mode: str, objective: str, mission: str) -> None:
     if result.get("status") == "blocked":
         console.print(f"[red]❌ Mission blocked: {result.get('error', 'Unknown error')}[/]")
         raise typer.Exit(1)
@@ -112,9 +133,17 @@ def run(
     console.print(f"[bold]Phases planned:[/] {len(result.get('plan', []))}")
     console.print(f"[bold]Execution strategy:[/] {result.get('execution_strategy', 'sequential')}")
     console.print(f"[bold]Findings:[/] {len(result.get('findings', []))}")
+    console.print(f"[bold]Attack chains found:[/] {len(result.get('attack_chains', []))}")
     quality = result.get("quality_assessment") or {}
     if quality.get("overall_risk_score") is not None:
         console.print(f"[bold]Overall risk score:[/] {quality['overall_risk_score']}/10")
+    verification = result.get("verification_summary") or {}
+    if verification:
+        console.print(f"[bold]Verification:[/] " + ", ".join(f"{k}={v}" for k, v in verification.items()))
+    budget = result.get("budget_report") or {}
+    if budget.get("estimated_tokens"):
+        console.print(f"[bold]Estimated LLM spend:[/] ~{budget['estimated_tokens']} tokens "
+                      f"(~${budget.get('estimated_usd', 0):.4f}) across {budget.get('calls', 0)} call(s)")
     console.print(f"[bold]LLM Provider:[/] {result.get('llm_provider', {}).get('active_provider', 'unknown')}")
     if result.get("report_path"):
         console.print(f"[bold]Report:[/] {result['report_path']}")
@@ -137,6 +166,122 @@ def run(
     console.print("[dim]Run [bold]nexus agents[/] to see all registered agents[/]")
     console.print("[dim]Run [bold]nexus agent run <name> --target <target>[/] to invoke one directly[/]")
     console.print("[dim]Run [bold]nexus providers[/] to see LLM provider status[/]")
+
+
+def _mode_command(
+    profile_key: str,
+    target: str,
+    engagement: Path | None,
+    mission: str,
+    provider: str | None,
+    objective: str | None = None,
+) -> None:
+    from nexus.foundation.agent_profiles import get_profile
+
+    profile = get_profile(profile_key)
+    result = _launch_mission(
+        target, engagement, profile.mode, mission,
+        objective or profile.objective_hint, provider,
+        allowed_domains=list(profile.allowed_domains),
+    )
+    _display_mission_result(result, target, profile.mode, objective or profile.objective_hint, mission)
+    tone_report = result.get("tone_report")
+    if tone_report:
+        console.print(Panel(tone_report[:4000], title=f"{profile.mode}-format report preview", border_style="cyan"))
+
+
+@app.command()
+def pentest(
+    target: str = typer.Option(..., "--target", "-t", help="Authorized target scope"),
+    engagement: Path = typer.Option(None, "--engagement", "-e", exists=True, readable=True,
+                                     help="Engagement JSON created by `nexus engage`"),
+    mission: str = typer.Option("pentest-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """🔒 Authorized penetration-test engagement — full guardrails, formal audit report."""
+    _mode_command("pentest", target, engagement, mission, provider)
+
+
+@app.command()
+def bounty(
+    target: str = typer.Option(..., "--target", "-t", help="In-scope bounty target"),
+    program: str = typer.Option(None, "--program", help="Bounty platform program identifier (H1/Bugcrowd) — "
+                                                          "scope-pull adapter not wired to a live API in this build"),
+    engagement: Path = typer.Option(None, "--engagement", "-e", exists=True, readable=True),
+    mission: str = typer.Option("bounty-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """💰 Bug-bounty engagement — web/API/cloud/mobile-focused, platform-style submission report."""
+    if program:
+        console.print(f"[yellow]--program {program}: no bounty-platform API key configured; "
+                       f"scope must come from --target/--engagement in this build.[/]")
+    _mode_command("bounty", target, engagement, mission, provider)
+
+
+@app.command()
+def ctf(
+    target: str = typer.Option(..., "--target", "-t", help="Challenge host/URL"),
+    category: str = typer.Option("web", "--category", help="pwn|web|crypto|rev|forensics|misc"),
+    mission: str = typer.Option("ctf-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """🚩 CTF challenge solving — category-scoped tools, writeup-style report."""
+    _mode_command("ctf", target, None, mission, provider, objective=f"ctf_{category}")
+
+
+@app.command()
+def redteam(
+    target: str = typer.Option(..., "--target", "-t", help="Authorized target scope"),
+    objective_ttp: str = typer.Option("full_chain", "--objective", "-o", help="TTP chain / objective to emulate"),
+    engagement: Path = typer.Option(None, "--engagement", "-e", exists=True, readable=True),
+    mission: str = typer.Option("redteam-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """🎯 Adversary emulation — MITRE ATT&CK-mapped TTP chain, redteam-format report."""
+    _mode_command("redteam", target, engagement, mission, provider, objective=objective_ttp)
+
+
+@app.command()
+def blueteam(
+    target: str = typer.Option(..., "--target", "-t", help="Environment/host under defensive review"),
+    mission: str = typer.Option("blueteam-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """🛡️ Defensive assessment — detection engineering and incident triage, incident-format report."""
+    _mode_command("blueteam", target, None, mission, provider)
+
+
+@app.command()
+def benchmark(
+    suite: str = typer.Option("intercode_ctf", "--suite", help="intercode_ctf|cybench|nyu_ctf"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """📊 Score the agent stack against Cybench/NYU-CTF/InterCode-CTF-style suites."""
+    from nexus.benchmarks.runner import BenchmarkRunner
+    from nexus.benchmarks.suites import SUITES
+
+    suite_cls = SUITES.get(suite)
+    if not suite_cls:
+        console.print(f"[red]Unknown suite '{suite}'. Available: {', '.join(sorted(SUITES))}[/]")
+        raise typer.Exit(1)
+
+    router = LLMRouter(provider=provider)
+    runner = BenchmarkRunner(llm=router)
+    console.print(f"[cyan]Running benchmark suite: {suite_cls.name}...[/]")
+    summary = runner.run(suite_cls())
+
+    if summary.get("note"):
+        console.print(f"[yellow]{summary['note']}[/]")
+        return
+
+    table = Table(title=f"{summary['name']} — {summary['correct']}/{summary['total']} ({summary['score'] * 100:.1f}%)",
+                  box=box.ROUNDED)
+    table.add_column("Category", style="cyan")
+    table.add_column("Score", style="green")
+    for category, bucket in summary.get("by_category", {}).items():
+        table.add_row(category, f"{bucket['correct']}/{bucket['total']} ({bucket['score'] * 100:.1f}%)")
+    console.print(table)
+    console.print(f"[dim]Appended to benchmarks/history.jsonl for score-over-time tracking.[/]")
 
 
 @app.command()
@@ -995,6 +1140,18 @@ def compliance_report(
         console.print(f"[green]Written:[/] {output}")
     else:
         console.print(report)
+
+
+@compliance_app.command("assess")
+def compliance_assess(
+    target: str = typer.Option(..., "--target", "-t", help="Environment/asset under compliance review"),
+    framework: str = typer.Option("SOC2", "--framework", help="soc2|pci|iso27001|nist_csf|gdpr|hipaa"),
+    mission: str = typer.Option("compliance-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """📋 Agent-driven control-mapping and gap-analysis mission (complements
+    `nexus compliance report`, which reports from static evidence only)."""
+    _mode_command("compliance", target, None, mission, provider, objective=f"gap_analysis_{framework.lower()}")
 
 
 auth_app = typer.Typer(help="Manage dashboard/API user accounts (nexus/foundation/auth.py).")

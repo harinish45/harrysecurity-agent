@@ -24,5 +24,10 @@ pyotp>=2.9
 cryptography>=45.0
 
 # Report visualizations / graph algorithms (nexus/reporting/visualizations,
-# nexus/advanced/threat_modeling.py)
-networkx>=3.0
+# nexus/advanced/threat_modeling.py, nexus/orchestration/decision/attack_chain.py,
+# nexus/agents/orchestrator/attack_chain_agent.py)
+networkx>=3.0
+# networkx's pagerank/spring_layout pull these in at call time — pinned
+# explicitly since they were previously undeclared transitive requirements.
+numpy>=1.26
+scipy>=1.11

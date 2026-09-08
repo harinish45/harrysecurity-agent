@@ -70,6 +70,17 @@ class Finding:
     tool_version: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
+    # Populated by the post-processing agents in the orchestration pipeline
+    # (verification_agent, blast_radius_agent, mitre_mapping_agent,
+    # attack_chain_agent) — additive/optional, every existing exporter keeps
+    # working whether or not it chooses to display these.
+    verification_status: str = ""
+    verification_detail: str = ""
+    business_impact: str = ""
+    mitre_techniques: list[dict[str, str]] = field(default_factory=list)
+    kind: str = ""
+    chain_assets: list[str] = field(default_factory=list)
+
     SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
     CONFIDENCE_ORDER = ("certain", "high", "medium", "low", "tentative")
 

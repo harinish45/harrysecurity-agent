@@ -107,7 +107,49 @@ class ReportGenerator:
             f"- **Exclusions:** {engagement.get('exclusions', 'None specified')}",
             f"- **Emergency stop contact:** {engagement.get('emergency_stop_contact', 'Not provided')}",
             "",
-            "## 6. Findings",
+        ])
+
+        # ── Verification summary (verification_agent) ───────────────────
+        verified_count = sum(1 for f in normalised if f.get("verification_status") == "verified")
+        if any(f.get("verification_status") for f in normalised):
+            lines.extend([
+                "## 6. Verification summary",
+                "",
+                "Every finding below carries a deterministic (non-LLM) replay result where one could be "
+                "computed — see `verification_agent`. `non_replayable` means no automated replay evidence "
+                "was available, not that the finding is unverified-and-suspect.",
+                "",
+                f"- **Verified:** {verified_count} / {len(normalised)}",
+                "",
+            ])
+            for status in ("verified", "unverified", "failed", "non_replayable"):
+                count = sum(1 for f in normalised if f.get("verification_status") == status)
+                if count:
+                    lines.append(f"  - `{status}`: {count}")
+            lines.append("")
+
+        # ── MITRE ATT&CK coverage (mitre_mapping_agent) ──────────────────
+        technique_findings: dict[str, list[str]] = {}
+        for item in normalised:
+            for t in item.get("mitre_techniques") or []:
+                technique_findings.setdefault(f"{t.get('id', '?')} — {t.get('name', '')}", []).append(item.get("id", ""))
+        if technique_findings:
+            lines.extend(["## 7. MITRE ATT&CK coverage", ""])
+            for technique, ids in sorted(technique_findings.items()):
+                lines.append(f"- **{technique}** — {len(ids)} finding(s): {', '.join(ids)}")
+            lines.append("")
+
+        # ── Attack chains (attack_chain_agent) ───────────────────────────
+        chain_findings = [f for f in normalised if f.get("kind") == "synthetic_chain"]
+        if chain_findings:
+            lines.extend(["## 8. Attack chains", ""])
+            for chain in chain_findings:
+                lines.append(f"- **{chain.get('id')}** ({chain.get('severity', 'info').upper()}): "
+                             f"{' -> '.join(chain.get('chain_assets', []))}")
+            lines.append("")
+
+        lines.extend([
+            "## 9. Findings",
             "",
         ])
 
@@ -124,6 +166,9 @@ class ReportGenerator:
                 confidence = item.get("confidence", "medium")
                 tool_name = item.get("tool", "")
                 affected = item.get("affected_asset", "")
+                verification_status = item.get("verification_status")
+                business_impact = item.get("business_impact")
+                mitre_techniques = item.get("mitre_techniques") or []
 
                 lines.extend([
                     f"### {fid} — {sev}",
@@ -132,8 +177,15 @@ class ReportGenerator:
                     f"**Severity:** {sev} | **Confidence:** {confidence}",
                     f"**Tool:** {tool_name}",
                     f"**Affected asset:** {affected}",
-                    "",
                 ])
+                if verification_status:
+                    lines.append(f"**Verification:** `{verification_status}` — {item.get('verification_detail', '')}")
+                if mitre_techniques:
+                    tags = ", ".join(f"[{t.get('id')}]({t.get('url', '')}) {t.get('name', '')}" for t in mitre_techniques)
+                    lines.append(f"**MITRE ATT&CK:** {tags}")
+                if business_impact:
+                    lines.append(f"**Business impact:** {business_impact}")
+                lines.append("")
                 if evidence:
                     lines.extend(["**Evidence:**", "", "```", evidence, "```", ""])
                 if remediation:
@@ -143,7 +195,7 @@ class ReportGenerator:
 
         # ── Remediation priorities ──────────────────────────────────────
         lines.extend([
-            "## 7. Remediation priorities",
+            "## 10. Remediation priorities",
             "",
             "| Priority | Finding ID | Title | Owner | Due date | Retest status |",
             "|----------|-----------|-------|-------|----------|---------------|",
@@ -159,7 +211,7 @@ class ReportGenerator:
 
         # ── Evidence appendix ───────────────────────────────────────────
         lines.extend([
-            "## 8. Evidence appendix",
+            "## 11. Evidence appendix",
             "",
             "Raw evidence for each finding is included in the finding entries above. "
             "The complete audit log and tool outputs are preserved alongside this report.",

@@ -60,6 +60,8 @@ dependencies = [
     "pyyaml>=6.0",
     "orjson>=3.9.0",
     "networkx>=3.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
 
     # Auth / Secrets
     "bcrypt>=4.0",

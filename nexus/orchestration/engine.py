@@ -5,13 +5,22 @@ Core mission execution engine with LLM-powered planning, agent delegation, and s
 from rich.console import Console
 
 from nexus.agents.base_agent import AgentContext
+from nexus.agents.orchestrator.attack_chain_agent import AttackChainAgent
+from nexus.agents.orchestrator.blast_radius_agent import BlastRadiusAgent
+from nexus.agents.orchestrator.debate_consensus_agent import DebateConsensusAgent
+from nexus.agents.orchestrator.mitre_mapping_agent import MitreMappingAgent
 from nexus.agents.orchestrator.pattern_selector_agent import PatternSelectorAgent
+from nexus.agents.orchestrator.poc_recorder_agent import PocRecorderAgent
 from nexus.agents.orchestrator.quality_assessor_agent import QualityAssessorAgent
+from nexus.agents.orchestrator.report_tone_agent import ReportToneAgent
+from nexus.agents.orchestrator.verification_agent import VerificationAgent
 from nexus.foundation.guardrails import LegalGuard, ScopeGuard, EscalationGuard
+from nexus.foundation.guardrails.budget_guard import BudgetGuard, BudgetExceededError
 from nexus.intelligence.llm.router import LLMRouter
 from nexus.foundation.logging import logger
 from nexus.orchestration.flow.flow_controller import FlowController
 from nexus.reporting.generator import ReportGenerator
+from nexus.foundation.schema import normalize_findings
 
 console = Console()
 
@@ -24,7 +33,7 @@ class OrchestrationEngine:
 
     async def run_mission(self, target: str, mission_id: str = "mission-001",
                           mode: str = "guided", objective: str = "full_assessment",
-                          engagement: dict | None = None) -> dict:
+                          engagement: dict | None = None, allowed_domains: list[str] | None = None) -> dict:
         """Execute a complete security assessment mission."""
         console.print(f"[bold green]OrchestrationEngine: Starting mission {mission_id} on {target}[/]")
         logger.info(f"Mission {mission_id} started: target={target}, mode={mode}")
@@ -45,7 +54,7 @@ class OrchestrationEngine:
         # pattern_selector_agent (which of the coordination patterns in
         # nexus.agents.patterns best fits this objective/mode).
         pattern_suggestion = await self._select_pattern(objective, mode, target)
-        plan = await self._plan_mission(target, mode, objective)
+        plan = await self._plan_mission(target, mode, objective, mission_id, allowed_domains)
         self.mission_context.add_to_history(
             f"Mission planned: {len(plan)} phase(s), suggested pattern={pattern_suggestion.get('pattern')}"
         )
@@ -62,10 +71,43 @@ class OrchestrationEngine:
             f"Mission executed via FlowController: strategy={controller.strategy}"
         )
 
-        # Phase 4.5: Quality-assess the collected findings before reporting.
-        quality_assessment = await self._assess_quality(target, self.mission_context.findings)
+        # Phase 4.5: post-process the raw findings before they're scored/reported.
+        # Older agents (e.g. recon_agent's fallback path) still append plain
+        # strings to findings rather than the canonical Finding dict; every
+        # stage below assumes dicts, so normalize once here rather than
+        # each stage guarding against str entries independently. Each stage
+        # is additive and independently fault-tolerant — a stage failing
+        # never aborts the mission, matching _select_pattern/_assess_quality's
+        # existing resilience style below.
+        self.mission_context.findings = normalize_findings(self.mission_context.findings)
+        chains = await self._find_attack_chains(target, self.mission_context.findings)
+        self.mission_context.findings.extend(chains)
 
-        # Phase 5: Generate report
+        self.mission_context.findings = await self._annotate(
+            BlastRadiusAgent(), "blast-radius", target, self.mission_context.findings,
+            metadata_key="annotated_findings", engagement=engagement,
+        )
+        self.mission_context.findings = await self._annotate(
+            MitreMappingAgent(), "MITRE ATT&CK mapping", target, self.mission_context.findings,
+            metadata_key="annotated_findings",
+        )
+
+        quality_assessment = await self._assess_quality(target, self.mission_context.findings)
+        debate_summary = await self._debate_ambiguous(target, quality_assessment.get("validated_findings", []))
+
+        self.mission_context.findings = await self._annotate(
+            VerificationAgent(), "verification", target, self.mission_context.findings,
+            metadata_key="verified_findings",
+        )
+        verification_counts = self._count_by_key(self.mission_context.findings, "verification_status")
+
+        poc_summary = await self._record_poc(target, mission_id, self.mission_context.findings)
+        tone_report = await self._render_tone_report(target, mode, self.mission_context.findings)
+        budget_report = BudgetGuard.report(mission_id)
+
+        # Phase 5: Generate the canonical Markdown report (unchanged path —
+        # the new finding keys above are additive, existing exporters keep
+        # working whether or not they choose to display them).
         report, report_path = await self._generate_report(self.mission_context.findings, engagement)
 
         return {
@@ -76,9 +118,15 @@ class OrchestrationEngine:
             "plan": plan,
             "results": results,
             "findings": self.mission_context.findings,
+            "attack_chains": chains,
             "pattern_suggestion": pattern_suggestion,
             "execution_strategy": controller.strategy,
             "quality_assessment": quality_assessment,
+            "debate_summary": debate_summary,
+            "verification_summary": verification_counts,
+            "poc_summary": poc_summary,
+            "tone_report": tone_report,
+            "budget_report": budget_report,
             "report": report,
             "report_path": report_path,
             "llm_provider": self.llm.get_provider_info(),
@@ -114,14 +162,94 @@ class OrchestrationEngine:
             logger.warning(f"quality_assessor_agent failed: {e}")
             return {"overall_risk_score": 0.0, "validated_findings": [], "error": str(e)}
 
-    async def _plan_mission(self, target: str, mode: str, objective: str) -> list:
+    async def _find_attack_chains(self, target: str, findings: list) -> list:
+        """Ask attack_chain_agent to graph-search the mission's findings for
+        cross-asset chains, returned as extra synthetic findings to append
+        (never replaces the originals)."""
+        if len(findings) < 2:
+            return []
+        try:
+            result = await AttackChainAgent().run("Find attack chains", target=target, findings=findings)
+            return result.get("metadata", {}).get("chains", [])
+        except Exception as e:
+            logger.warning(f"attack_chain_agent failed: {e}")
+            return []
+
+    async def _annotate(self, agent, label: str, target: str, findings: list,
+                        *, metadata_key: str, **extra_kwargs) -> list:
+        """Run an annotation-style agent (blast_radius/mitre_mapping/
+        verification — anything that returns an enriched copy of the
+        findings list under `metadata[metadata_key]`) and fall back to the
+        unmodified findings if it fails, so one annotation stage failing
+        never loses the mission's findings."""
+        if not findings:
+            return findings
+        try:
+            result = await agent.run(f"Annotate findings ({label})", target=target, findings=findings, **extra_kwargs)
+            annotated = result.get("metadata", {}).get(metadata_key)
+            return annotated if annotated else findings
+        except Exception as e:
+            logger.warning(f"{label} annotation failed: {e}")
+            return findings
+
+    async def _debate_ambiguous(self, target: str, review_findings: list) -> dict:
+        """Ask debate_consensus_agent to resolve (or escalate) findings
+        quality_assessor_agent marked 'review' rather than 'validated'."""
+        under_review = [f for f in review_findings if f.get("validation_status") == "review"]
+        if not under_review:
+            return {"resolved": [], "escalated": []}
+        try:
+            result = await DebateConsensusAgent().run("Debate ambiguous findings", target=target, findings=under_review)
+            metadata = result.get("metadata", {})
+            return {"resolved": metadata.get("resolved", []), "escalated": metadata.get("escalated", [])}
+        except Exception as e:
+            logger.warning(f"debate_consensus_agent failed: {e}")
+            return {"resolved": [], "escalated": []}
+
+    async def _record_poc(self, target: str, mission_id: str, findings: list) -> dict:
+        """Ask poc_recorder_agent to persist replayable transcripts for
+        every finding verification_agent stamped 'verified'."""
+        try:
+            result = await PocRecorderAgent().run("Record PoC transcripts", target=target,
+                                                    mission_id=mission_id, findings=findings)
+            return {"summary": result.get("summary", ""), "poc_files": result.get("metadata", {}).get("poc_files", [])}
+        except Exception as e:
+            logger.warning(f"poc_recorder_agent failed: {e}")
+            return {"summary": "", "poc_files": []}
+
+    async def _render_tone_report(self, target: str, mode: str, findings: list) -> str:
+        """Ask report_tone_agent to render the mode-appropriate report body
+        (audit/redteam/compliance/bounty/CTF/...) alongside the canonical
+        Markdown report generated by ReportGenerator."""
+        try:
+            result = await ReportToneAgent().run("Render mode report", target=target, mode=mode, findings=findings)
+            return result.get("metadata", {}).get("rendered_report", "")
+        except Exception as e:
+            logger.warning(f"report_tone_agent failed: {e}")
+            return ""
+
+    @staticmethod
+    def _count_by_key(findings: list, key: str) -> dict:
+        counts: dict[str, int] = {}
+        for f in findings:
+            value = f.get(key)
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+        return counts
+
+    async def _plan_mission(self, target: str, mode: str, objective: str, mission_id: str = "mission",
+                            allowed_domains: list[str] | None = None) -> list:
         """Use LLM to decompose the mission into phases."""
+        domains = ", ".join(allowed_domains) if allowed_domains else (
+            "reconnaissance, network, webapp, wireless, active_directory, cloud, mobile, malware, "
+            "reverse_engineering, exploit_dev, forensics, incident_response, threat_intel, iam, "
+            "compliance, appsec, ai_security"
+        )
         prompt = f"""You are a penetration testing mission planner. Plan a security assessment for target: {target}
 Mode: {mode}
 Objective: {objective}
 
-Available domains: reconnaissance, network, webapp, wireless, active_directory, cloud, mobile, malware,
-reverse_engineering, exploit_dev, forensics, incident_response, threat_intel, iam, compliance, appsec, ai_security
+Available domains: {domains}
 
 Return a JSON list of phases with agent and task for each phase. Phases that
 can safely run at the same time (no phase depends on another's output) may
@@ -132,6 +260,10 @@ Format: [{{"id": "P1", "agent": "recon_agent", "task": "description", "domain": 
 
         response = self.llm.complete(prompt, system="You are a cybersecurity mission planner. Return only valid JSON.")
         logger.debug(f"LLM plan response: {response[:200]}...")
+        try:
+            BudgetGuard.record(mission_id, prompt, response, label="mission_planning")
+        except BudgetExceededError as e:
+            logger.error(f"Mission planning exceeded configured budget: {e}")
 
         import json as json_mod
         plan = None
