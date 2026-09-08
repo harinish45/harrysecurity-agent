@@ -27,9 +27,16 @@ console = Console()
 class OrchestrationEngine:
     """Central orchestration engine that plans and executes security missions."""
 
-    def __init__(self, llm_provider: str = None):
+    def __init__(self, llm_provider: str = None, *, emit_events: bool = False):
         self.llm = LLMRouter(provider=llm_provider)
         self.mission_context = None
+        # When True, print one `NEXUS-EVENT:{json}` line per FlowController
+        # batch-start/agent-done to plain stdout (deliberately not through
+        # `console`/rich, so the line stays raw-parseable JSON). This is what
+        # lets `web/server.py`'s scan subprocess reader turn a CLI-launched
+        # mission into structured live WebSocket events instead of only raw
+        # text lines — see `_stream_output` there.
+        self.emit_events = emit_events
 
     async def run_mission(self, target: str, mission_id: str = "mission-001",
                           mode: str = "guided", objective: str = "full_assessment",
@@ -62,7 +69,7 @@ class OrchestrationEngine:
         # Phase 4: Execute the plan — dependency-batched and concurrency-bounded,
         # each phase dispatched to its real nexus.agents.* class (not just
         # tool-grabbed by domain).
-        controller = FlowController(mission_id)
+        controller = FlowController(mission_id, on_event=self._emit_event if self.emit_events else None)
         results = await controller.run(plan)
         for phase_result in results:
             for f in phase_result.get("findings") or []:
@@ -132,6 +139,11 @@ class OrchestrationEngine:
             "llm_provider": self.llm.get_provider_info(),
             "status": "completed",
         }
+
+    @staticmethod
+    def _emit_event(event: dict) -> None:
+        import json as json_mod
+        print(f"NEXUS-EVENT:{json_mod.dumps(event, default=str)}", flush=True)
 
     async def _select_pattern(self, objective: str, mode: str, target: str) -> dict:
         """Ask pattern_selector_agent which coordination pattern best fits

@@ -465,6 +465,31 @@ tr:hover td { background: var(--bg-tertiary); }
     white-space: pre-wrap;
 }
 
+.agent-stream {
+    white-space: normal;
+}
+
+.agent-stream-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.agent-stream-row:last-child {
+    border-bottom: none;
+}
+
+.agent-stream-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.agent-stream-detail {
+    color: var(--text-secondary);
+}
+
 .tier-cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
 
 .tier-card {

@@ -39,7 +39,7 @@ class PromptInjectionGuardAgent(BaseAgent):
                         "evidence": f"Matched pattern in {hit['source']}: {hit['match']!r}",
                         "remediation": "Sanitize user/target-controllable content before it reaches any LLM context.",
                         "tool": self.name,
-                        "source_finding": f.get("id"),
+                        "raw": {"source_finding": f.get("id")},
                     })
 
         if not detections:

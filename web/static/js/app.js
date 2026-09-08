@@ -153,6 +153,8 @@ function handleScanEvent(data) {
     } else if (data.type === 'output') {
         output.textContent += `\n${data.line || ''}`;
         output.scrollTop = output.scrollHeight;
+    } else if (data.type === 'agent_event') {
+        renderAgentEvent(data.event || {});
     }
 }
 
@@ -678,9 +680,46 @@ async function startScan() {
 
 async function startScanFromPanel() {
     const target = document.getElementById('scan-target')?.value?.trim() || '127.0.0.1';
+    const mode = document.getElementById('scan-mission-mode')?.value || 'live';
     const output = document.getElementById('scan-output');
-    if (output) output.textContent = `🚀 Launching assessment against ${target}…\n`;
-    await apiFetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target}) }).catch(() => {});
+    const stream = document.getElementById('agent-stream');
+    if (output) output.textContent = `🚀 Launching ${mode} assessment against ${target}…\n`;
+    if (stream) { stream.innerHTML = ''; agentStreamGroups = {}; }
+    await apiFetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target, mode}) }).catch(() => {});
+}
+
+// Per-agent event groups for the Live Agent Stream panel — keyed by agent
+// name so repeated batches for the same agent collapse into one block
+// instead of scrolling text.
+let agentStreamGroups = {};
+
+function renderAgentEvent(evt) {
+    const stream = document.getElementById('agent-stream');
+    if (!stream) return;
+
+    if (evt.type === 'batch_start') {
+        (evt.agents || []).forEach(name => {
+            agentStreamGroups[name] = agentStreamGroups[name] || { status: 'running', batch: evt.batch };
+        });
+    } else if (evt.type === 'agent_done') {
+        const name = evt.agent || 'unknown';
+        agentStreamGroups[name] = {
+            status: evt.status || 'completed',
+            batch: evt.batch,
+            findings: evt.findings_count,
+            error: evt.error,
+        };
+    }
+
+    const rows = Object.entries(agentStreamGroups).map(([name, info]) => {
+        const icon = info.status === 'failed' ? '❌' : (info.status === 'running' ? '⏳' : '✅');
+        const detail = info.error
+            ? `error: ${escHtml(info.error)}`
+            : (info.findings !== undefined ? `${info.findings} finding(s)` : 'running…');
+        return `<div class="agent-stream-row"><span class="agent-stream-name">${icon} ${escHtml(name)}</span>`
+             + `<span class="agent-stream-detail">batch ${info.batch ?? '?'} — ${detail}</span></div>`;
+    });
+    stream.innerHTML = rows.join('') || '<span class="muted">Waiting for agents…</span>';
 }
 
 async function stopScan() {

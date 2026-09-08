@@ -106,7 +106,8 @@ def _launch_mission(
                   f"Available: [cyan]{', '.join(provider_info['available_providers'])}[/][/]")
 
     from nexus.orchestration.engine import OrchestrationEngine
-    engine = OrchestrationEngine(llm_provider=provider)
+    import os as _os
+    engine = OrchestrationEngine(llm_provider=provider, emit_events=bool(_os.environ.get("NEXUS_EMIT_EVENTS")))
 
     async def _run():
         return await engine.run_mission(

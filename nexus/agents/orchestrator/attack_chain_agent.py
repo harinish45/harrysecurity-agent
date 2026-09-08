@@ -42,11 +42,15 @@ class AttackChainAgent(BaseAgent):
 
         chain_findings = []
         for i, chain in enumerate(chains, 1):
-            worst = min(
+            # min() of severity *indices* picks the chain's most-severe
+            # existing link (index 0 = critical); the chain is elevated one
+            # notch further to reflect the compounding risk of the chain
+            # itself, not just its worst individual finding.
+            most_severe_idx = min(
                 (self._severity_index(by_asset[a]) for a in chain if a in by_asset),
                 default=4,
             )
-            elevated = _SEVERITY_ORDER[max(0, worst - 1)]
+            elevated = _SEVERITY_ORDER[max(0, most_severe_idx - 1)]
             chain_findings.append({
                 "id": f"CHAIN-{i:03d}",
                 "title": f"Attack chain: {' -> '.join(chain)}",

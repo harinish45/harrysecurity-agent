@@ -169,6 +169,14 @@
                     <p class="subtitle">Start and monitor real-time security assessments</p>
                     <div class="scan-form">
                         <input type="text" id="scan-target" placeholder="Target IP or domain (e.g. 192.168.1.1)" class="form-input">
+                        <select id="scan-mission-mode" class="form-select" title="Mission Control mode">
+                            <option value="live">Live scanner (legacy)</option>
+                            <option value="pentest">Pentest</option>
+                            <option value="bounty">Bounty</option>
+                            <option value="ctf">CTF</option>
+                            <option value="redteam">Redteam</option>
+                            <option value="blueteam">Blueteam</option>
+                        </select>
                         <select id="scan-mode" class="form-select">
                             <option value="guided">Guided (Recommended)</option>
                             <option value="autonomous">Autonomous</option>
@@ -179,6 +187,9 @@
                     </div>
                     <div id="scan-output" class="scan-output">
                         <span class="muted">No scan running. Configure target and press Launch.</span>
+                    </div>
+                    <div id="agent-stream" class="scan-output agent-stream">
+                        <span class="muted">Live Agent Stream — populated when a pentest/bounty/ctf/redteam/blueteam mission is running.</span>
                     </div>
                 </div>
                 <div class="scan-control-panel">

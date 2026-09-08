@@ -405,6 +405,32 @@ async def get_findings(request: Request, limit: int = 50):
     }
 
 
+@app.get("/api/benchmarks")
+async def get_benchmarks(request: Request, limit: int = 50):
+    """Score-over-time data for the Benchmark Dashboard, read from
+    `benchmarks/history.jsonl` (appended to by `nexus benchmark` /
+    `benchmark_harness_agent`) — data path first, chart rendering is a
+    client-side concern the frontend can layer on top of this."""
+    _require_token(request)
+    history_path = Path("benchmarks") / "history.jsonl"
+    if not history_path.exists():
+        return {"runs": [], "total": 0}
+
+    runs = []
+    with history_path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                runs.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    runs.sort(key=lambda r: r.get("run_at", ""), reverse=True)
+    return {"runs": runs[:limit], "total": len(runs)}
+
+
 @app.get("/api/config")
 async def get_config(request: Request):
     """Return current platform configuration (safe, no secrets)."""
@@ -442,6 +468,11 @@ _SCAN_ENV_ALLOWLIST = {
     "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "LLM_PROVIDER",
 }
 
+# Mission modes the "Mission Control" mode switcher can launch, alongside the
+# original legacy `nexus live` scanner (kept as "live" for backward
+# compatibility with the existing dashboard UI/scans).
+_MISSION_MODES = {"pentest", "bounty", "ctf", "redteam", "blueteam"}
+
 
 @app.post("/api/scan/start")
 async def scan_start(payload: dict, request: Request):
@@ -453,6 +484,9 @@ async def scan_start(payload: dict, request: Request):
     _require_permission(request, Permission.SCAN_CREATE)
     global _active_scan
     target = payload.get("target", "127.0.0.1")
+    mode = payload.get("mode", "live")
+    if mode != "live" and mode not in _MISSION_MODES:
+        raise HTTPException(status_code=400, detail=f"Unknown mode '{mode}'. Available: live, {', '.join(sorted(_MISSION_MODES))}")
 
     if not os.environ.get("NEXUS_LEGAL_ACK"):
         # Used to be auto-injected here on every scan, which defeats its
@@ -476,13 +510,23 @@ async def scan_start(payload: dict, request: Request):
         return {"status": "already_running", "target": _active_scan["target"]}
 
     import sys as _sys
+    import time as _time
 
     # Notify clients that a scan is starting
-    _active_scan = {"process": None, "target": target, "status": "starting"}
-    await _broadcast_scan_event({"type": "phase", "target": target, "phase": 0, "message": "Scan starting…"})
+    _active_scan = {"process": None, "target": target, "status": "starting", "mode": mode}
+    await _broadcast_scan_event({"type": "phase", "target": target, "phase": 0, "message": "Scan starting…", "mode": mode})
 
-    cmd = [_sys.executable, "-m", "nexus", "live", "--target", target]
     scan_env = {k: v for k, v in os.environ.items() if k in _SCAN_ENV_ALLOWLIST}
+    if mode == "live":
+        cmd = [_sys.executable, "-m", "nexus", "live", "--target", target]
+    else:
+        # Mission-mode launch — same OrchestrationEngine pipeline as the CLI
+        # (`nexus pentest/bounty/ctf/redteam/blueteam`), with structured
+        # per-agent progress events turned on so `_stream_output` below can
+        # relay real batch/agent progress instead of only raw text lines.
+        mission_id = f"dashboard-{mode}-{int(_time.time())}"
+        cmd = [_sys.executable, "-m", "nexus", mode, "--target", target, "--mission", mission_id]
+        scan_env["NEXUS_EMIT_EVENTS"] = "1"
     proc = _subprocess.Popen(
         cmd,
         stdout=_subprocess.PIPE,
@@ -490,10 +534,14 @@ async def scan_start(payload: dict, request: Request):
         text=True,
         env=scan_env,
     )
-    _active_scan = {"process": proc, "target": target, "status": "running"}
-    await _broadcast_scan_event({"type": "status", "status": "running", "target": target})
+    _active_scan = {"process": proc, "target": target, "status": "running", "mode": mode}
+    await _broadcast_scan_event({"type": "status", "status": "running", "target": target, "mode": mode})
 
-    # Background reader: stream stdout lines to WebSocket clients
+    # Background reader: stream stdout lines to WebSocket clients. Lines
+    # tagged `NEXUS-EVENT:{json}` (emitted by OrchestrationEngine/
+    # FlowController when NEXUS_EMIT_EVENTS=1) become structured
+    # `agent_event` messages; everything else is relayed as raw `output`,
+    # same as before.
     import threading
 
     def _stream_output(process):
@@ -501,19 +549,24 @@ async def scan_start(payload: dict, request: Request):
             line = line.rstrip()
             if not line:
                 continue
-            # Broadcast progress
             import asyncio
+            event = {"type": "output", "target": target, "line": line}
+            if line.startswith("NEXUS-EVENT:"):
+                try:
+                    event = {"type": "agent_event", "target": target, "event": json.loads(line[len("NEXUS-EVENT:"):])}
+                except json.JSONDecodeError:
+                    pass
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                loop.run_until_complete(_broadcast_scan_event({"type": "output", "target": target, "line": line}))
+                loop.run_until_complete(_broadcast_scan_event(event))
                 loop.close()
             except Exception:
                 pass
 
     threading.Thread(target=_stream_output, args=(proc,), daemon=True).start()
 
-    return {"status": "started", "target": target, "pid": proc.pid}
+    return {"status": "started", "target": target, "mode": mode, "pid": proc.pid}
 
 
 @app.post("/api/scan/stop")
