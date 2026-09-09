@@ -715,7 +715,10 @@ def test_ws_scan_enforces_max_connections(monkeypatch):
     import web.server as server
 
     monkeypatch.setattr(server, "WS_MAX_CONNECTIONS", 2)
-    monkeypatch.setattr(server, "_ws_clients", [])
+    # _ws_clients is a set (.add()/.discard() are used on it in the real
+    # handler) — a plain list here would AttributeError the moment a real
+    # connection tries to register itself.
+    monkeypatch.setattr(server, "_ws_clients", set())
     client = TestClient(server.app)
 
     with client.websocket_connect("/ws/scan") as ws1:

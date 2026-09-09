@@ -53,9 +53,14 @@ def run(
     provider: str = typer.Option(None, "--provider", "-p",
                                  help="LLM provider: openai, anthropic, openrouter, ollama, groq, deepseek, omniroute, custom"),
     resume: bool = typer.Option(False, "--resume", help="Resume mission <mission> from its last checkpoint instead of re-planning from scratch"),
+    hat_mode: str = typer.Option("white", "--hat-mode", "-h",
+                                 help="Engagement mode: [bold]white[/] (authorized), [bold]grey[/] (ambiguous), [bold]black[/] (unauthorized simulation)"),
+    workflow: str = typer.Option("full_assessment", "--workflow", "-w",
+                                 help="Assessment workflow: web_pentest, network_audit, cloud_assessment, red_team, blue_team, compliance_audit"),
 ):
     """🚀 Launch a security assessment mission."""
-    result = _launch_mission(target, engagement, mode, mission, objective, provider, resume=resume)
+    result = _launch_mission(target, engagement, mode, mission, objective, provider,
+                              resume=resume, hat_mode=hat_mode, workflow=workflow)
     _display_mission_result(result, target, mode, objective, mission)
 
 
@@ -87,6 +92,8 @@ def _launch_mission(
     provider: str | None,
     allowed_domains: list[str] | None = None,
     resume: bool = False,
+    hat_mode: str = "white",
+    workflow: str = "full_assessment",
 ) -> dict:
     """Shared mission-launch path for `nexus run` and every mode command
     (`nexus pentest`/`bounty`/`ctf`/`redteam`/`blueteam`/`compliance assess`)
@@ -105,6 +112,7 @@ def _launch_mission(
     console.print(f"[dim]LLM Provider: [cyan]{provider_info['active_provider']}[/] | "
                   f"Model: [cyan]{provider_info['model']}[/] | "
                   f"Available: [cyan]{', '.join(provider_info['available_providers'])}[/][/]")
+    console.print(f"[dim]Hat Mode: [cyan]{hat_mode}[/] | Workflow: [cyan]{workflow}[/][/]")
 
     from nexus.orchestration.engine import OrchestrationEngine
     import os as _os
@@ -119,6 +127,8 @@ def _launch_mission(
             engagement=engagement_record,
             allowed_domains=allowed_domains,
             resume=resume,
+            hat_mode=hat_mode,
+            workflow=workflow,
         )
 
     return asyncio.run(_run())
@@ -755,6 +765,8 @@ def live(
     ports: str = typer.Option(None, "--ports", "-p", help="Comma-separated port list (default: top ports)"),
     llm_url: str = typer.Option(None, "--llm-url", help="LLM gateway URL (default: from env or Ollama)"),
     llm_model: str = typer.Option(None, "--llm-model", help="LLM model name"),
+    hat_mode: str = typer.Option("white", "--hat-mode", "-h", help="Engagement mode: white, grey, black"),
+    workflow: str = typer.Option("full_assessment", "--workflow", "-w", help="Assessment workflow"),
 ):
     """🚀 Run the live AI cybersecurity agent against a target."""
     import sys

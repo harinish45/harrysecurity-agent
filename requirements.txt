@@ -1,44 +1,6 @@
-requests>=2.31.0
-python-dotenv>=1.0.0
-typer[all]>=0.9.0
-rich>=13.7.0
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
-httpx>=0.26.0
-pyyaml>=6.0.1
-boto3>=1.34.0
-botocore>=1.34.0
-dnspython>=2.4.0
-ldap3>=2.9  # real LDAP SPN enumeration in nexus/tools/active_directory/kerberoast.py
-beautifulsoup4>=4.12.0
-weasyprint>=60.0
-xhtml2pdf>=0.2.11
-pypdf>=3.1.0
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-websockets>=12.0
-jinja2>=3.1.0
-
-# Auth / secrets vault / TLS
-bcrypt>=4.0
-pyotp>=2.9
-cryptography>=45.0
-
-# Cross-platform process resource-limit enforcement (nexus/tools/sandbox.py)
-psutil>=5.9
-
-# Report visualizations / graph algorithms (nexus/reporting/visualizations,
-# nexus/advanced/threat_modeling.py, nexus/orchestration/decision/attack_chain.py,
-# nexus/agents/orchestrator/attack_chain_agent.py)
-networkx>=3.0
-# networkx's pagerank/spring_layout pull these in at call time — pinned
-# explicitly since they were previously undeclared transitive requirements.
-numpy>=1.26
-scipy>=1.11
-
-# Real Model Context Protocol server (nexus/mcp/server.py, `nexus mcp`) —
-# replaces the earlier "coming in Phase 2" stub.
-mcp>=2.2.0
-
-# Property-based/fuzz testing of the guardrail chain (tests/unit/test_guardrail_property_based.py)
-hypothesis>=6.100
+# Canonical development installation.
+# Runtime dependencies live in pyproject.toml (single source of truth,
+# including everything this branch's security-hardening work added —
+# ldap3/mcp/psutil are in [project.dependencies], hypothesis is in the
+# `dev` extra); CI installs the dev extra.
+-e .[dev]

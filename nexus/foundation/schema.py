@@ -1,7 +1,4 @@
-"""
-NEXUS-STRIKE — Unified finding schema and status constants.
-Every tool, report, and export MUST use this schema and these status values.
-"""
+"""NEXUS-STRIKE canonical result and finding contracts."""
 from __future__ import annotations
 
 import re
@@ -24,6 +21,7 @@ STATUS_REQUIRES_HARDWARE = "requires_hardware"         # Need hardware device
 STATUS_REQUIRES_FILE = "requires_file"       # Need a local file path (not a network host)
 STATUS_REQUIRES_SANDBOX = "requires_sandbox"  # Needs dynamic/sandboxed execution, not performed here
 STATUS_NOT_IMPLEMENTED = "not_implemented"   # Not yet written
+STATUS_SCHEMA_ERROR = "schema_error"         # Malformed findings/result shape — fails closed, not a crash
 
 ALL_STATUSES = frozenset({
     STATUS_COMPLETED,
@@ -36,30 +34,13 @@ ALL_STATUSES = frozenset({
     STATUS_REQUIRES_FILE,
     STATUS_REQUIRES_SANDBOX,
     STATUS_NOT_IMPLEMENTED,
+    STATUS_SCHEMA_ERROR,
 })
 
 
-# ── Finding Schema (single source of truth) ──────────────────────────────────
-
 @dataclass
 class Finding:
-    """Every finding MUST be an instance of this dataclass.
-
-    Fields
-    ------
-    id : str             Auto‑assigned: ``F-001``
-    title : str          Short human‑readable title
-    severity : str       One of ``critical``, ``high``, ``medium``, ``low``, ``info``
-    confidence : str     One of ``certain``, ``high``, ``medium``, ``low``, ``tentative``
-    affected_asset : str The host, URL, resource, or component where the issue exists
-    evidence : str       Machine‑parseable evidence (snippet, log line, response)
-    remediation : str    Action the asset owner should take
-    references : list    URLs or identifiers (CVE, CWE, etc.)
-    timestamp : str      ISO‑8601 UTC when the finding was created
-    tool : str           Fully‑qualified tool name, e.g. ``network.port_scan``
-    tool_version : str   Tool / package version from metadata
-    raw : dict           Original tool output (optional, not for display)
-    """
+    """Canonical finding contract shared by tools, correlation and reports."""
 
     id: str = ""
     title: str = ""
@@ -107,77 +88,129 @@ class Finding:
         # that took down the whole reporting pipeline for one bad finding.
         # Treat anything that isn't a recognized string value as "info"/
         # "medium" instead of trusting it's already a lowercase string.
+        #
+        # NOTE for future merges: an earlier merge of origin/master's schema.py
+        # auto-inserted a *raising* severity/confidence check immediately
+        # above this comment, with no textual overlap against this method's
+        # HEAD-side content — git didn't flag it as a conflict, but it made
+        # the coercion below unreachable dead code and reintroduced the exact
+        # crash this comment describes fixing. Do not re-add an unconditional
+        # `raise ValueError` on invalid severity/confidence here; malformed
+        # input must be coerced, not raised, since Finding() is constructed
+        # directly (not only via normalize_findings()/_coerce_finding(),
+        # which already validate stricter external input at the boundary)
+        # across hundreds of call sites that assume this never raises.
         sev = str(self.severity).lower() if self.severity is not None else ""
         if sev not in self.SEVERITY_ORDER:
             self.severity = "info"
+        else:
+            self.severity = sev
         conf = str(self.confidence).lower() if self.confidence is not None else ""
         if conf not in self.CONFIDENCE_ORDER:
             self.confidence = "medium"
+        else:
+            self.confidence = conf
+        # A finding with no title at all is never legitimate (nothing in
+        # this codebase intentionally constructs one — verified) and would
+        # render as a blank line in every report; unlike severity/
+        # confidence, there's no reasonable default to coerce to here, so
+        # this one genuinely should raise.
+        if not self.title.strip():
+            raise ValueError("Finding title must not be empty")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-# ── Result builder (used by every tool) ──────────────────────────────────────
+def _coerce_finding(item: Any, *, tool: str, tool_version: str, affected_asset: str, index: int) -> Finding:
+    if isinstance(item, Finding):
+        return item
+    if isinstance(item, dict):
+        allowed = {field for field in Finding.__dataclass_fields__ if field not in {"SEVERITY_ORDER", "CONFIDENCE_ORDER"}}
+        unknown = set(item) - allowed
+        if unknown:
+            raise ValueError(f"Unknown finding fields: {sorted(unknown)}")
+        values = dict(item)
+        values.setdefault("tool", tool)
+        values.setdefault("tool_version", tool_version)
+        values.setdefault("affected_asset", affected_asset)
+        return Finding(**values)
+    text = str(item).strip()
+    if not text:
+        raise ValueError(f"Finding {index} is empty")
+    return Finding(
+        id=f"F-{index:03d}", title=text[:160], evidence=text,
+        tool=tool, tool_version=tool_version, affected_asset=affected_asset,
+    )
 
-def tool_result(
-    tool_name: str,
-    target: str,
-    status: str = STATUS_COMPLETED,
-    findings: Optional[list[Finding | dict]] = None,
-    summary: Optional[str] = None,
-    error: Optional[str] = None,
-    metadata: Optional[dict] = None,
-) -> dict[str, Any]:
-    """Build a standardised tool result dictionary.
 
-    Example
-    -------
-    >>> tool_result("network.port_scan", "10.0.0.1",
-    ...             findings=[Finding(title="Open port 22", severity="medium")],
-    ...             summary="Found 3 open ports")
-    """
+def normalize_findings(raw_findings: list[Any], *, tool: str = "", tool_version: str = "", affected_asset: str = "") -> list[dict[str, Any]]:
+    """Normalize findings without silently weakening malformed tool output."""
+    return [
+        _coerce_finding(item, tool=tool, tool_version=tool_version, affected_asset=affected_asset, index=i).to_dict()
+        for i, item in enumerate(raw_findings, 1)
+    ]
+
+
+def tool_result(tool_name: str, target: str, status: str = STATUS_COMPLETED,
+                findings: Optional[list[Finding | dict | str]] = None,
+                summary: Optional[str] = None, error: Optional[str] = None,
+                metadata: Optional[dict] = None) -> dict[str, Any]:
+    """Build a standardized tool result; malformed findings fail closed."""
     if status not in ALL_STATUSES:
-        status = STATUS_FAILED
-
-    normalised: list[dict[str, Any]] = []
-    for i, f in enumerate(findings or [], 1):
-        if isinstance(f, Finding):
-            normalised.append(f.to_dict())
-        elif isinstance(f, dict):
-            normalised.append(Finding(**f).to_dict())
-        else:
-            # A plain string finding (several agents/tools still emit these,
-            # e.g. mission_commander_agent's recon summaries) — `Finding` has
-            # no `description` field, so building one with `description=...`
-            # raised TypeError on every such call. Match `normalize_findings`
-            # below, which already handles this correctly: title from the
-            # text itself, severity inferred by keyword, id/tool/target
-            # filled in from this call's own context.
-            desc = str(f)
-            sev = "info"
-            for s in Finding.SEVERITY_ORDER:
-                if s in desc.lower():
-                    sev = s
-                    break
-            normalised.append(Finding(
-                id=f"F-{i:03d}",
-                title=desc[:80],
-                severity=sev,
-                tool=tool_name,
-                affected_asset=target,
-            ).to_dict())
-
-    result: dict[str, Any] = {
-        "tool": tool_name,
-        "target": target,
-        "status": status,
-        "findings": normalised,
-        "summary": summary or "",
-        "error": error or "",
+        status = STATUS_SCHEMA_ERROR
+    try:
+        normalized = normalize_findings(findings or [], tool=tool_name, affected_asset=target)
+    except (TypeError, ValueError) as exc:
+        return {
+            "tool": tool_name, "target": target, "status": STATUS_SCHEMA_ERROR,
+            "findings": [], "summary": summary or "", "error": str(exc),
+            "metadata": metadata or {},
+        }
+    return {
+        "tool": tool_name, "target": target, "status": status,
+        "findings": normalized, "summary": summary or "", "error": error or "",
         "metadata": metadata or {},
     }
-    return result
+
+
+def _coerce_finding(item: Any, *, tool: str, tool_version: str, affected_asset: str, index: int) -> Finding:
+    """Coerce one raw finding item (a `Finding`, a plain dict, or a bare
+    string) into a real `Finding`, raising ValueError/TypeError on anything
+    genuinely malformed (an unrecognized dict key, an empty string item)
+    instead of silently guessing — `tool_result()` catches that and fails
+    closed to STATUS_SCHEMA_ERROR rather than propagating a crash. This
+    check is deliberately at the ingestion boundary only: `Finding.__init__`
+    itself stays forgiving (coerces a bad severity/confidence rather than
+    raising), since it's constructed directly across hundreds of call sites
+    that assume it never raises — see the comment in `__post_init__`."""
+    if isinstance(item, Finding):
+        return item
+    if isinstance(item, dict):
+        allowed = {f for f in Finding.__dataclass_fields__ if f not in {"SEVERITY_ORDER", "CONFIDENCE_ORDER"}}
+        unknown = set(item) - allowed
+        if unknown:
+            raise ValueError(f"Unknown finding fields: {sorted(unknown)}")
+        values = dict(item)
+        values.setdefault("tool", tool)
+        values.setdefault("tool_version", tool_version)
+        values.setdefault("affected_asset", affected_asset)
+        return Finding(**values)
+    # A plain string finding (several agents/tools still emit these, e.g.
+    # mission_commander_agent's recon summaries) — infer severity by keyword
+    # rather than defaulting to "info" for everything.
+    text = str(item).strip()
+    if not text:
+        raise ValueError(f"Finding {index} is empty")
+    sev = "info"
+    for s in Finding.SEVERITY_ORDER:
+        if s in text.lower():
+            sev = s
+            break
+    return Finding(
+        id=f"F-{index:03d}", title=text[:160], evidence=text, severity=sev,
+        tool=tool, tool_version=tool_version, affected_asset=affected_asset,
+    )
 
 
 def normalize_findings(
@@ -187,29 +220,14 @@ def normalize_findings(
     tool_version: str = "",
     affected_asset: str = "",
 ) -> list[dict[str, Any]]:
-    """Convert arbitrary finding formats into the canonical dict format."""
-    out: list[dict[str, Any]] = []
-    for i, item in enumerate(raw_findings, 1):
-        if isinstance(item, Finding):
-            out.append(item.to_dict())
-        elif isinstance(item, dict):
-            out.append(Finding(**item).to_dict())
-        else:
-            desc = str(item)
-            sev = "info"
-            for s in Finding.SEVERITY_ORDER:
-                if s in desc.lower():
-                    sev = s
-                    break
-            out.append(Finding(
-                id=f"F-{i:03d}",
-                title=desc[:80],
-                severity=sev,
-                tool=tool,
-                tool_version=tool_version,
-                affected_asset=affected_asset,
-            ).to_dict())
-    return out
+    """Convert arbitrary finding formats into the canonical dict format.
+    Raises ValueError/TypeError on a genuinely malformed item — callers that
+    need "never raise" behavior should go through `tool_result()`, which
+    catches this and fails closed to STATUS_SCHEMA_ERROR."""
+    return [
+        _coerce_finding(item, tool=tool, tool_version=tool_version, affected_asset=affected_asset, index=i).to_dict()
+        for i, item in enumerate(raw_findings, 1)
+    ]
 
 
 # ── Redaction ─────────────────────────────────────────────────────────────

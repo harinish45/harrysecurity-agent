@@ -18,7 +18,12 @@ class ScopeGuard:
 
     @staticmethod
     def _hostname(target: str) -> str:
-        parsed = urlparse(target if "://" in target else f"//{target}", scheme="")
+        raw = target.strip()
+        try:
+            return str(ipaddress.ip_address(raw))
+        except ValueError:
+            pass
+        parsed = urlparse(raw if "://" in raw else f"//{raw}", scheme="")
         hostname = parsed.hostname
         if not hostname:
             raise ScopeGuardError("Target must be a host, IP address, or URL")
@@ -54,12 +59,10 @@ class ScopeGuard:
             if address is not None and address in network:
                 return True
 
-        # A hostname may be approved through a CIDR scope. Resolve it once and
-        # compare every answer; failing resolution must not silently allow it.
         if address is None:
             try:
                 resolved = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, None)}
-            except socket.gaierror as exc:
+            except OSError as exc:
                 raise ScopeGuardError(f"Cannot resolve target {hostname}: {exc}") from exc
             for entry in entries:
                 try:

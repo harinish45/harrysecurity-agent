@@ -1,9 +1,12 @@
 """
 NEXUS-STRIKE Tool Registry
-Central registry for all 500+ security tools across 29 domains.
-Supports registration, lookup, domain filtering, and metadata.
+Central registry for all security tools across domains.
+Supports registration, lookup, domain filtering, metadata, typed execution
+profiles, and contract assurance.
 """
-from typing import Callable, Dict, Any, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from nexus.tools.profile import ToolProfile, profile_from_metadata
 
 
 class ToolRegistry:
@@ -12,15 +15,19 @@ class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, Callable] = {}
         self._metadata: Dict[str, dict] = {}
+        self._profiles: Dict[str, ToolProfile] = {}
 
     def register(self, name: str, fn: Callable, metadata: Optional[dict] = None):
         """Register a tool by domain-qualified name (e.g., 'reconnaissance.subdomain_enum')."""
         self._tools[name] = fn
-        self._metadata[name] = metadata or {
+        effective = metadata or {
             "name": name,
             "domain": name.split(".")[0] if "." in name else "unknown",
             "status": "stub",
         }
+        profile = profile_from_metadata(name, effective)
+        self._profiles[name] = profile
+        self._metadata[name] = {**effective, "profile": profile}
 
     def has(self, name: str) -> bool:
         """True if `name` is a registered tool. Cheap existence check for
@@ -46,6 +53,12 @@ class ToolRegistry:
                 f"Available tools: {', '.join(sorted(self._tools)[:10])}..."
             )
         return self._tools[name]
+
+    def get_profile(self, name: str) -> ToolProfile:
+        """Get the validated execution/performance contract for a tool."""
+        if name not in self._profiles:
+            raise KeyError(f"Tool '{name}' has no execution profile")
+        return self._profiles[name]
 
     def run(self, name: str, target: str, **kwargs: Any) -> dict:
         """Execute a tool through the guardrailed ToolExecutor.
@@ -81,6 +94,22 @@ class ToolRegistry:
     def list_tools(self) -> Dict[str, dict]:
         """List all registered tools with metadata."""
         return {k: self._metadata.get(k, {}) for k in sorted(self._tools)}
+
+    def list_profiles(self) -> Dict[str, dict[str, object]]:
+        """Return JSON-safe operational profiles for routing/scheduling UIs."""
+        return {k: self._profiles[k].to_dict() for k in sorted(self._profiles)}
+
+    def assurance_report(self):
+        """Return deterministic contract-health results for every registered tool."""
+        from nexus.tools.assurance import ToolAssurance
+
+        checks = ToolAssurance().audit(self._tools, self._profiles)
+        return {
+            "total": len(checks),
+            "healthy": sum(check.healthy for check in checks),
+            "unhealthy": sum(not check.healthy for check in checks),
+            "checks": checks,
+        }
 
     def list_by_domain(self, domain: str) -> List[str]:
         """List all tools in a specific domain."""
@@ -121,7 +150,7 @@ def list_tools() -> List[Tuple[str, Callable]]:
 
 
 # =============================================================================
-# Domain grouping helpers (Enhancement Package)
+# Domain grouping helpers
 # =============================================================================
 
 def get_tool_domains() -> list:
@@ -140,4 +169,4 @@ def get_tools_by_domain() -> dict:
 
 def get_tool_count_by_domain() -> dict:
     """Return tool count per domain."""
-    return {domain: len(tools) for domain, tools in get_tools_by_domain().items()}
+    return {domain: len(tools) for domain, tools in get_tools_by_domain().items()}

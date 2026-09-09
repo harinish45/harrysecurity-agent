@@ -1,0 +1,52 @@
+replicaCount: 2
+
+image:
+  repository: nexus-strike
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8765
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+securityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+networkPolicy:
+  enabled: true
+  allowedIngressNamespaceSelector: {}
+  egress:
+    enabled: true
+    # Restrict egress further in an environment with known LLM/CVE endpoints.
+    allowDns: true
+
+persistence:
+  enabled: true
+  size: 2Gi
+  mountPath: /app/.nexus
+
+probes:
+  readiness:
+    path: /
+    initialDelaySeconds: 10
+    periodSeconds: 15
+  liveness:
+    path: /
+    initialDelaySeconds: 30
+    periodSeconds: 30

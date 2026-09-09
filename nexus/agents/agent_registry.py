@@ -74,8 +74,8 @@ def list_agents():
     for name in sorted(AGENT_REGISTRY):
         try:
             agents.append((name, get_agent(name)))
-        except Exception:
-            # Fallback to None if agent class cannot be loaded during test collection
+        except (ImportError, AttributeError, KeyError):
+            # A missing optional agent must not prevent registry discovery.
             agents.append((name, None))
     return agents
 
@@ -146,4 +146,4 @@ def get_agent_tiers() -> list:
 
 def get_agent_count_by_tier() -> dict:
     """Return agent count per tier."""
-    return {tier: len(agents) for tier, agents in get_agents_by_tier().items()}
+    return {tier: len(agents) for tier, agents in get_agents_by_tier().items()}

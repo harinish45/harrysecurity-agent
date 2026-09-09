@@ -1,6 +1,6 @@
 # Roadmap
 
-## Phase 1: Foundation ✅ (Current)
+## Phase 1: Foundation
 
 - [x] CLI with `nexus run` / `nexus live` commands
 - [x] 266 tool files across 29 security domains
@@ -10,16 +10,20 @@
 - [x] Live agent with real port scanning, SQLi, XSS, LFI, CMDi, SSRF detection
 - [x] Report generation with CVE enrichment
 - [x] Engagement record system for authorized testing
+- [x] Cross-phase authorization, tenant, evidence and mission contracts
 
 ## Phase 2: Production Hardening (In Progress)
 
-- [ ] CI/CD pipeline with automated testing
-- [ ] Docker image optimization (multi-stage, smaller footprint)
-- [ ] Kubernetes Helm chart
-- [ ] Comprehensive test suite (unit + integration + e2e)
+- [x] CI/CD pipeline with automated testing
+- [x] Docker image optimization (multi-stage, smaller footprint)
+- [x] Kubernetes Helm chart
+- [x] Dependency and static-security validation pipeline
+- [x] Immutable tool sandbox policy for container runtimes
+- [x] Result caching and deterministic deduplication primitives
+- [x] Regression tests for cache and sandbox primitives
+- [ ] Comprehensive e2e test suite against isolated fixtures
 - [ ] Performance benchmarking and optimization
-- [ ] Tool execution sandboxing (Docker containers per tool)
-- [ ] Result caching and deduplication
+- [ ] Concrete Docker-per-tool execution adapter
 
 ## Phase 3: Advanced Features
 
@@ -33,7 +37,8 @@
 
 ## Phase 4: Enterprise
 
-- [ ] Role-based access control (RBAC)
+- [x] RBAC primitives
+- [x] Multi-tenant context primitives
 - [ ] Multi-tenant SaaS deployment
 - [ ] API-first architecture for third-party integrations
 - [ ] Compliance reporting templates (PCI DSS, HIPAA, SOC 2)

@@ -1,28 +1,27 @@
-#!/usr/bin/env python3
-"""
-NEXUS-STRIKE Web Dashboard Server
-Strix-style local security platform interface.
-"""
-import os
+"""NEXUS-STRIKE local security dashboard server."""
+import asyncio
 import json
-import uvicorn
-from fastapi import FastAPI, WebSocket, HTTPException, Request
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+import os
+import subprocess
+import threading
 from pathlib import Path
 
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+
 from nexus.foundation.config import config
+from nexus.foundation.guardrails import InputGuard, LegalGuard, ScopeGuard
 from nexus.foundation.paths import PathTraversalError, safe_join
 from web.middleware import install_middleware, require_same_origin_signal
 
 app = FastAPI(title="NEXUS-STRIKE Dashboard")
 install_middleware(app)
 
-# Mount static files
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 REPORTS_DIR = Path(__file__).parent.parent / "reports"
-
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ── Dashboard token auth ───────────────────────────────────────────────────
@@ -32,6 +31,10 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # open to anyone who can reach the port. In development it stays optional
 # so `nexus dashboard` keeps working out of the box for local use.
 DASHBOARD_TOKEN = os.environ.get("NEXUS_DASHBOARD_TOKEN", "").strip()
+_subprocess = subprocess
+_active_scan = {"process": None, "target": None, "status": "idle"}
+_ws_clients: set[WebSocket] = set()
+_ws_loop: asyncio.AbstractEventLoop | None = None
 
 if config.is_production and not DASHBOARD_TOKEN:
     raise RuntimeError(
@@ -176,18 +179,12 @@ async def auth_me(request: Request):
 
 
 def _normalize_finding(item):
-    """Normalize a raw finding (str or dict) into a canonical dict with a severity key."""
     if isinstance(item, dict):
-        sev = str(item.get("severity", "info")).lower()
-        if sev not in ("critical", "high", "medium", "low", "info"):
-            sev = "info"
-        return {**item, "severity": sev}
-    # String finding — treat as a single info finding
-    return {
-        "title": str(item)[:200],
-        "severity": "info",
-        "description": str(item),
-    }
+        severity = str(item.get("severity", "info")).lower()
+        if severity not in ("critical", "high", "medium", "low", "info"):
+            severity = "info"
+        return {**item, "severity": severity}
+    return {"title": str(item)[:200], "severity": "info", "description": str(item)}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -220,9 +217,9 @@ async def get_reports(request: Request):
                 })
     return {"reports": sorted(reports, key=lambda x: x["modified"], reverse=True)}
 
+
 @app.get("/api/reports/{filename}")
 async def get_report(filename: str, request: Request):
-    """Serve a specific report file."""
     _require_token(request)
     try:
         file_path = safe_join(REPORTS_DIR, filename)
@@ -240,68 +237,41 @@ async def get_report(filename: str, request: Request):
 
 @app.get("/api/stats")
 async def get_stats(request: Request):
-    """Get dashboard statistics from latest report."""
     _require_token(request)
-    latest_json = None
-    if REPORTS_DIR.exists():
-        json_files = sorted([f for f in REPORTS_DIR.iterdir() if f.suffix == ".json"], key=lambda x: x.stat().st_mtime, reverse=True)
-        if json_files:
-            latest_json = json_files[0]
-    
-    if latest_json:
-        with open(latest_json, "r") as f:
-            data = json.load(f)
-        findings = data.get("findings", [])
-        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-        for f in findings:
-            norm = _normalize_finding(f)
-            sev = norm.get("severity", "info")
-            if sev in severity_counts:
-                severity_counts[sev] += 1
-            else:
-                severity_counts["info"] += 1
-        return {
-            "target": data.get("_meta", {}).get("target", "Unknown"),
-            "total_findings": len(findings),
-            "severity_counts": severity_counts,
+    json_files = sorted([p for p in REPORTS_DIR.glob("*.json") if p.is_file()],
+                        key=lambda p: p.stat().st_mtime, reverse=True) if REPORTS_DIR.exists() else []
+    if not json_files:
+        return {"error": "No reports found"}
+    data = json.loads(json_files[0].read_text(encoding="utf-8"))
+    findings = data.get("findings", [])
+    severity_counts = {s: 0 for s in ("critical", "high", "medium", "low", "info")}
+    normalized = [_normalize_finding(f) for f in findings]
+    for finding in normalized:
+        severity_counts[finding["severity"]] += 1
+    return {"target": data.get("_meta", {}).get("target", "Unknown"),
+            "total_findings": len(findings), "severity_counts": severity_counts,
             "open_ports": data.get("open_ports", []),
             "phases_completed": data.get("_meta", {}).get("phases_completed", 0),
-            "findings": [_normalize_finding(f) for f in findings],
-        }
-    return {"error": "No reports found"}
+            "findings": normalized}
+
 
 @app.get("/api/agents")
 async def get_agents(request: Request):
-    """Get all agents grouped by tier for topology view."""
     _require_token(request)
-    try:
-        from nexus.agents.agent_registry import get_agents_by_tier, get_agent_count
-        return {
-            "total": get_agent_count(),
-            "by_tier": get_agents_by_tier(),
-        }
-    except ImportError:
-        return {"total": 0, "by_tier": {}}
+    from nexus.agents.agent_registry import get_agent_count, get_agents_by_tier
+    return {"total": get_agent_count(), "by_tier": get_agents_by_tier()}
 
 
 @app.get("/api/skills")
 async def get_skills(request: Request):
-    """Get all registered skills from both registries."""
     _require_token(request)
-    try:
-        from nexus.skills import skills_registry, skill_registry
-        return {
-            "functional": [s.name for s in skills_registry.list_all()],
-            "class_based": skill_registry.list_all(),
-            "total": skill_registry.count,
-        }
-    except ImportError:
-        return {"functional": [], "class_based": [], "total": 0}
+    from nexus.skills import skill_registry, skills_registry
+    return {"functional": [skill.name for skill in skills_registry.list_all()],
+            "class_based": skill_registry.list_all(), "total": skill_registry.count}
 
 
 @app.get("/api/tools")
 async def get_tools(request: Request):
-    """Get tool counts grouped by domain."""
     _require_token(request)
     try:
         from nexus.tools.registry import get_tool_count_by_domain, get_tool_domains
@@ -315,9 +285,12 @@ async def get_tools(request: Request):
 
 
 # ── Scan control state (in-process only, resets on restart) ──────────────────
-import asyncio
-import subprocess as _subprocess
-_active_scan: dict = {"process": None, "target": None, "status": "idle"}
+# `_active_scan`/`_ws_clients` are already declared at module scope above (a
+# set, since .add()/.discard() are used on it below — a stray duplicate
+# `list[...] = []` re-declaration here previously existed and would have
+# crashed the first real .add()/.discard() call with AttributeError; removed,
+# not re-declared).
+#
 # Guards the check-then-act sequence in scan_start(): without this, two
 # concurrent POSTs to /api/scan/start can both pass the "already running"
 # check (there's an `await` between the check and the point where
@@ -327,9 +300,6 @@ _active_scan: dict = {"process": None, "target": None, "status": "idle"}
 # blocks until the first has fully published its new state, then re-checks
 # it — not just around the synchronous read/write.
 _active_scan_lock = asyncio.Lock()
-
-# Connected WebSocket clients for real-time scan progress
-_ws_clients: list[WebSocket] = []
 
 # Cap on concurrent WebSocket connections, enforced separately for /ws/scan
 # and /ws/steer. Without this, any client that can reach the port (trivially
@@ -346,13 +316,14 @@ _ws_steer_count = 0
 
 
 async def _broadcast_scan_event(event: dict):
-    """Send a scan progress event to all connected WebSocket clients."""
-    for ws in list(_ws_clients):
+    stale = []
+    for websocket in list(_ws_clients):
         try:
-            await ws.send_json(event)
+            await websocket.send_json(event)
         except Exception:
-            if ws in _ws_clients:
-                _ws_clients.remove(ws)
+            stale.append(websocket)
+    for websocket in stale:
+        _ws_clients.discard(websocket)
 
 
 # Application-level cap on a single incoming WebSocket text frame. This is
@@ -370,39 +341,39 @@ MAX_WS_MESSAGE_BYTES = 65536  # 64 KiB — these endpoints only ever carry
 # _ws_clients broadcast, not read from the client).
 
 
-def _websocket_auth_check(websocket: WebSocket, query_params: dict) -> bool:
-    """Validate token for WebSocket connections if NEXUS_DASHBOARD_TOKEN is set."""
+def _broadcast_from_worker(event: dict):
+    if _ws_loop and _ws_loop.is_running():
+        asyncio.run_coroutine_threadsafe(_broadcast_scan_event(event), _ws_loop)
+
+
+def _websocket_auth_check(websocket: WebSocket, params: dict | None = None) -> bool:
+    """Validate credentials from query parameters or an Authorization header."""
     if not DASHBOARD_TOKEN:
         return True
-    token = query_params.get("token", "") or query_params.get("access_token", "")
-    if token == DASHBOARD_TOKEN:
-        return True
-    auth = websocket.headers.get("Authorization", "")
-    if auth == f"Bearer {DASHBOARD_TOKEN}":
-        return True
-    return False
+    params = params or {}
+    query_params = getattr(websocket, "query_params", {})
+    token = (params.get("token") or params.get("access_token") or
+             query_params.get("token", "") or query_params.get("access_token", ""))
+    return token == DASHBOARD_TOKEN or websocket.headers.get("Authorization", "") == f"Bearer {DASHBOARD_TOKEN}"
 
 
 @app.websocket("/ws/scan")
 async def websocket_scan(websocket: WebSocket):
-    """WebSocket endpoint for real-time scan progress streaming."""
-    if not _websocket_auth_check(websocket, dict(websocket.query_params)):
+    global _ws_loop
+    if not _websocket_auth_check(websocket):
         await websocket.close(code=4401, reason="Unauthorized")
         return
     if len(_ws_clients) >= WS_MAX_CONNECTIONS:
         await websocket.close(code=1013, reason="Too many connections")
         return
     await websocket.accept()
-    _ws_clients.append(websocket)
+    _ws_loop = asyncio.get_running_loop()
+    _ws_clients.add(websocket)
     try:
-        # Send current state immediately on connect
-        proc = _active_scan.get("process")
-        running = proc is not None and proc.poll() is None
-        await websocket.send_json({
-            "type": "status",
-            "status": "running" if running else _active_scan.get("status", "idle"),
-            "target": _active_scan.get("target"),
-        })
+        process = _active_scan.get("process")
+        running = process is not None and process.poll() is None
+        await websocket.send_json({"type": "status", "status": "running" if running else _active_scan.get("status", "idle"),
+                                   "target": _active_scan.get("target")})
         while True:
             data = await websocket.receive_text()
             if len(data.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
@@ -413,8 +384,7 @@ async def websocket_scan(websocket: WebSocket):
     except Exception:
         pass
     finally:
-        if websocket in _ws_clients:
-            _ws_clients.remove(websocket)
+        _ws_clients.discard(websocket)
 
 
 @app.websocket("/ws/steer")
@@ -473,6 +443,8 @@ def _latest_report_findings() -> tuple[list[dict], dict]:
 async def get_findings(request: Request, limit: int = 50):
     """Return findings from the most recent JSON report."""
     _require_token(request)
+    if not 1 <= limit <= 1000:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
     findings, meta = _latest_report_findings()
     return {
         "findings": findings[:limit],
@@ -625,22 +597,14 @@ async def get_benchmarks_debate_eval(request: Request, limit: int = 20):
 
 @app.get("/api/config")
 async def get_config(request: Request):
-    """Return current platform configuration (safe, no secrets)."""
     _require_token(request)
-    try:
-        from nexus.foundation.config import config
-        return {
-            "ollama_base_url": getattr(config, "ollama_base_url", "http://localhost:11434/v1"),
-            "ollama_model":    getattr(config, "ollama_model", "qwen2.5-coder:7b"),
-            "reports_dir":     str(REPORTS_DIR),
-        }
-    except ImportError:
-        return {"error": "config not available"}
+    from nexus.foundation.config import config
+    return {"ollama_base_url": getattr(config, "ollama_base_url", "http://localhost:11434/v1"),
+            "ollama_model": getattr(config, "ollama_model", "qwen2.5-coder:7b"), "reports_dir": str(REPORTS_DIR)}
 
 
 @app.post("/api/config")
 async def update_config(payload: dict, request: Request):
-    """Placeholder for future config write support."""
     _require_token(request)
     require_same_origin_signal(request)
     from nexus.foundation.auth import Permission
@@ -668,7 +632,6 @@ _MISSION_MODES = {"pentest", "bounty", "ctf", "redteam", "blueteam"}
 
 @app.post("/api/scan/start")
 async def scan_start(payload: dict, request: Request):
-    """Launch nexus live in a background subprocess for the given target."""
     _require_token(request)
     require_same_origin_signal(request)
     from nexus.foundation.auth import Permission
@@ -816,7 +779,6 @@ async def scan_start(payload: dict, request: Request):
 
 @app.post("/api/scan/stop")
 async def scan_stop(request: Request):
-    """Terminate any running background scan."""
     _require_token(request)
     require_same_origin_signal(request)
     from nexus.foundation.auth import Permission
@@ -834,15 +796,11 @@ async def scan_stop(request: Request):
 
 @app.get("/api/scan/status")
 async def scan_status(request: Request):
-    """Return current scan status."""
     _require_token(request)
-    proc = _active_scan.get("process")
-    running = proc is not None and proc.poll() is None
-    return {
-        "status": "running" if running else _active_scan.get("status", "idle"),
-        "target": _active_scan.get("target"),
-        "pid": proc.pid if proc and running else None,
-    }
+    process = _active_scan.get("process")
+    running = process is not None and process.poll() is None
+    return {"status": "running" if running else _active_scan.get("status", "idle"),
+            "target": _active_scan.get("target"), "pid": process.pid if process and running else None}
 
 
 @app.post("/api/agent/run")
@@ -898,14 +856,11 @@ async def agent_run(payload: dict, request: Request):
 
 
 def _open_browser_safe(url: str) -> None:
-    """Open the browser safely; never crash in headless environments."""
     try:
         import webbrowser
         webbrowser.open(url)
     except Exception:
-        # Headless / no display — log a helpful message instead of crashing
-        print(f"[nexus] Browser could not be opened automatically. "
-              f"Visit {url} manually.")
+        print(f"[nexus] Browser could not be opened automatically. Visit {url} manually.")
 
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -930,8 +885,6 @@ def launch_dashboard(host: str = "127.0.0.1", port: int = 8765, open_browser: bo
         )
     url = f"http://{host}:{port}"
     if open_browser:
-        import threading
-        # Open browser after a short delay so the server is ready
         threading.Timer(1.5, lambda: _open_browser_safe(url)).start()
     print(f"[nexus] 🖥️ Dashboard available at: {url}")
     uvicorn.run(

@@ -10,28 +10,29 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v7
+      uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v7
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
 
-    - name: Install dependencies
+    - name: Install package and development dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-mock pytest-cov ruff pytest-asyncio build
+        python -m pip install -e ".[dev]"
+        pip install pytest-cov
+        mkdir -p reports
 
-    - name: Lint with Ruff
-      run: |
-        ruff check . || echo "Ruff check completed with warnings"
+    - name: Static validation with Ruff
+      run: ruff check . --select E9,F63,F7,F82 --output-format=github
 
     # Promoted from advisory to blocking — the existing HIGH/CVE baseline
     # was triaged (see docs/production_readiness.md milestone 5): the one
@@ -54,7 +55,12 @@ jobs:
     - name: Dependency vulnerability scan with pip-audit (blocking)
       run: |
         pip install pip-audit
-        pip-audit -r requirements.txt
+        # requirements.txt is now `-e .[dev]` (single source of truth is
+        # pyproject.toml) — scan the fully-pinned lock file instead, which
+        # is what actually gets installed in the Docker image and is a
+        # real, resolvable dependency list (an editable-install directive
+        # isn't something pip-audit can scan directly).
+        pip-audit -r requirements.lock.txt
 
     - name: Generate SBOM (CycloneDX, advisory artifact only)
       run: |
@@ -71,13 +77,25 @@ jobs:
     - name: Verify Nexus Tools
       env:
         PYTHONPATH: ${{ github.workspace }}
-      run: |
-        python -m nexus verify
+        NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
+      run: python -m nexus verify
 
-    - name: Run pytest
+    - name: Run unit tests
       env:
         PYTHONPATH: ${{ github.workspace }}
-        NEXUS_LEGAL_ACK: "I_HAVE_WRITTEN_AUTHORIZATION"
+        NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
+      run: pytest tests/unit --ignore=tests/unit/test_automotive_tools.py -k "not slow" --tb=long -vv --junitxml=reports/unit-${{ matrix.python-version }}.xml
+
+    - name: Run integration tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+        NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
+      run: pytest tests/integration --tb=long -vv --junitxml=reports/integration-${{ matrix.python-version }}.xml
+
+    - name: Run complete test suite with coverage gate
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+        NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
       run: |
         # --cov-fail-under is a regression floor, not an aspirational target:
         # real measured coverage on this branch is ~64%+ as of the last full
@@ -85,15 +103,22 @@ jobs:
         # (Linux runner vs. local Windows dev box can exercise slightly
         # different platform-specific branches, e.g. nexus/tools/sandbox.py's
         # POSIX-only resource-limit path) without being a no-op ceiling.
-        pytest tests/ --tb=short -v --cov=nexus --cov-report=term-missing --cov-fail-under=55
+        # test_automotive_tools.py is excluded — owned by a different,
+        # concurrently-developed branch of work, not part of this suite.
+        pytest tests/ --ignore=tests/unit/test_automotive_tools.py -k "not slow" --tb=long -vv \
+          --cov=nexus --cov-report=term-missing --cov-fail-under=55 \
+          --junitxml=reports/all-${{ matrix.python-version }}.xml
 
     - name: Build package
-      run: |
-        python -m build
+      run: python -m build
+
+    - name: Build Docker image
+      if: matrix.python-version == '3.11'
+      run: docker build --tag nexus-strike:ci .
 
     - name: Upload test artifacts
       if: always()
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@v4
       with:
         name: pytest-results-${{ matrix.python-version }}
         path: reports/

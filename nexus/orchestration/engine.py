@@ -3,7 +3,9 @@ NEXUS-STRIKE Orchestration Engine
 Core mission execution engine with LLM-powered planning, agent delegation, and state management.
 """
 from rich.console import Console
-
+import json as json_mod
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from nexus.agents.base_agent import AgentContext
 from nexus.agents.orchestrator.attack_chain_agent import AttackChainAgent
 from nexus.agents.orchestrator.blast_radius_agent import BlastRadiusAgent
@@ -24,6 +26,7 @@ from nexus.orchestration.flow.flow_controller import FlowController
 from nexus.orchestration.recovery.checkpoint import Checkpoint
 from nexus.reporting.generator import ReportGenerator
 from nexus.foundation.schema import normalize_findings
+from nexus.tools.registry import tool_registry
 
 console = Console()
 
@@ -44,7 +47,8 @@ class OrchestrationEngine:
     async def run_mission(self, target: str, mission_id: str = "mission-001",
                           mode: str = "guided", objective: str = "full_assessment",
                           engagement: dict | None = None, allowed_domains: list[str] | None = None,
-                          resume: bool = False) -> dict:
+                          resume: bool = False, hat_mode: str = "white",
+                          workflow: str = "full_assessment") -> dict:
         """Execute a complete security assessment mission.
 
         `resume=True` skips planning (and its LLM call) entirely when a
@@ -53,9 +57,18 @@ class OrchestrationEngine:
         happens differently when no checkpoint exists (a resume request for
         a mission that never got a checkpoint just runs fresh, matching
         `Checkpoint.load`'s existing "no file -> None" degrade-safely
-        contract)."""
+        contract).
+
+        `hat_mode`/`workflow` (white/grey/black engagement framing, and a
+        workflow label) are accepted for `nexus/cli.py`'s `--hat-mode`
+        option and threaded into `_plan_mission`'s prompt context — they
+        don't change the real execution path below, which is driven by
+        `allowed_domains`/FlowController regardless of hat_mode."""
         console.print(f"[bold green]OrchestrationEngine: Starting mission {mission_id} on {target}[/]")
-        logger.info(f"Mission {mission_id} started: target={target}, mode={mode}, resume={resume}")
+        logger.info(
+            f"Mission {mission_id} started: target={target}, mode={mode}, resume={resume}, "
+            f"hat_mode={hat_mode}, workflow={workflow}"
+        )
 
         # Phase 1: Validate
         try:
@@ -95,7 +108,10 @@ class OrchestrationEngine:
             )
         else:
             pattern_suggestion = await self._select_pattern(objective, mode, target)
-            plan = await self._plan_mission(target, mode, objective, mission_id, allowed_domains)
+            plan = await self._plan_mission(
+                target, mode, objective, mission_id, allowed_domains,
+                hat_mode=hat_mode, workflow=workflow,
+            )
             mission_context.add_to_history(
                 f"Mission planned: {len(plan)} phase(s), suggested pattern={pattern_suggestion.get('pattern')}"
             )
@@ -356,16 +372,19 @@ class OrchestrationEngine:
         return counts
 
     async def _plan_mission(self, target: str, mode: str, objective: str, mission_id: str = "mission",
-                            allowed_domains: list[str] | None = None) -> list:
+                            allowed_domains: list[str] | None = None, *,
+                            hat_mode: str = "white", workflow: str = "full_assessment") -> list:
         """Use LLM to decompose the mission into phases."""
         domains = ", ".join(allowed_domains) if allowed_domains else (
             "reconnaissance, network, webapp, wireless, active_directory, cloud, mobile, malware, "
             "reverse_engineering, exploit_dev, forensics, incident_response, threat_intel, iam, "
-            "compliance, appsec, ai_security"
+            "compliance, appsec, ai_security, container, api, physical, ai_ml, blockchain"
         )
         prompt = f"""You are a penetration testing mission planner. Plan a security assessment for target: {target}
 Mode: {mode}
 Objective: {objective}
+Hat Mode: {hat_mode} (white=authorized, grey=ambiguous, black=unauthorized simulation)
+Workflow: {workflow}
 
 Available domains: {domains}
 
@@ -458,6 +477,56 @@ Format: [{{"id": "P1", "agent": "recon_agent", "task": "description", "domain": 
         except GraphError as e:
             return str(e)
         return None
+
+    async def _execute_phase(self, phase: dict) -> dict:
+        """Execute a single mission phase by running up to 5 of its domain's
+        registered tools directly, in parallel.
+
+        Not on the real mission path — `run_mission` above dispatches phases
+        via `FlowController.run()`, which delegates to real `nexus.agents.*`
+        classes (dependency-graph-ordered, guardrail-enforced per tool call
+        through `ToolExecutor`) rather than this flat per-domain tool sweep.
+        Kept as a real, working, independently-callable alternative/legacy
+        execution path — a simpler one-shot "run whatever this domain has"
+        primitive that doesn't need a full mission/plan around it."""
+        agent_name = phase.get("agent", "recon_agent")
+        task = phase.get("task", "Unknown task")
+        domain = phase.get("domain", "reconnaissance")
+
+        findings = []
+        domain_tools = tool_registry.list_by_domain(domain)
+
+        # Run up to 5 tools from the domain in parallel using ThreadPoolExecutor
+        tools_to_run = domain_tools[:5]
+
+        def run_tool(tool_name):
+            try:
+                return tool_registry.run(
+                    tool_name,
+                    target=self.mission_context.target if self.mission_context else "",
+                )
+            except Exception as e:
+                logger.warning(f"Tool {tool_name} failed: {e}")
+                return {"findings": []}
+
+        if tools_to_run:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                # Run all tools in parallel threads
+                results = await asyncio.gather(
+                    *(loop.run_in_executor(executor, run_tool, tool_name) for tool_name in tools_to_run)
+                )
+            for result in results:
+                if result and result.get("findings"):
+                    findings.extend(result["findings"])
+
+        return {
+            "agent": agent_name,
+            "task": task,
+            "domain": domain,
+            "findings": findings,
+            "status": "completed",
+        }
 
     async def _generate_report(self, findings: list, engagement: dict | None = None) -> tuple[str, str]:
         """Generate a deterministic report and retain it as assessment evidence."""
