@@ -1,0 +1,6 @@
+{
+  "id": "nyuctf-web-05",
+  "category": "web",
+  "prompt": "A `/logout` redirect endpoint takes a `next` query parameter and 302-redirects to it unchecked, so a phishing link like `/logout?next=https://evil.example` sends victims to an attacker-controlled page that looks like a re-login prompt. Name the single CWE ID for this weakness (format: CWE-XXX).",
+  "answer_pattern": "CWE-601"
+}

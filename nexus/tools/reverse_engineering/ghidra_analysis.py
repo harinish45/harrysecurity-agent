@@ -17,7 +17,8 @@ import shutil
 import tempfile
 
 from nexus.tools.registry import tool_registry
-from nexus.tools.sandbox import SandboxError, run_subprocess
+from nexus.tools.docker_sandbox import run_subprocess_sandboxed
+from nexus.tools.sandbox import SandboxError
 
 _HEADLESS_TIMEOUT = 60
 # A binary handed to a headless decompiler is, by construction, untrusted —
@@ -56,7 +57,18 @@ def _run_headless_ghidra(headless_path: str, target: str) -> str:
             headless_path, project_dir, "nexus_strike_project",
             "-import", target, "-overwrite",
         ]
-        result = run_subprocess(
+        # NEXUS_SANDBOX_MODE=docker note: this call site is wired for
+        # container isolation the same way exploit_dev/fuzzing.py is, but
+        # two things limit it in practice today, honestly documented rather
+        # than silently glossed over: (1) nexus.tools.docker_sandbox's
+        # auto-mount always mounts read-only, while Ghidra needs to WRITE
+        # into project_dir — docker mode will currently fail closed with a
+        # permission error rather than complete a real headless run; (2)
+        # the default sandbox image doesn't bundle Ghidra itself, so even a
+        # writable mount wouldn't be sufficient without a custom image. The
+        # host-process path (the default, unaffected by this) is unchanged
+        # and is what actually runs when a local Ghidra install is found.
+        result = run_subprocess_sandboxed(
             cmd,
             timeout=_HEADLESS_TIMEOUT,
             cpu_seconds=_GHIDRA_CPU_LIMIT_S,

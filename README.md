@@ -1,5 +1,11 @@
 # 🏴‍☠️ NEXUS-STRIKE
 
+[![CI](https://github.com/harinish45/harrysecurity-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/harinish45/harrysecurity-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Security: Bandit](https://img.shields.io/badge/security-bandit%20%2B%20pip--audit-brightgreen.svg)](.github/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![Tests: 1800+](https://img.shields.io/badge/tests-1800%2B-brightgreen.svg)](tests/)
+
 **Autonomous AI Cybersecurity Agent — Real Pentest, Real Findings, Real CVE Reports**
 
 NEXUS-STRIKE is an open-source multi-agent cybersecurity assessment platform. It performs live port scanning, service fingerprinting, web vulnerability detection (SQLi, XSS, LFI, CMDi, SSRF), and CVE-enriched risk analysis — all orchestrated by a locally-running or cloud LLM.
@@ -267,6 +273,20 @@ nexus tools --domain webapp   # filter by domain
 
 ---
 
+## 📊 Benchmark Score
+
+Tool count is a weak credibility signal on its own — here's a real, reproducible number instead. NEXUS-STRIKE bundles a 66-challenge CTF-style benchmark suite (CWE-identification tasks spanning crypto/pwn/rev/web/forensics/network/cloud/misc, in the spirit of InterCode-CTF/Cybench/NYU-CTF Bench) and scores itself against it with a deterministic regex checker — no LLM judge, no self-grading.
+
+| Suite | Score | Notes |
+|-------|-------|-------|
+| `intercode_ctf` (10 tasks, easy tier) | **5/10 (50%)** | reproducible run-over-run (confirmed via 2 independent runs, identical result) |
+| `cybench` (32 tasks) | **21–22/32 (66–69%)** | 2 real runs, small variance from LLM sampling + provider rate-limit misses |
+| `nyu_ctf` (24 tasks, hardest tier) | **10/24 (42%)** | intentionally the hard tier |
+
+Run it yourself: `nexus benchmark --suite cybench` (or `nyu_ctf`/`intercode_ctf`) — every run is a real LLM call against the free-tier provider configured in your `.env`, scored and appended to `benchmarks/history.jsonl`. This is a single-turn "describe a vulnerability, name the CWE" knowledge benchmark (not yet an agentic tool-use benchmark) — an honest first proof point, not a claim of solving full interactive CTF challenges end-to-end.
+
+---
+
 ## 📄 Report Output
 
 Reports are written to `engagements/<mission-id>/` and include:
@@ -274,6 +294,44 @@ Reports are written to `engagements/<mission-id>/` and include:
 - **JSON findings** — structured CVE-enriched results
 - **Markdown report** — human-readable pentest narrative
 - **Audit log** — append-only execution record
+
+---
+
+## 🆚 How this compares
+
+Being honest about where this project stands: NEXUS-STRIKE is **pre-1.0 with a
+small community** (this repo, at the time of writing). The closest comparable
+open-source AI-pentest-agent projects are considerably more established:
+
+| | ⭐ Stars | Maturity |
+|---|---|---|
+| [Strix](https://github.com/usestrix/strix) | ~61k | Established, large community |
+| [PentAGI](https://github.com/vxcontrol/pentagi) | ~23k | Established, Docker-sandboxed execution |
+| [CAI](https://github.com/aliasrobotics/cai) | ~10k | Established, broad LLM-provider support |
+| NEXUS-STRIKE | 1 | Pre-1.0, single-maintainer |
+
+If you want a battle-tested tool with a large community today, those three are
+the right choice. What NEXUS-STRIKE does have, as concrete, checkable design
+decisions rather than marketing claims:
+
+- **Findings get replayed, not just trusted.** A dedicated `verification_agent`
+  re-runs the underlying check deterministically (a real HTTP re-request diffed
+  against the claimed evidence, a real TCP reachability probe, a re-timed
+  statistical check for timing-based claims) before a finding is reported as
+  verified — the goal being to catch the failure mode where an LLM asserts
+  something was found that a second, non-LLM check can't reproduce.
+- **A tool that can't do the work says so.** Where a tool genuinely needs
+  something unavailable — hardware, a paid API key, a licensed dataset, an
+  actively-running target — it returns an honest `STATUS_REQUIRES_*` /
+  `STATUS_UNAVAILABLE` result instead of a plausible-looking fabricated finding.
+  This is a project-wide convention, not a one-off.
+- **The audit log is tamper-evident**, not just append-only: every entry is
+  SHA-256 hash-chained to the one before it, and `AuditGuard.verify_chain()`
+  detects any single-entry edit, deletion, or reorder.
+- **Free-tier-first LLM config.** `NEXUS_FREE_TIER_ONLY=1` restricts provider
+  fallback to zero-cost options (a local Ollama model, Groq's free tier, NVIDIA
+  NIM, a real `:free`-suffixed OpenRouter model) — no paid API key is required
+  to run the platform at all.
 
 ---
 

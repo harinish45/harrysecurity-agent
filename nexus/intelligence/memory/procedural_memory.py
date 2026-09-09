@@ -1,2 +1,0 @@
-class ProceduralMemory:
-    pass

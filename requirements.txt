@@ -34,4 +34,8 @@ networkx>=3.0
 # networkx's pagerank/spring_layout pull these in at call time — pinned
 # explicitly since they were previously undeclared transitive requirements.
 numpy>=1.26
-scipy>=1.11
+scipy>=1.11
+
+# Real Model Context Protocol server (nexus/mcp/server.py, `nexus mcp`) —
+# replaces the earlier "coming in Phase 2" stub.
+mcp>=2.2.0

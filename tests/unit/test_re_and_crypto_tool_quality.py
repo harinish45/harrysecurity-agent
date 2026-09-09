@@ -33,15 +33,16 @@ def test_ghidra_analysis_invokes_real_headless_when_found(tmp_path):
     # own internal path handling (it uses os.path.join heavily) — mock
     # _find_analyze_headless directly instead, which is the actual
     # detection seam this test cares about. Ghidra invocation now goes
-    # through nexus.tools.sandbox.run_subprocess (real CPU/memory limits
-    # on an untrusted-binary decompile — see ghidra_analysis.py), so the
-    # mock target moved from the removed direct `subprocess.run` call.
+    # through nexus.tools.docker_sandbox.run_subprocess_sandboxed (real
+    # CPU/memory limits on an untrusted-binary decompile via the host path
+    # by default, an opt-in container path under NEXUS_SANDBOX_MODE=docker
+    # — see ghidra_analysis.py), so the mock target moved accordingly.
     sample = tmp_path / "sample.bin"
     sample.write_bytes(b"\x7fELF" + b"\x00" * 20)
 
     fake_result = MagicMock(stdout="INFO  Analysis complete.\n", stderr=None, returncode=0)
     with patch.object(ghidra_analysis, "_find_analyze_headless", return_value="/opt/ghidra/support/analyzeHeadless"), \
-         patch("nexus.tools.reverse_engineering.ghidra_analysis.run_subprocess", return_value=fake_result) as mock_run:
+         patch("nexus.tools.reverse_engineering.ghidra_analysis.run_subprocess_sandboxed", return_value=fake_result) as mock_run:
         result = ghidra_analysis.run(str(sample))
 
     assert mock_run.called
@@ -58,7 +59,7 @@ def test_ghidra_analysis_timeout_reported_honestly(tmp_path):
 
     with patch.object(ghidra_analysis, "_find_analyze_headless", return_value="/opt/ghidra/support/analyzeHeadless"), \
          patch(
-             "nexus.tools.reverse_engineering.ghidra_analysis.run_subprocess",
+             "nexus.tools.reverse_engineering.ghidra_analysis.run_subprocess_sandboxed",
              side_effect=ghidra_analysis.SandboxError("Command exceeded timeout of 60s: analyzeHeadless"),
          ):
         result = ghidra_analysis.run(str(sample))
@@ -76,7 +77,7 @@ def test_ghidra_analysis_resource_limit_violation_reported_honestly(tmp_path):
 
     with patch.object(ghidra_analysis, "_find_analyze_headless", return_value="/opt/ghidra/support/analyzeHeadless"), \
          patch(
-             "nexus.tools.reverse_engineering.ghidra_analysis.run_subprocess",
+             "nexus.tools.reverse_engineering.ghidra_analysis.run_subprocess_sandboxed",
              side_effect=ghidra_analysis.SandboxError(
                  "Command exceeded resource limit: memory usage 2100.0MB exceeded limit 2048.0MB: analyzeHeadless"
              ),

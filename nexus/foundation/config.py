@@ -60,6 +60,15 @@ try:
         nexus_mode: str = "guided"
         nexus_log_level: str = "INFO"
         nexus_sandbox_enabled: bool = True
+        # "process" (default): subprocess-spawning tools (nexus/tools/sandbox.py)
+        # run as a resource-limited host OS process — real rlimit/psutil
+        # enforcement, but still shares the host's filesystem/network/kernel.
+        # "docker": route the same tools through a disposable, network-isolated
+        # container instead (nexus/tools/docker_sandbox.py) — a second,
+        # independent isolation layer on top of, not instead of, the process
+        # limits. Fails closed (raises, never silently falls back to "process")
+        # if no Docker daemon is reachable when this is set.
+        nexus_sandbox_mode: str = "process"
         nexus_auto_approve: bool = False
         nexus_max_concurrent_tools: int = 5
         nexus_tool_timeout: int = 300
@@ -129,6 +138,7 @@ except ImportError:
             self.nexus_mode = os.getenv("NEXUS_MODE", "guided")
             self.nexus_log_level = os.getenv("NEXUS_LOG_LEVEL", "INFO")
             self.nexus_sandbox_enabled = os.getenv("NEXUS_SANDBOX_ENABLED", "true").lower() in ("1","true","yes")
+            self.nexus_sandbox_mode = os.getenv("NEXUS_SANDBOX_MODE", "process")
             self.nexus_auto_approve = os.getenv("NEXUS_AUTO_APPROVE", "false").lower() in ("1","true","yes")
             self.nexus_max_concurrent_tools = int(os.getenv("NEXUS_MAX_CONCURRENT_TOOLS", "5"))
             self.nexus_tool_timeout = int(os.getenv("NEXUS_TOOL_TIMEOUT", "300"))

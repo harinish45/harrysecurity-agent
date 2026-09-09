@@ -27,26 +27,34 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest pytest-mock ruff pytest-asyncio build
+        pip install pytest pytest-mock pytest-cov ruff pytest-asyncio build
 
     - name: Lint with Ruff
       run: |
         ruff check . || echo "Ruff check completed with warnings"
 
-    # Advisory for now — see docs/production_readiness.md for the plan to
-    # promote these to blocking once the current findings are triaged.
-    # The codebase has an existing, untriaged baseline, so flipping either
-    # scanner to blocking now would break CI on pre-existing findings
-    # unrelated to any given PR; that's a deliberate, temporary choice.
-    - name: Security scan with Bandit (advisory)
+    # Promoted from advisory to blocking — the existing HIGH/CVE baseline
+    # was triaged (see docs/production_readiness.md milestone 5): the one
+    # HIGH-severity Bandit finding was a documented false positive (B613
+    # bidi-control-character detection code that must contain the literal
+    # characters it strips) now suppressed with a justified `# nosec`
+    # comment at its source; pip-audit had zero known CVEs against
+    # requirements.txt. MEDIUM/LOW Bandit findings stay advisory — this
+    # codebase legitimately contains strings like "0.0.0.0" and "/tmp" as
+    # target-scanning/wordlist/hardening-flag literals (a security-testing
+    # tool's tools search FOR insecure patterns; they don't cause them),
+    # and gating on every occurrence would be noise, not signal.
+    - name: Security scan with Bandit (blocking on HIGH severity)
       run: |
         pip install bandit
-        bandit -r nexus scripts web -ll || echo "Bandit found issues — review before the next hardening pass (see docs/production_readiness.md)"
+        bandit -r nexus scripts web -lll
+        echo "--- Full report including MEDIUM (advisory, not blocking) ---"
+        bandit -r nexus scripts web -ll || echo "Bandit found MEDIUM+ issues — review, but not build-blocking (see docs/production_readiness.md)"
 
-    - name: Dependency vulnerability scan with pip-audit (advisory)
+    - name: Dependency vulnerability scan with pip-audit (blocking)
       run: |
         pip install pip-audit
-        pip-audit -r requirements.txt || echo "pip-audit found issues — review before the next hardening pass (see docs/production_readiness.md)"
+        pip-audit -r requirements.txt
 
     - name: Verify Nexus Tools
       env:
@@ -59,7 +67,13 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}
         NEXUS_LEGAL_ACK: "I_HAVE_WRITTEN_AUTHORIZATION"
       run: |
-        pytest tests/ --tb=short -v
+        # --cov-fail-under is a regression floor, not an aspirational target:
+        # real measured coverage on this branch is ~64%+ as of the last full
+        # local run; 55% leaves real margin for CI-environment differences
+        # (Linux runner vs. local Windows dev box can exercise slightly
+        # different platform-specific branches, e.g. nexus/tools/sandbox.py's
+        # POSIX-only resource-limit path) without being a no-op ceiling.
+        pytest tests/ --tb=short -v --cov=nexus --cov-report=term-missing --cov-fail-under=55
 
     - name: Build package
       run: |

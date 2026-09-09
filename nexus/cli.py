@@ -330,12 +330,44 @@ def benchmark(
 
 @app.command()
 def mcp(
-    port: int = typer.Option(8888, "--port", "-p", help="MCP server port"),
+    http: bool = typer.Option(
+        False, "--http", help="Serve over streamable-HTTP instead of stdio (needed for a remote/network MCP client)."
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind host, --http mode only."),
+    port: int = typer.Option(8888, "--port", "-p", help="Bind port, --http mode only."),
 ):
-    """🔌 Start the Model Context Protocol (MCP) server for IDE integration."""
-    console.print(f"[cyan]Starting NEXUS-STRIKE MCP Server on port {port}...[/]")
-    console.print("[dim]Connect your MCP client (Claude Desktop, Cursor, etc.) to this port.[/]")
-    console.print("[yellow]MCP Server implementation coming in Phase 2.[/]")
+    """🔌 Start the real NEXUS-STRIKE MCP server.
+
+    Default transport is stdio — the standard way local MCP clients
+    (Claude Desktop, Cursor, Claude Code) launch an MCP server themselves
+    as a subprocess; you normally won't run this by hand for that case,
+    you point the client at `nexus mcp` as its server command. Pass
+    --http to serve over streamable-HTTP for a client that connects over
+    the network instead of spawning a subprocess.
+
+    Exposes: list_domains, list_tools, list_agents, run_tool, run_mission,
+    get_mission_status, get_report — every one routed through the same
+    guardrail chain (Scope/Legal/Escalation/Rate/Audit/Output) a CLI-
+    invoked scan or mission uses; an MCP client gets no bypass.
+    """
+    import sys
+
+    from nexus.mcp.server import create_server
+
+    server = create_server()
+    if http:
+        # stdout is free to use here — streamable-HTTP doesn't speak
+        # JSON-RPC over stdio, so a normal startup banner is safe.
+        console.print(f"[cyan]Starting NEXUS-STRIKE MCP server (streamable-HTTP) on {host}:{port}...[/]")
+        server.run(transport="streamable-http", host=host, port=port)
+    else:
+        # stdio mode reserves stdout entirely for the JSON-RPC protocol
+        # stream a client reads from — any banner printed to `console`
+        # (which is stdout-bound) would corrupt the handshake the moment
+        # the client starts reading. stderr is the only safe place for a
+        # human-readable startup line here.
+        print("Starting NEXUS-STRIKE MCP server (stdio)...", file=sys.stderr)
+        server.run(transport="stdio")
 
 
 @app.command("engage")

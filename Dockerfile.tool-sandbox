@@ -1,0 +1,46 @@
+# ============================================================
+# NEXUS-STRIKE — tool-sandbox image
+#
+# NOT the platform image (see ./Dockerfile for that). This is the disposable
+# container `nexus/tools/docker_sandbox.py` runs individual untrusted-input
+# subprocess tools inside of (a fuzzer feeding mutated bytes to a local
+# executable, a decompiler importing an unknown binary sample) when
+# NEXUS_SANDBOX_MODE=docker is set. Built once, reused (`--rm`) per
+# invocation — a fresh container per tool call, not a long-lived service.
+#
+# Deliberately minimal: no network tooling, no shell niceties, nothing an
+# untrusted payload could pivot on beyond what the specific tool being run
+# actually needs. `docker_sandbox.py` runs every container with
+# `--network none` and a read-only root filesystem regardless of what's
+# installed here — this image being lean is defense in depth on top of
+# that, not the only thing standing between a hostile input and the host.
+# ============================================================
+FROM python:3.12-slim
+
+LABEL org.opencontainers.image.title="NEXUS-STRIKE Tool Sandbox" \
+      org.opencontainers.image.description="Disposable, network-isolated container for untrusted-input subprocess tools" \
+      org.opencontainers.image.licenses="MIT"
+
+# `file` — the format/magic-byte detection the reverse-engineering and
+# malware tools already do in Python gets a real cross-check here; `binutils`
+# — `strings`/`objdump` for the static-analysis tools that shell out to them.
+# Nothing beyond that: no curl/wget/netcat (this container has no network
+# access to use them with anyway — `--network none` at run time — but
+# omitting them here means a container escape doesn't even find them on
+# PATH), no compiler toolchain, no package manager left usable post-build.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    file \
+    binutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Non-root, unprivileged — the container's own user has no reason to be
+# root even with --network none and a read-only rootfs already in place;
+# this is one more layer, not the load-bearing one.
+RUN groupadd -r sandbox && useradd -r -g sandbox -m -d /home/sandbox sandbox
+USER sandbox
+WORKDIR /sandbox_work
+
+# No ENTRYPOINT/CMD — `docker_sandbox.py` always supplies the full command
+# to run (`docker run ... <image> <cmd...>`); this image is never started
+# bare.

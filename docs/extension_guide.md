@@ -67,10 +67,26 @@ Then add to `agent_registry.py`:
 
 ## Adding an LLM Provider
 
-1. Create a provider file in `nexus/intelligence/llm/providers/`
-2. Implement the provider interface
-3. Add configuration in `nexus/foundation/config.py`
-4. Register in `nexus/intelligence/llm/router.py`
+All provider classes live directly in `nexus/intelligence/llm/router.py`
+(`OpenAICompatibleProvider`, `AnthropicProvider`, `AzureProvider`,
+`MockProvider`) rather than one file per provider — most providers are
+just the OpenAI-compatible chat-completions shape with a different
+`base_url`, so a new OpenAI-compatible provider needs no new class at all.
+
+1. **OpenAI-compatible provider** (most cases — Groq, DeepSeek, a local
+   vLLM server, etc.): add an entry to `LLMRouter.PROVIDER_CONFIGS` in
+   `router.py` with `"api_type": "openai"`, its env-var key name, default
+   model, and base-URL config key.
+2. **A genuinely different API shape** (not OpenAI-compatible): add a new
+   provider class in `router.py` following `AnthropicProvider`'s pattern
+   (lazy `_get_client()`, a `complete()` method), then branch to it in
+   `LLMRouter._get_client()` by `api_type`.
+3. Add the corresponding `*_api_key`/`*_model`/`*_base_url` fields to
+   `NexusConfig` in `nexus/foundation/config.py` and matching entries in
+   `.env.example`.
+4. If the provider is genuinely free (no paid tier), add it to
+   `FREE_TIER_PROVIDERS` in `nexus/foundation/free_tier.py` so it's
+   selectable under `NEXUS_FREE_TIER_ONLY=1`.
 
 ## Adding a Guardrail
 

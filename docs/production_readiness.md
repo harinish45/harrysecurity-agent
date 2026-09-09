@@ -79,8 +79,17 @@ aspirational.
    `nexus/advanced/notarization.py` for an OpenTimestamps-based starting point).
 3. Add provider health checks, retry policy, and circuit breakers for LLM calls.
 4. Build authenticated API, cloud, source-code, and container-review connectors.
-5. Promote `bandit`/`pip-audit` CI checks from advisory to blocking once the
-   current codebase baseline is triaged.
+5. ~~Promote `bandit`/`pip-audit` CI checks from advisory to blocking once the
+   current codebase baseline is triaged.~~ **Done.** The baseline was
+   triaged: one HIGH-severity Bandit finding was a documented false positive
+   (bidi-control-character detection code that must contain the literal
+   characters it strips), fixed with a justified `# nosec` suppression;
+   pip-audit had zero known CVEs. CI now fails the build on any HIGH-severity
+   Bandit finding or any pip-audit-reported CVE; MEDIUM/LOW Bandit findings
+   stay advisory (this codebase's own scanning tools legitimately contain
+   strings like `"0.0.0.0"` and `/tmp` wordlist entries as detection
+   targets, not vulnerabilities). A `--cov-fail-under=55` regression floor
+   was also added to the pytest CI step.
 6. Implement the MCP service using the official protocol before advertising it as deployable.
 7. Multi-worker dashboard deployment needs a shared session store (Redis is
    already a Docker Compose service) — today's sessions are in-memory,

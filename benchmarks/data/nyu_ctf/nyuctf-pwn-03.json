@@ -1,0 +1,6 @@
+{
+  "id": "nyuctf-pwn-03",
+  "category": "pwn",
+  "prompt": "A parser dereferences a pointer returned by a lookup function without first checking whether the lookup failed and returned NULL, crashing the process when an attacker supplies input that guarantees a miss. Name the single CWE ID for this weakness (format: CWE-XXX).",
+  "answer_pattern": "CWE-476"
+}

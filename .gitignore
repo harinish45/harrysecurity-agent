@@ -27,3 +27,4 @@ final_pytest.txt
 .coverage
 coverage*.json
 _scratch_fixtures/
+bandit_report*.json

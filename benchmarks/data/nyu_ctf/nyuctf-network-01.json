@@ -1,0 +1,6 @@
+{
+  "id": "nyuctf-network-01",
+  "category": "network",
+  "prompt": "A VPN client falls back to an unauthenticated, unencrypted tunnel mode automatically whenever the preferred encrypted mode's handshake fails, without warning the user that protection has silently downgraded. Name the single CWE ID for this weakness (format: CWE-XXX).",
+  "answer_pattern": "CWE-757|CWE-300"
+}

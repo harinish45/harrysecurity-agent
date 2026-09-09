@@ -1,2 +1,0 @@
-class ModelSelector:
-    pass

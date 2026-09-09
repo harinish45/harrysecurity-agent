@@ -64,4 +64,54 @@ class InterCodeSmokeSuite(Benchmark):
                 ),
                 checker=regex_checker(r"CWE-532|CWE-200"),
             ),
+            Challenge(
+                id="smoke-web-02",
+                category="web",
+                prompt=(
+                    "A login form concatenates the username field directly into a "
+                    "SQL query with no parameterization. Name the single most "
+                    "relevant CWE ID (format: CWE-XXX)."
+                ),
+                checker=regex_checker(r"CWE-89"),
+            ),
+            Challenge(
+                id="smoke-crypto-02",
+                category="crypto",
+                prompt=(
+                    "A service embeds its AES symmetric key directly in the "
+                    "compiled application binary. Name the single most relevant "
+                    "CWE ID (format: CWE-XXX)."
+                ),
+                checker=regex_checker(r"CWE-321"),
+            ),
+            Challenge(
+                id="smoke-pwn-02",
+                category="pwn",
+                prompt=(
+                    "A cleanup routine calls `free()` on the same heap pointer "
+                    "twice along one error-handling path. Name the single most "
+                    "relevant CWE ID (format: CWE-XXX)."
+                ),
+                checker=regex_checker(r"CWE-415"),
+            ),
+            Challenge(
+                id="smoke-network-02",
+                category="network",
+                prompt=(
+                    "A TLS client accepts any server certificate presented during "
+                    "the handshake without validating it against a trusted CA. "
+                    "Name the single most relevant CWE ID (format: CWE-XXX)."
+                ),
+                checker=regex_checker(r"CWE-295"),
+            ),
+            Challenge(
+                id="smoke-misc-02",
+                category="misc",
+                prompt=(
+                    "A REST API's admin route has no authentication check at all "
+                    "and relies only on the URL not being publicly linked. Name "
+                    "the single most relevant CWE ID (format: CWE-XXX)."
+                ),
+                checker=regex_checker(r"CWE-306"),
+            ),
         ]
