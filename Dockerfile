@@ -16,13 +16,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for layer caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# Copy requirements first for layer caching. Installs from the LOCK file
+# (fully pinned, including transitive deps) for a reproducible build —
+# requirements.txt's loose `>=` pins are for local dev only.
+COPY requirements.lock.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.lock.txt
 
-# Copy the package and install it
+# Copy the package and install it. --no-deps: dependencies are already
+# pinned and installed from the lock file above; without this, pip would
+# resolve pyproject.toml's own loose `>=` dependency specifiers again and
+# could silently pull a newer, unpinned version of something the lock
+# file fixed, defeating the point of installing from the lock file at all.
 COPY . .
-RUN pip install --no-cache-dir --prefix=/install .
+RUN pip install --no-cache-dir --no-deps --prefix=/install .
 
 # ── Stage 2: Runtime ──────────────────────────────────────────
 FROM python:3.10-slim AS runtime

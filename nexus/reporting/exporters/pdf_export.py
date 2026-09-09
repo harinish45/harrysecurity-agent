@@ -52,6 +52,8 @@ class PdfExport:
             return path
         if self._try_playwright(html_path, path):
             return path
+        if self._try_edge_or_chrome(html_path, path):
+            return path
         if self._try_wkhtmltopdf(html_path, path):
             return path
         if self._try_xhtml2pdf(html_content, path):
@@ -61,6 +63,7 @@ class PdfExport:
             "No PDF rendering backend available. Install one of:\n"
             "  pip install weasyprint\n"
             "  pip install playwright && playwright install chromium\n"
+            "  Microsoft Edge or Google Chrome (headless print-to-pdf)\n"
             "  pip install xhtml2pdf\n"
             "  or install wkhtmltopdf from https://wkhtmltopdf.org/"
         )
@@ -93,6 +96,59 @@ class PdfExport:
         except Exception as exc:
             print(f"[PDF] playwright failed: {exc}", file=sys.stderr)
             return False
+
+    @staticmethod
+    def _try_edge_or_chrome(html_path: Path, output: Path) -> bool:
+        """Microsoft Edge / Google Chrome headless print-to-pdf.
+        Available natively on Windows (Microsoft Edge) and environments with Chrome/Edge.
+        Produces high-fidelity, CSS3-compliant vector PDF output.
+        """
+        import shutil
+        import tempfile
+
+        candidates = [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            "msedge",
+            "google-chrome",
+            "chromium-browser",
+            "chromium",
+        ]
+        executable = None
+        for cand in candidates:
+            if Path(cand).is_file():
+                executable = cand
+                break
+            resolved = shutil.which(cand)
+            if resolved:
+                executable = resolved
+                break
+
+        if not executable:
+            return False
+
+        temp_profile = tempfile.mkdtemp(prefix="nexus_pdf_")
+        try:
+            cmd = [
+                executable,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={temp_profile}",
+                f"--print-to-pdf={output.resolve()}",
+                html_path.resolve().as_uri(),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            if result.returncode == 0 and output.exists() and output.stat().st_size > 0:
+                return True
+        except Exception as exc:
+            print(f"[PDF] edge/chrome print-to-pdf failed: {exc}", file=sys.stderr)
+        finally:
+            shutil.rmtree(temp_profile, ignore_errors=True)
+
+        return False
 
     @staticmethod
     def _try_wkhtmltopdf(html_path: Path, output: Path) -> bool:

@@ -56,6 +56,7 @@ def test_xhtml2pdf_fallback_used_when_other_backends_unavailable(tmp_path, monke
     exact failure mode this session hit on a fresh Windows host."""
     monkeypatch.setattr(PdfExport, "_try_weasyprint", staticmethod(lambda html, output: False))
     monkeypatch.setattr(PdfExport, "_try_playwright", staticmethod(lambda html_path, output: False))
+    monkeypatch.setattr(PdfExport, "_try_edge_or_chrome", staticmethod(lambda html_path, output: False))
     monkeypatch.setattr(PdfExport, "_try_wkhtmltopdf", staticmethod(lambda html_path, output: False))
 
     out = tmp_path / "fallback_report.pdf"
@@ -67,6 +68,7 @@ def test_xhtml2pdf_fallback_used_when_other_backends_unavailable(tmp_path, monke
 def test_pdf_export_raises_clearly_when_all_backends_fail(tmp_path, monkeypatch):
     monkeypatch.setattr(PdfExport, "_try_weasyprint", staticmethod(lambda html, output: False))
     monkeypatch.setattr(PdfExport, "_try_playwright", staticmethod(lambda html_path, output: False))
+    monkeypatch.setattr(PdfExport, "_try_edge_or_chrome", staticmethod(lambda html_path, output: False))
     monkeypatch.setattr(PdfExport, "_try_wkhtmltopdf", staticmethod(lambda html_path, output: False))
     monkeypatch.setattr(PdfExport, "_try_xhtml2pdf", classmethod(lambda cls, html, output: False))
 

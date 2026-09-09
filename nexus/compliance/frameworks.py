@@ -261,8 +261,9 @@ _ISO27001 = [
           "Development, testing, and operational environments shall be separated to "
           "reduce risks of unauthorized access or changes."),
        "sandboxed_execution",
-       "nexus/runtime/sandbox/docker_sandbox.py provides container-isolated execution, "
-       "separating tool run environments from the host running NEXUS."),
+       "nexus/tools/docker_sandbox.py provides opt-in, container-isolated execution "
+       "(NEXUS_SANDBOX_MODE=docker), separating tool run environments from the host "
+       "running NEXUS."),
 ]
 
 # ── NIST Cybersecurity Framework (functions/subcategories) ─────────────────

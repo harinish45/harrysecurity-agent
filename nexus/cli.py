@@ -352,14 +352,32 @@ def mcp(
     """
     import sys
 
-    from nexus.mcp.server import create_server
+    from nexus.mcp.server import LOOPBACK_HOSTS, MCP_TOKEN, build_http_app, create_server
 
     server = create_server()
     if http:
+        # run_tool/run_mission can trigger real scans and LLM spend; an
+        # unauthenticated network listener exposing them is the same class
+        # of risk web/server.py's launch_dashboard() already refuses for
+        # the dashboard — mirror that fail-closed check here rather than
+        # let an operator accidentally expose this with --host 0.0.0.0.
+        if host not in LOOPBACK_HOSTS and not MCP_TOKEN:
+            console.print(
+                f"[red]Refusing to bind the MCP server to non-loopback host {host!r} "
+                "without NEXUS_MCP_TOKEN set — this would expose run_tool/run_mission "
+                "unauthenticated to anything that can reach this host. Set "
+                "NEXUS_MCP_TOKEN, or bind to 127.0.0.1/localhost instead.[/]"
+            )
+            raise typer.Exit(1)
         # stdout is free to use here — streamable-HTTP doesn't speak
         # JSON-RPC over stdio, so a normal startup banner is safe.
         console.print(f"[cyan]Starting NEXUS-STRIKE MCP server (streamable-HTTP) on {host}:{port}...[/]")
-        server.run(transport="streamable-http", host=host, port=port)
+        if not MCP_TOKEN:
+            console.print("[yellow]NEXUS_MCP_TOKEN is not set — accepting unauthenticated requests "
+                          "(fine on loopback, not fine if this host is reachable from elsewhere).[/]")
+        import uvicorn
+
+        uvicorn.run(build_http_app(server), host=host, port=port, log_level="info")
     else:
         # stdio mode reserves stdout entirely for the JSON-RPC protocol
         # stream a client reads from — any banner printed to `console`

@@ -287,5 +287,18 @@ def redact_findings(findings: list[dict], *, patterns: Optional[list] = None) ->
         raw = new_item.get("raw")
         if isinstance(raw, (dict, str)):
             new_item["raw"] = _redact_value(raw, extra_patterns)
+        # `title` also needs this: a tool that returns bare strings instead
+        # of proper Finding dicts (e.g. blue_team.canary_token_deployment's
+        # real decoy-credential findings) gets normalised by
+        # ToolExecutor.run() into `Finding(title=str(f)[:120], ...)` with NO
+        # `evidence` populated — the tool's real, legitimately-generated
+        # secret-shaped text (a decoy AWS key it deliberately created) then
+        # sits unredacted in `title`, the one Finding field this function
+        # used to leave untouched, and OutputGuard's independent secret
+        # patterns (which cover fields redact_findings() doesn't reach)
+        # would otherwise discard the whole result instead of redacting it.
+        title = new_item.get("title")
+        if isinstance(title, str):
+            new_item["title"] = _redact_text(title, extra_patterns)
         out.append(new_item)
     return out

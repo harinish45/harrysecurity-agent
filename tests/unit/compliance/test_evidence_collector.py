@@ -178,6 +178,29 @@ def test_module_presence_checks_are_real_not_fabricated(control_id, capability):
     assert record.detail
 
 
+def test_sandboxed_execution_check_targets_the_real_module_not_a_dead_stub():
+    """`_check_sandboxed_execution` used to import
+    `nexus.runtime.sandbox.docker_sandbox` — a 2-line dead-code stub
+    (`class FilesystemVault: ...`-style placeholder never referenced
+    anywhere else in the codebase) that would trivially "pass" regardless
+    of whether real sandboxing existed, letting this control report false
+    evidence. It now checks the REAL Docker sandbox this platform actually
+    uses (`nexus.tools.docker_sandbox`, built this session and wired into
+    exploit_dev/fuzzing.py) and requires its real dispatch function to
+    exist, not just a bare import."""
+    engine = ComplianceEngine()
+    status, detail = engine._check_sandboxed_execution()
+    assert status == STATUS_PARTIAL
+    assert "nexus.tools.docker_sandbox" in detail
+
+    # Confirm this is a real, falsifiable check, not something that
+    # trivially passes for any module path.
+    status, detail = engine._module_check(
+        "nexus.tools.docker_sandbox", "this_function_does_not_exist", "n/a"
+    )
+    assert status == STATUS_GAP
+
+
 def test_module_presence_check_reports_gap_for_broken_import(monkeypatch):
     engine = ComplianceEngine()
     status, detail = engine._module_check("nexus.compliance.this_module_does_not_exist", None, "n/a")

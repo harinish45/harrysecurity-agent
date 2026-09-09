@@ -17,6 +17,7 @@ component; it must not become a guardrail bypass.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,52 @@ from nexus.foundation.paths import safe_join, safe_slug
 
 _ENGAGEMENTS_ROOT = Path("engagements")
 
+# Same reasoning as web/server.py's _LOOPBACK_HOSTS: stdio transport is
+# inherently local — a client that can spawn `nexus mcp` as a subprocess
+# already has equivalent access to this machine, so it needs no separate
+# auth. --http mode is a real network listener; run_tool/run_mission can
+# trigger real scans and LLM spend, so an unauthenticated network listener
+# here is the same class of exposure the dashboard already guards against.
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+MCP_TOKEN = os.environ.get("NEXUS_MCP_TOKEN", "").strip()
+
+# `run_mission` starts a full multi-agent OrchestrationEngine run — many LLM
+# calls and tool executions, its own thread pool via FlowController. Nothing
+# else in the platform caps how many of these can run concurrently (RateGuard
+# throttles individual tool calls by target, BudgetGuard tracks spend per
+# mission_id once it exists — neither stops an MCP client from calling
+# run_mission itself in an unbounded loop). A local semaphore, not a new
+# guardrail module: this is resource exhaustion specific to this new,
+# repeatable-by-a-remote-client entry point, not a scope/legality decision.
+_MAX_CONCURRENT_MISSIONS = int(os.environ.get("NEXUS_MCP_MAX_CONCURRENT_MISSIONS", "2"))
+
+
+def build_http_app(server: MCPServer):
+    """Wrap the server's streamable-HTTP ASGI app with bearer-token auth
+    when NEXUS_MCP_TOKEN is set. Building the full OAuth-shaped
+    AuthSettings/TokenVerifier this SDK supports is unwarranted complexity
+    for a single-operator static-secret case; a plain Starlette middleware
+    checking one header is simpler to reason about and test, and matches
+    the dashboard's existing _require_token pattern exactly."""
+    app = server.streamable_http_app()
+    if not MCP_TOKEN:
+        return app
+
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+
+    class _BearerTokenMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            header = request.headers.get("authorization", "")
+            scheme, _, presented = header.partition(" ")
+            if scheme.lower() != "bearer" or not hmac.compare_digest(presented, MCP_TOKEN):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            return await call_next(request)
+
+    app.add_middleware(_BearerTokenMiddleware)
+    return app
+
 
 def _mission_report_path(mission_id: str) -> Path:
     mission_dir = safe_join(_ENGAGEMENTS_ROOT, safe_slug(mission_id))
@@ -37,6 +84,10 @@ def _mission_report_path(mission_id: str) -> Path:
 
 
 def create_server() -> MCPServer:
+    import anyio
+
+    mission_slots = anyio.Semaphore(_MAX_CONCURRENT_MISSIONS)
+
     server = MCPServer(
         name="nexus-strike",
         title="NEXUS-STRIKE",
@@ -129,18 +180,35 @@ def create_server() -> MCPServer:
         Blocks until the mission completes (this can take a while for a
         real multi-agent assessment); the result is also persisted so a
         later get_report(mission_id) call can retrieve it without
-        re-running anything."""
+        re-running anything. Rejects cleanly (does not queue) if
+        NEXUS_MCP_MAX_CONCURRENT_MISSIONS missions are already running
+        through this server — call get_mission_status/retry rather than
+        stacking up unbounded concurrent multi-agent runs."""
+        import anyio
+
         from nexus.orchestration.engine import OrchestrationEngine
 
-        resolved_mission_id = mission_id or f"mcp-{safe_slug(target)}"
-        engine = OrchestrationEngine(llm_provider=provider, emit_events=False)
-        result = await engine.run_mission(
-            target=target,
-            mission_id=resolved_mission_id,
-            mode=mode,
-            objective=objective,
-            allowed_domains=allowed_domains,
-        )
+        try:
+            mission_slots.acquire_nowait()
+        except anyio.WouldBlock:
+            return {
+                "status": "failed",
+                "error": f"Too many concurrent missions already running via this MCP server "
+                         f"(limit: {_MAX_CONCURRENT_MISSIONS}). Wait for one to finish or check "
+                         "get_mission_status, then retry.",
+            }
+        try:
+            resolved_mission_id = mission_id or f"mcp-{safe_slug(target)}"
+            engine = OrchestrationEngine(llm_provider=provider, emit_events=False)
+            result = await engine.run_mission(
+                target=target,
+                mission_id=resolved_mission_id,
+                mode=mode,
+                objective=objective,
+                allowed_domains=allowed_domains,
+            )
+        finally:
+            mission_slots.release()
         try:
             _mission_report_path(resolved_mission_id).write_text(
                 json.dumps(result, default=str, indent=2), encoding="utf-8"

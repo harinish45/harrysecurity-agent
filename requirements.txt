@@ -38,4 +38,7 @@ scipy>=1.11
 
 # Real Model Context Protocol server (nexus/mcp/server.py, `nexus mcp`) —
 # replaces the earlier "coming in Phase 2" stub.
-mcp>=2.2.0
+mcp>=2.2.0
+
+# Property-based/fuzz testing of the guardrail chain (tests/unit/test_guardrail_property_based.py)
+hypothesis>=6.100

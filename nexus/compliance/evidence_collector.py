@@ -194,12 +194,23 @@ class ComplianceEngine:
         return STATUS_GAP, f"InputGuard/OutputGuard import check failed: {input_detail or output_detail}"
 
     def _check_sandboxed_execution(self) -> tuple[str, str]:
+        # `nexus.runtime.sandbox.docker_sandbox` is a 2-line dead-code stub
+        # (`class FilesystemVault: ...`-style placeholder, never imported
+        # anywhere else in the codebase) — checking it always trivially
+        # "passes" regardless of whether real sandboxing exists, which would
+        # let this compliance control report false evidence. The REAL Docker
+        # sandbox this platform actually uses lives at
+        # `nexus.tools.docker_sandbox` (built this session, wired into
+        # exploit_dev/fuzzing.py and reverse_engineering/ghidra_analysis.py).
+        # Also require the real dispatch function to exist, not just a
+        # successful bare import, so a future accidental rename/removal of
+        # that function still fails this check truthfully.
         return self._module_check(
-            "nexus.runtime.sandbox.docker_sandbox",
-            None,
-            "A Docker-based sandbox runtime exists in code for isolating tool execution; "
-            "this check confirms the module imports and is not verifying every tool "
-            "actually routes through it.",
+            "nexus.tools.docker_sandbox",
+            "run_subprocess_sandboxed",
+            "A Docker-based sandbox (nexus.tools.docker_sandbox) exists in code for isolating "
+            "tool execution; this check confirms the module and its dispatch function import "
+            "and is not verifying every tool actually routes through it.",
         )
 
     def _check_tool_timeout_enforcement(self) -> tuple[str, str]:

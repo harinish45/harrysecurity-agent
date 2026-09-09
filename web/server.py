@@ -105,9 +105,26 @@ def _require_permission(request: Request, permission) -> None:
 async def auth_login(payload: dict, request: Request):
     """Authenticate against nexus.foundation.auth (bcrypt + optional TOTP)
     and return a per-user session token. Bootstrap the first account with
-    `nexus auth create-admin` — there is no default account."""
+    `nexus auth create-admin` — there is no default account.
+
+    ``AuthManager``'s per-account lockout (5 attempts / 15 min) stops a
+    brute-force run against ONE username, but does nothing against a
+    credential-spray sweeping many different usernames from one source —
+    each guess lands under a different account's own attempt counter. This
+    endpoint adds a second, IP-keyed layer via the same ``RateGuard`` used
+    to bound every other target-facing call in this codebase, so a spray
+    attempt gets rate-limited overall regardless of which username it's
+    currently trying.
+    """
     require_same_origin_signal(request)
     from nexus.foundation.auth import AuthenticationError, auth_manager
+    from nexus.foundation.guardrails.rate_guard import RateGuard, RateGuardError
+
+    client_host = request.client.host if request.client else "unknown"
+    try:
+        RateGuard.validate(target=f"login:{client_host}")
+    except RateGuardError as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
 
     username = str(payload.get("username", ""))
     password = str(payload.get("password", ""))

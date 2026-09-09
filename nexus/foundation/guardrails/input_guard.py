@@ -85,10 +85,39 @@ class InputGuard:
         return text
 
     @classmethod
+    def _strip_combining_marks(cls, text):
+        """Drop Unicode combining marks (categories Mn/Mc/Me) — a diacritic
+        inserted mid-keyword (e.g. "i" + U+0307 COMBINING DOT ABOVE + "gnore")
+        breaks the literal "ignore" substring match while the payload still
+        reads/renders as the original word, the same evasion class as the
+        bidi-override and zero-width tricks above, found by property-fuzz
+        testing. NFKC normalization does not remove these — they're valid,
+        separately-encoded combining characters, not compatibility-decomposable
+        forms of anything — so they need their own explicit strip."""
+        return "".join(ch for ch in text if unicodedata.category(ch) not in ("Mn", "Mc", "Me"))
+
+    @classmethod
     def _normalize(cls, payload):
-        """NFKC-normalize and strip zero-width/bidi-control characters."""
-        normalized = unicodedata.normalize("NFKC", payload)
-        normalized = cls._strip_zero_width(normalized)
+        """NFD-decompose (so a precomposed accented letter like "ì" splits
+        into "i" + a combining grave accent BEFORE the mark-strip below runs),
+        strip zero-width/bidi-control/combining-mark characters, then
+        NFKC-normalize for compatibility folding (fullwidth forms, etc.).
+
+        Order matters here and was itself a real bug this fuzz pass caught:
+        doing NFKC first (as the original version did) COMPOSES a base
+        letter plus an adjacent combining mark into one precomposed
+        character whenever a canonical equivalent exists (e.g. "i" + U+0300
+        COMBINING GRAVE ACCENT -> "ì", U+00EC) — by the time the mark-strip
+        ran, there was no longer a separate mark to strip, and "ì" is a
+        single codepoint that doesn't literally spell "i". Decomposing
+        first guarantees every combining mark is present as its own
+        codepoint for the strip step to remove, regardless of whether the
+        original payload arrived pre-composed or already split apart.
+        """
+        decomposed = unicodedata.normalize("NFD", payload)
+        stripped = cls._strip_zero_width(decomposed)
+        stripped = cls._strip_combining_marks(stripped)
+        normalized = unicodedata.normalize("NFKC", stripped)
         return normalized
 
     @classmethod

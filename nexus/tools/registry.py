@@ -22,6 +22,14 @@ class ToolRegistry:
             "status": "stub",
         }
 
+    def has(self, name: str) -> bool:
+        """True if `name` is a registered tool. Cheap existence check for
+        callers (e.g. ToolExecutor.run()) that need to validate a name
+        before doing guardrail/audit work for a call that's doomed to fail
+        anyway, without triggering get()'s KeyError or its message-building
+        cost."""
+        return name in self._tools
+
     def get(self, name: str) -> Callable:
         """Get the raw tool function by name (bypasses guardrails).
 

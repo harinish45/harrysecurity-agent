@@ -496,6 +496,38 @@ def test_login_requires_csrf_header(client, isolated_auth_vault):
     assert response.status_code == 403
 
 
+def test_login_rate_limited_across_different_usernames(client, isolated_auth_vault, monkeypatch):
+    """AuthManager's per-account lockout stops a brute-force run against ONE
+    username, but does nothing against a credential-spray sweeping many
+    DIFFERENT usernames from the same source — each guess lands under a
+    different account's own attempt counter, never tripping any single
+    account's 5-attempt lockout. /api/auth/login now also applies RateGuard
+    keyed by client IP, so a spray attempt gets rate-limited overall
+    regardless of which username it's currently trying."""
+    from nexus.foundation.guardrails.rate_guard import RateGuard
+
+    monkeypatch.setenv("NEXUS_RATE_LIMIT", "3")
+    monkeypatch.setenv("NEXUS_RATE_WINDOW", "60")
+    RateGuard.reset("login:testclient")
+
+    for i in range(3):
+        response = client.post(
+            "/api/auth/login",
+            json={"username": f"nonexistent-user-{i}", "password": "whatever"},
+            headers={"X-Requested-With": "NEXUS-Dashboard"},
+        )
+        assert response.status_code == 401  # under the limit, just wrong creds
+
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "yet-another-nonexistent-user", "password": "whatever"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert response.status_code == 429
+
+    RateGuard.reset("login:testclient")
+
+
 def test_session_token_authenticates_api_calls(client, isolated_auth_vault):
     from nexus.foundation.auth import Role, auth_manager
 

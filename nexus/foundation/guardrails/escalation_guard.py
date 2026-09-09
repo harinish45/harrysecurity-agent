@@ -28,10 +28,17 @@ class EscalationGuard:
         # separator into a keyword — e.g. this codebase's OWN registered
         # `webapp.sql_injection` tool (an actual SQL-injection tester) never
         # matched "sqli" because of the underscore, while its sibling
-        # `webapp.sqli` did. Stripping separators before matching closes
-        # that whole evasion class (also catches "sq-li", "sq.li", etc.)
-        # without needing to enumerate every naming variant by hand.
-        lower_name = re.sub(r"[_\-.\s]+", "", raw_name)
+        # `webapp.sqli` did.
+        #
+        # A follow-up property-fuzz pass found the first fix (stripping only
+        # an enumerated separator set `[_\-.\s]`) was itself still a
+        # blocklist — any UN-enumerated separator ("/", ":", ",", a Unicode
+        # middle dot, etc.) evaded it exactly the same way, just with a
+        # different character. Inverted to an allowlist: strip everything
+        # that ISN'T a lowercase ASCII letter or digit, which closes the
+        # whole evasion class at once instead of playing whack-a-mole with
+        # individual separator characters.
+        lower_name = re.sub(r"[^a-z0-9]+", "", raw_name)
         for _d in cls._destructive:
             if _d in raw_name or _d in lower_name:
                 console.print(f"[red][ESCALATION GUARD] Action '{tool_name}' requires human approval.[/red]")

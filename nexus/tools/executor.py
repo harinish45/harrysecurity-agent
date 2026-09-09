@@ -71,6 +71,26 @@ class ToolExecutor:
         if not isinstance(target, str) or not target.strip():
             raise ToolExecutionError("A non-empty string target is required")
 
+        # ── Tool name must resolve before anything else runs ─────────────
+        # `tool_registry.get()` raises a bare KeyError for an unregistered
+        # name. That used to happen AFTER every guardrail below had already
+        # run (Input/Scope/Legal/Escalation/Rate/Audit) and wasn't caught by
+        # their try/except, so a bad tool_name crashed ToolExecutor.run()
+        # with a raw, uncaught KeyError instead of degrading to a clean
+        # tool_result — every caller (CLI, dashboard, and now the MCP
+        # server, which is a new, less-trusted caller that can't be assumed
+        # to only ever pass real names) needs a truthful failure here, not
+        # a crash. Checking membership directly (not calling get()) avoids
+        # constructing get()'s own truncated-tool-list error message, which
+        # is a minor internal-registry disclosure not needed for a normal
+        # "not found" response.
+        if not tool_registry.has(tool_name):
+            return tool_result(
+                tool_name, target,
+                status=STATUS_FAILED,
+                error=f"Unknown tool: {tool_name!r} is not registered",
+            )
+
         # ── Engagement check for non-local targets ──────────────────────
         is_local = target in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
         if not is_local and self._require_engagement and not engagement:
