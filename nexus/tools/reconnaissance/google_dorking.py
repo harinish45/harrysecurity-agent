@@ -1,66 +1,86 @@
 #!/usr/bin/env python3
 """
-NEXUS-STRIKE — reconnaissance tool: Google Dorking
+NEXUS-STRIKE — reconnaissance.google_dorking
 Domain: reconnaissance
+
+Previously one of 13 tools sharing byte-for-byte identical fake logic
+(DNS resolve + bare HTTP GET on `/`, unrelated to Google dorking at all).
+Caught during a follow-up audit. Automating real Google scraping violates
+Google's Terms of Service and is unreliable (CAPTCHAs, rate limits) — the
+honest, correct behavior is to generate a real, curated set of actionable
+Google dork query strings tailored to the target, clearly labeled as
+queries for the operator to run manually, not fabricated "results".
 """
-from nexus.foundation.net import safe_urlopen
+from __future__ import annotations
+
+from typing import Any
+
+from nexus.foundation.schema import Finding, STATUS_COMPLETED, STATUS_FAILED, tool_result
 from nexus.tools.registry import tool_registry
-from nexus.foundation.ssl_config import get_ssl_context
+
+_TOOL_NAME = "reconnaissance.google_dorking"
+
+_DORK_CATEGORIES: dict[str, list[str]] = {
+    "exposed documents": [
+        "site:{d} filetype:pdf", "site:{d} filetype:doc OR filetype:docx",
+        "site:{d} filetype:xls OR filetype:xlsx",
+    ],
+    "login/admin panels": [
+        "site:{d} inurl:admin", "site:{d} inurl:login", "site:{d} intitle:\"admin panel\"",
+    ],
+    "exposed config/backup files": [
+        "site:{d} ext:env OR ext:config OR ext:bak", "site:{d} inurl:wp-config.php",
+        "site:{d} ext:sql", "site:{d} filetype:log",
+    ],
+    "error messages / stack traces": [
+        "site:{d} intext:\"sql syntax\"", "site:{d} intext:\"stack trace\"",
+        "site:{d} intext:\"warning: mysql\"",
+    ],
+    "exposed directories": [
+        "site:{d} intitle:\"index of /\"", "site:{d} intitle:\"index of /backup\"",
+    ],
+    "subdomains and related sites": [
+        "site:*.{d} -site:www.{d}",
+    ],
+}
 
 
-def run(target: str, **kwargs) -> dict:
-    """reconnaissance tool: Google Dorking"""
-    findings = []
-    try:
-        import re as _re
-        import socket
-        import ssl
-        import urllib.error
-        import urllib.request
+def run(target: str, **kwargs: Any) -> dict:
+    """Generate real, actionable Google dork queries for the target — for manual execution."""
+    domain = target.strip().lower()
+    if not domain:
+        return tool_result(_TOOL_NAME, target, status=STATUS_FAILED, error="Empty target")
 
-        def _extract_title(html):
-            m = _re.search(r'<title[^>]*>([^<]+)</title>', html, _re.IGNORECASE)
-            return m.group(1).strip() if m else ''
+    findings: list[Finding] = []
+    all_queries: dict[str, list[str]] = {}
+    for category, templates in _DORK_CATEGORIES.items():
+        queries = [t.format(d=domain) for t in templates]
+        all_queries[category] = queries
+        findings.append(Finding(
+            title=f"Google dork queries generated: {category}",
+            severity="info",
+            confidence="certain",
+            affected_asset=domain,
+            evidence="Run these manually in a browser (automated scraping of Google violates its ToS "
+                     f"and is unreliable): {queries}",
+            remediation="Manually review any results these queries return for unintended public exposure.",
+            tool=_TOOL_NAME,
+            references=["MITRE ATT&CK T1593"],
+        ))
 
-        ssl_ctx = get_ssl_context(target, allow_insecure=True)
-        # DNS resolution
-        try:
-            ip = socket.gethostbyname(target)
-            findings.append(f"Resolved {target} -> {ip}")
-        except Exception as e:
-            findings.append(f"DNS resolution failed: {e}")
-        # HTTP check
-        for scheme in ("http", "https"):
-            url = f"{scheme}://{target}/"
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-                resp = safe_urlopen(req, timeout=6, context=ssl_ctx)
-                server = resp.headers.get('Server', 'unknown')
-                body = resp.read(4096).decode('utf-8', errors='replace')
-                title = _extract_title(body)
-                title_note = f", Title='{title}'" if title else ''
-                findings.append(
-                    f"{scheme.upper()} {url}: status={resp.status},"
-                    f" Server={server}{title_note}"
-                )
-            except urllib.error.HTTPError as e:
-                findings.append(f"{scheme.upper()} {url}: HTTP {e.code} {e.reason}")
-            except OSError:
-                findings.append(f"{scheme.upper()} {url}: port not reachable (closed or filtered)")
-            except Exception as e:
-                findings.append(f"{scheme.upper()} {url}: {str(e)[:120]}")
-    except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "reconnaissance.google_dorking", "domain": "reconnaissance", "target": target, "status": "completed", "findings": findings}
+    return tool_result(
+        _TOOL_NAME, target, status=STATUS_COMPLETED, findings=findings,
+        summary=f"Generated {sum(len(v) for v in all_queries.values())} Google dork queries across "
+                f"{len(all_queries)} categories for {domain} — for manual execution only",
+        metadata={"dork_queries": all_queries},
+    )
 
 
-# Register with tool registry
-tool_registry.register("reconnaissance.google_dorking", run, metadata={
-    "name": "reconnaissance.google_dorking",
+tool_registry.register(_TOOL_NAME, run, metadata={
+    "name": _TOOL_NAME,
     "domain": "reconnaissance",
     "status": "completed",
-    "description": "reconnaissance tool: Google Dorking",
-    "parameters": {
-        "target": "Target domain, IP, or URL",
-    },
+    "description": "Generates real, actionable Google dork query strings tailored to the target domain "
+                    "for manual execution (does not scrape Google, which would violate its ToS)",
+    "parameters": {"target": "Target domain to generate dork queries for"},
 })

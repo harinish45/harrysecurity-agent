@@ -15,6 +15,15 @@ class InputGuard:
 
     _ZERO_WIDTH_CHARS = "​‌‍﻿⁠"
 
+    # Bidi/directional-format control characters (U+202A-U+202E, U+2066-U+2069)
+    # — a "Trojan Source"-style evasion: inserting e.g. U+202E (RIGHT-TO-LEFT
+    # OVERRIDE) in the middle of a blocked keyword ("ign‮ore") breaks the
+    # literal regex match while the word still reads/renders as the original
+    # keyword. NFKC normalization does not remove these (they're formatting
+    # controls, not compatibility-decomposable characters), so they need the
+    # same explicit strip the zero-width characters already get.
+    _BIDI_CONTROL_CHARS = "‪‫‬‭‮⁦⁧⁨⁩"
+
     # Common Cyrillic/Greek confusables mapped to their ASCII lookalikes.
     _HOMOGLYPHS = {
         # Cyrillic lowercase
@@ -61,11 +70,13 @@ class InputGuard:
     def _strip_zero_width(cls, text):
         for ch in cls._ZERO_WIDTH_CHARS:
             text = text.replace(ch, "")
+        for ch in cls._BIDI_CONTROL_CHARS:
+            text = text.replace(ch, "")
         return text
 
     @classmethod
     def _normalize(cls, payload):
-        """NFKC-normalize and strip zero-width characters."""
+        """NFKC-normalize and strip zero-width/bidi-control characters."""
         normalized = unicodedata.normalize("NFKC", payload)
         normalized = cls._strip_zero_width(normalized)
         return normalized

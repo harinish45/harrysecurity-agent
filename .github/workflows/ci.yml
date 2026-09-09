@@ -57,7 +57,7 @@ jobs:
     - name: Run pytest
       env:
         PYTHONPATH: ${{ github.workspace }}
-        NEXUS_LEGAL_ACK: "1"
+        NEXUS_LEGAL_ACK: "I_HAVE_WRITTEN_AUTHORIZATION"
       run: |
         pytest tests/ --tb=short -v
 

@@ -74,7 +74,7 @@ def _build_providers() -> list[dict]:
         name="groq",
         base_url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
         api_key=os.getenv("GROQ_API_KEY", ""),
-        model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
     )
 
     # 5. Omniroute

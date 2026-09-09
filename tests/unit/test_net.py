@@ -27,13 +27,19 @@ def test_rejects_request_object_with_bad_scheme():
 
 
 def test_allows_http_and_https_schemes_through_to_urlopen(monkeypatch):
+    # safe_urlopen() now builds its own opener (rather than calling
+    # urllib.request.urlopen() directly) so it can install a custom
+    # HTTPRedirectHandler that re-validates every redirect hop against
+    # ScopeGuard (see test_ssrf_redirect_protection.py) — OpenerDirector.open
+    # is the real call that ends up executing the request either way, so
+    # that's the layer to intercept here.
     calls = []
 
-    def _fake_urlopen(url_or_request, timeout=None, context=None, **kwargs):
-        calls.append((url_or_request, timeout, context))
+    def _fake_open(self, fullurl, data=None, timeout=None):
+        calls.append((fullurl, timeout))
         return "opened"
 
-    monkeypatch.setattr("nexus.foundation.net.urllib.request.urlopen", _fake_urlopen)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", _fake_open)
 
     assert safe_urlopen("https://example.com", timeout=5) == "opened"
     assert safe_urlopen("http://example.com", timeout=3) == "opened"

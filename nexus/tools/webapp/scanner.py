@@ -1,65 +1,119 @@
 #!/usr/bin/env python3
 """
-NEXUS-STRIKE — webapp tool: Scanner
+NEXUS-STRIKE — webapp.scanner
 Domain: webapp
+Lightweight composite "quick scan" aggregator.
+
+Previously: a dummy stub identical across all 17 webapp.* "secondary"
+tools (DNS resolve + bare GET of "/", no aggregation of anything). Now: a
+real orchestrator that calls several other real webapp.* tools through
+``tool_registry.run()`` — the guardrailed entrypoint, so every sub-scan
+still passes InputGuard/ScopeGuard/LegalGuard/EscalationGuard/RateGuard/
+AuditGuard exactly like a directly-invoked scan would — and merges their
+findings into one composite result. This is a genuine aggregation of
+already-real tool output, not a new detection technique of its own.
 """
-from nexus.foundation.net import safe_urlopen
+from __future__ import annotations
+
+from typing import Any
+
+from nexus.foundation.schema import (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_NO_FINDINGS,
+    tool_result,
+)
 from nexus.tools.registry import tool_registry
-from nexus.foundation.ssl_config import get_ssl_context
+
+# Kept intentionally small/fast for a "quick scan": four cheap, single-GET-ish
+# checks rather than the heavier multi-payload tools (sqli/xss/lfi/...).
+DEFAULT_SUBSCANS = [
+    "webapp.csrf",
+    "webapp.session_mgmt",
+    "webapp.waf_detect",
+    "webapp.param_discovery",
+]
 
 
-def run(target: str, **kwargs) -> dict:
-    """webapp tool: Scanner"""
-    findings = []
-    try:
-        import urllib.request
-        import ssl
-        import urllib.parse
-        parsed = urllib.parse.urlparse(target if "://" in target else f"http://{target}/")
-        url = parsed.geturl()
-        ctx = get_ssl_context(target, allow_insecure=True)
+def run(target: str, subscans: list[str] | None = None, timeout: int = 10, **kwargs: Any) -> dict:
+    """Run a quick composite scan by aggregating several other webapp.* tools.
+
+    Parameters
+    ----------
+    target : str
+        Target URL or hostname to test.
+    subscans : list[str], optional
+        Fully-qualified tool names to run (default: a fixed set of 4 fast
+        webapp.* checks). Each is executed via ``tool_registry.run()``, so
+        all guardrails apply exactly as they would for a direct call.
+    timeout : int
+        Per-subscan timeout in seconds, passed through to each sub-tool.
+    """
+    if not target or not target.strip():
+        return tool_result("webapp.scanner", target, status=STATUS_FAILED, error="Empty target")
+
+    tools_to_run = subscans or DEFAULT_SUBSCANS
+    findings: list[dict] = []
+    sub_results: list[dict] = []
+    errors: list[str] = []
+
+    for tool_name in tools_to_run:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = safe_urlopen(req, timeout=5, context=ctx)
-            import re as _re
-            def _title(h):
-                m = _re.search(r'<title[^>]*>([^<]+)</title>', h, _re.IGNORECASE)
-                return m.group(1).strip() if m else ''
-            server = resp.headers.get('Server', 'unknown')
-            powered_by = resp.headers.get('X-Powered-By', '')
-            csp = resp.headers.get('Content-Security-Policy', 'missing')
-            hsts = resp.headers.get('Strict-Transport-Security', 'missing')
-            x_frame = resp.headers.get('X-Frame-Options', 'missing')
-            body = resp.read(4096).decode('utf-8', errors='replace')
-            title = _title(body)
-            findings.append(
-                f"HTTP {resp.status} {url}: Server={server}"
-                + (f", X-Powered-By={powered_by}" if powered_by else "")
-                + (f", Title='{title}'" if title else "")
-            )
-            findings.append(f"Security headers — CSP={csp}, HSTS={hsts}, X-Frame-Options={x_frame}")
-            if csp == 'missing':
-                findings.append('WARN: Content-Security-Policy header absent')
-            if hsts == 'missing':
-                findings.append('WARN: Strict-Transport-Security header absent')
-            if x_frame == 'missing':
-                findings.append('WARN: X-Frame-Options header absent (potential clickjacking)')
-        except urllib.error.HTTPError as e:
-            findings.append(f"HTTP {e.code}: {url}")
+            result = tool_registry.run(tool_name, target=target, timeout=timeout)
         except Exception as e:
-            findings.append(f"HTTP error: {str(e)[:80]}")
-    except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "webapp.scanner", "domain": "webapp", "target": target, "status": "completed", "findings": findings}
+            errors.append(f"{tool_name}: {str(e)[:150]}")
+            sub_results.append({"tool": tool_name, "status": "failed", "error": str(e)[:150]})
+            continue
+
+        sub_status = result.get("status", "failed")
+        sub_findings = result.get("findings", [])
+        sub_results.append({
+            "tool": tool_name,
+            "status": sub_status,
+            "summary": result.get("summary", ""),
+            "finding_count": len(sub_findings),
+        })
+        if sub_status == "failed":
+            errors.append(f"{tool_name}: {result.get('error', 'unknown error')}")
+        findings.extend(sub_findings)
+
+    if not sub_results:
+        return tool_result("webapp.scanner", target, status=STATUS_FAILED, error="No subscans configured")
+
+    all_failed = all(r["status"] == "failed" for r in sub_results)
+    if all_failed:
+        return tool_result(
+            "webapp.scanner", target,
+            status=STATUS_FAILED,
+            error="; ".join(errors) or "All subscans failed",
+            metadata={"subscans": sub_results},
+        )
+
+    status = STATUS_COMPLETED if findings else STATUS_NO_FINDINGS
+    summary = (
+        f"Quick scan aggregated {len(tools_to_run)} sub-tool(s): "
+        f"{len(findings)} total finding(s) across {sum(1 for r in sub_results if r['status'] == 'completed')} completed "
+        f"({sum(1 for r in sub_results if r['status'] == 'no_findings')} clean, "
+        f"{sum(1 for r in sub_results if r['status'] == 'failed')} failed)"
+    )
+
+    return tool_result(
+        "webapp.scanner", target,
+        status=status,
+        findings=findings,
+        summary=summary,
+        metadata={"subscans": sub_results, "errors": errors},
+    )
 
 
-# Register with tool registry
 tool_registry.register("webapp.scanner", run, metadata={
     "name": "webapp.scanner",
     "domain": "webapp",
     "status": "completed",
-    "description": "webapp tool: Scanner",
+    "description": "Lightweight composite quick-scan: aggregates CSRF, session cookie, WAF-detection, and parameter-discovery findings via tool_registry.run()",
     "parameters": {
-        "target": "Target domain, IP, or URL",
+        "target": "Target URL or hostname to test",
+        "subscans": "Fully-qualified webapp.* tool names to run (default: csrf, session_mgmt, waf_detect, param_discovery)",
+        "timeout": "Per-subscan timeout in seconds (default: 10)",
     },
 })

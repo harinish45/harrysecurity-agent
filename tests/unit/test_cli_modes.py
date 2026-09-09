@@ -76,3 +76,23 @@ def test_benchmark_rejects_unknown_suite():
     result = runner.invoke(app, ["benchmark", "--suite", "not-a-real-suite"])
     assert result.exit_code == 1
     assert "Unknown suite" in result.output
+
+
+def test_benchmark_latency_times_named_agents(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["benchmark", "--latency", "--agent", "mitre_mapping_agent",
+                                  "--agent", "blast_radius_agent"])
+    assert result.exit_code == 0, result.output
+    assert "mitre_mapping_agent" in result.output
+    assert "blast_radius_agent" in result.output
+    assert (tmp_path / "benchmarks" / "latency_history.jsonl").exists()
+
+
+def test_benchmark_debate_consensus_eval(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with patch("nexus.intelligence.llm.router.LLMRouter.complete") as mock_complete:
+        mock_complete.return_value = json.dumps({"verdict": "real", "reasoning": "test"})
+        result = runner.invoke(app, ["benchmark", "--suite", "debate_consensus_eval"])
+    assert result.exit_code == 0, result.output
+    assert "debate_consensus_agent" in result.output
+    assert (tmp_path / "benchmarks" / "debate_eval_history.jsonl").exists()

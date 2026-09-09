@@ -25,9 +25,9 @@ class MissionCommanderAgent(BaseAgent):
 
         phases = [
             {"phase": 1, "name": "Reconnaissance", "agents": ["network_agent", "recon_agent", "searcher_agent"], "tools": tools_used[:3]},
-            {"phase": 2, "name": "Vulnerability Assessment", "agents": ["vuln_analyst_agent", "webapp_agent"], "tools": ["vuln_assessment.scan", "appsec.dependency_analysis"]},
-            {"phase": 3, "name": "Exploitation", "agents": ["exploitation_agent", "post_exploitation_agent"], "tools": ["offensive.exploit", "offensive.privesc"]},
-            {"phase": 4, "name": "Reporting", "agents": ["reporter_agent", "doc_writer_agent"], "tools": ["reporting.generate", "compliance.policy_reviews"]},
+            {"phase": 2, "name": "Vulnerability Assessment", "agents": ["vuln_analyst_agent", "webapp_agent"], "tools": ["vuln_assessment.network_vuln_scanning", "appsec.dependency_analysis"]},
+            {"phase": 3, "name": "Exploitation", "agents": ["exploit_agent", "redteam_agent"], "tools": ["vuln_assessment.cve_analysis", "vuln_assessment.risk_scoring"]},
+            {"phase": 4, "name": "Reporting", "agents": ["reporter_agent", "doc_writer_agent"], "tools": ["vuln_assessment.reporting_vuln", "compliance.policy_reviews"]},
         ]
 
         for p in phases:

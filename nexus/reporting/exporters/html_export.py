@@ -33,6 +33,7 @@ class HtmlExport:
         rows = self._build_rows(findings)
         summary = self._build_summary(findings)
         visualizations = self._build_visualizations(findings) if include_visualizations else ""
+        chains = self._build_chains(findings)
         document = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -93,9 +94,20 @@ class HtmlExport:
   .badge-unverified {{ background:#3a2a08; color:#facc15 }}
   .badge-failed {{ background:#3b0d0f; color:#ff6369 }}
   .badge-non_replayable {{ background:var(--code-bg); color:var(--text-dim) }}
+  .badge-likely_false_positive {{ background:#3a1a08; color:#fb923c }}
   .mitre-chip {{ display:inline-block; font-size:.65rem; padding:1px 6px; border-radius:6px; margin:1px 2px 1px 0;
                background:#0c2340; color:#5b9dff; text-decoration:none }}
   .impact {{ font-size:.75rem; color:var(--text-dim); margin-top:.25rem }}
+  .chains {{ margin-bottom:1.5rem }}
+  .chains summary {{ cursor:pointer; font-weight:600; padding:.75rem 1rem; background:var(--surface);
+                     border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.08); list-style:none }}
+  .chains summary::-webkit-details-marker {{ display:none }}
+  .chains summary::before {{ content:'\\25B8'; display:inline-block; margin-right:.5rem; transition:transform .15s }}
+  .chains[open] summary::before {{ transform:rotate(90deg) }}
+  .chain-list {{ background:var(--surface); border-radius:0 0 8px 8px; padding:.5rem 1rem 1rem; margin-top:-4px }}
+  .chain-item {{ padding:.5rem 0; border-bottom:1px solid var(--border); font-size:.85rem }}
+  .chain-item:last-child {{ border-bottom:none }}
+  .chain-path {{ font-family:'SF Mono','Cascadia Code','Fira Code',monospace; color:var(--text-dim) }}
   .footer {{ margin-top:2rem; font-size:.8rem; color:var(--text-dim); text-align:center }}
 </style>
 </head>
@@ -107,6 +119,8 @@ class HtmlExport:
   {summary}
 
   {visualizations}
+
+  {chains}
 
   <div class="filter-bar" id="sevFilterBar">
     <button class="filter-btn active" data-sev="all">All</button>
@@ -167,6 +181,32 @@ class HtmlExport:
         if not blocks:
             return ""
         return f'<section class="visualizations">{"".join(blocks)}</section>'
+
+    def _build_chains(self, findings: list[dict]) -> str:
+        """Collapsible view of attack_chain_agent's synthetic chain findings
+        (multi-hop compositions across findings, e.g. "this cred unlocks that
+        host") — rendered separately from the flat findings table since a
+        chain isn't a single observation, it's a claim about several."""
+        chains = [f for f in findings if f.get("kind") == "synthetic_chain"]
+        if not chains:
+            return ""
+        items = []
+        for c in chains:
+            sev = c.get("severity", "info")
+            path = " &rarr; ".join(escape(a) for a in (c.get("chain_assets") or []))
+            items.append(
+                f'<div class="chain-item">'
+                f'<span class="tag tag-{sev}">{sev.upper()}</span> '
+                f'<strong>{escape(c.get("id", ""))}</strong> &mdash; {escape(c.get("title", ""))}'
+                f'<div class="chain-path">{path}</div>'
+                f'</div>'
+            )
+        return (
+            f'<details class="chains" open>'
+            f'<summary>Attack chains ({len(chains)})</summary>'
+            f'<div class="chain-list">{"".join(items)}</div>'
+            f'</details>'
+        )
 
     def _build_summary(self, findings: list[dict]) -> str:
         from collections import Counter

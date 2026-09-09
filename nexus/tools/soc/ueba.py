@@ -2,44 +2,53 @@
 """
 NEXUS-STRIKE — soc tool: Ueba
 Domain: soc
+
+UEBA (user and entity behavior analytics) is inherently a behavioral-
+baseline analysis over historical data — it needs authentication/access
+logs for a user or entity across a representative time window, not a
+point-in-time network check. This previously did a DNS resolve on
+`target` and GET'd four hardcoded paths (`/alerts`, `/logs`,
+`/api/v1/alerts`, `/siem`) against it, reporting whatever HTTP status
+came back as "completed" — those paths have nothing to do with any
+behavioral baseline — caught during this session's audit. A single
+point-in-time target has no behavior history to baseline against. Now it
+honestly reports STATUS_OUT_OF_SCOPE instead of fabricating a UEBA result
+from an unrelated HTTP probe.
 """
-from nexus.foundation.net import safe_urlopen
+from nexus.foundation.schema import STATUS_OUT_OF_SCOPE, tool_result
 from nexus.tools.registry import tool_registry
 
 
 def run(target: str, **kwargs) -> dict:
     """soc tool: Ueba"""
-    findings = []
-    try:
-        import socket
-        try:
-            ip = socket.gethostbyname(target)
-            findings.append(f"Target {target} -> {ip}")
-        except:
-            findings.append(f"DNS resolution failed for {target}")
-        for ep in ["/alerts", "/logs", "/api/v1/alerts", "/siem"]:
-            url = f"http://{target}{ep}"
-            try:
-                import urllib.request
-                req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-                resp = safe_urlopen(req, timeout=3)
-                findings.append(f"{ep}: status={resp.status}")
-            except urllib.error.HTTPError as e:
-                findings.append(f"{ep}: HTTP {e.code}")
-            except:
-                pass
-    except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "soc.ueba", "domain": "soc", "target": target, "status": "completed", "findings": findings}
+    return tool_result(
+        "soc.ueba", target,
+        status=STATUS_OUT_OF_SCOPE,
+        summary=f"UEBA analysis for {target} requires a behavioral baseline — authentication/"
+                f"access logs for the user or entity over a representative historical "
+                f"window — a single point-in-time target has no behavior history to baseline "
+                f"against",
+        error="requires_case_data: no historical behavior/access logs supplied",
+        metadata={
+            "requires": [
+                "historical auth/access logs for the user or entity",
+                "baseline time window (e.g. 30/90 days)",
+                "peer-group definition for comparative anomaly scoring",
+            ],
+        },
+    )
 
 
 # Register with tool registry
 tool_registry.register("soc.ueba", run, metadata={
     "name": "soc.ueba",
     "domain": "soc",
-    "status": "completed",
-    "description": "soc tool: Ueba",
+    "status": "out_of_scope",
+    "description": "soc tool: UEBA requires a historical behavioral baseline (auth/access "
+                    "logs over time) for the user/entity — honestly reports "
+                    "STATUS_OUT_OF_SCOPE for a bare network target instead of fabricating a "
+                    "UEBA result",
     "parameters": {
-        "target": "Target domain, IP, or URL",
+        "target": "Target domain, IP, or URL (not used — this tool requires case data, see description)",
     },
 })

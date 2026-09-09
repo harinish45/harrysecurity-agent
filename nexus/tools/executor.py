@@ -16,6 +16,7 @@ from nexus.foundation.guardrails import (
     RateGuard,
     ScopeGuard,
 )
+from nexus.foundation.guardrails.output_guard import OutputGuardError
 from nexus.foundation.schema import (
     ALL_STATUSES,
     STATUS_COMPLETED,
@@ -26,6 +27,7 @@ from nexus.foundation.schema import (
     STATUS_REQUIRES_HARDWARE,
     STATUS_UNAVAILABLE,
     Finding,
+    redact_findings,
     tool_result,
 )
 from nexus.tools.registry import tool_registry
@@ -160,6 +162,17 @@ class ToolExecutor:
                     ).to_dict()
                 )
 
+        # Redact secret-shaped text out of finding evidence/raw fields BEFORE
+        # building the canonical result. This is deliberately different from
+        # rejecting the whole result: a secret-detection tool's entire job is
+        # to discover and report exactly this kind of thing (an exposed AWS
+        # key, a leaked bearer token) on the TARGET — that's a legitimate,
+        # valuable finding, not a leak of NEXUS-STRIKE's own state, and it
+        # must not be silently thrown away. Redacting here means the finding
+        # (title/severity/existence) survives into the report while the raw
+        # secret material never reaches a checkpoint, report, or audit log.
+        normalised = redact_findings(normalised)
+
         # Build the canonical result
         canonical = tool_result(
             tool_name,
@@ -174,9 +187,28 @@ class ToolExecutor:
             },
         )
 
-        # Validate output for secret leakage
-        OutputGuard.validate(
-            json.dumps(canonical, default=str),
-            context={"tool": tool_name},
-        )
+        # Validate output for secret leakage. This is a second, independent
+        # layer behind the redaction above — it catches secret-shaped text
+        # that redact_findings() doesn't touch (summary/error/metadata, or a
+        # redaction-pattern gap), not a first line of defense against every
+        # legitimate discovered-secret finding (those are already redacted
+        # by this point). Every guardrail before this point (Input/Scope/
+        # Legal/Escalation/Rate/Audit) is wrapped in the try/except above and
+        # degrades to a clean STATUS_FAILED tool_result on a violation —
+        # OutputGuard sat outside that pattern and let OutputGuardError
+        # propagate raw out of ToolExecutor.run() instead, which is exactly
+        # what surfaced as unhandled `OutputGuardError` tracebacks in the
+        # automotive-tools tests rather than a clean failure result.
+        try:
+            OutputGuard.validate(
+                json.dumps(canonical, default=str),
+                context={"tool": tool_name},
+            )
+        except OutputGuardError as exc:
+            return tool_result(
+                tool_name, target,
+                status=STATUS_FAILED,
+                error=f"Output blocked: {exc}",
+                metadata={"execution_ms": elapsed_ms},
+            )
         return canonical

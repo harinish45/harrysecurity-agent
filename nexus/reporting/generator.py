@@ -31,13 +31,26 @@ class ReportGenerator:
         engagement = engagement or {}
         created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
+        # Sections 4/6/7/8 below are only appended when there's data for
+        # them (no asset inventory when findings carry no affected_asset, no
+        # verification summary when nothing ran verification_agent, etc.) —
+        # a hardcoded "## N." literal per section used to leave a gap in the
+        # visible numbering whenever one was skipped (straight from "## 5."
+        # to "## 7." with no "## 6."). A running counter keeps every visible
+        # heading contiguous regardless of which optional sections appear.
+        section_counter = [0]
+
+        def section_heading(title: str) -> str:
+            section_counter[0] += 1
+            return f"## {section_counter[0]}. {title}"
+
         # ── Executive summary ───────────────────────────────────────────
         total = len(normalised)
         risk_score = self._compute_risk_score(normalised)
         lines = [
             "# Security Assessment Report",
             "",
-            "## 1. Assessment metadata",
+            section_heading("Assessment metadata"),
             "",
             f"- **Mission:** `{mission_id}`",
             f"- **Target:** `{target}`",
@@ -47,7 +60,7 @@ class ReportGenerator:
             f"- **Engagement ID:** {engagement.get('id', 'Not provided')}",
             f"- **Rules of engagement:** {engagement.get('rules_of_engagement', 'Not provided')}",
             "",
-            "## 2. Executive summary",
+            section_heading("Executive summary"),
             "",
             f"The assessment recorded **{total}** observations across "
             f"{counts['critical']} critical, {counts['high']} high, "
@@ -59,7 +72,7 @@ class ReportGenerator:
             "Results are technical observations, not proof of exploitability. "
             "Validate each finding before remediation or escalation.",
             "",
-            "## 3. Severity heatmap",
+            section_heading("Severity heatmap"),
             "",
         ]
 
@@ -85,7 +98,7 @@ class ReportGenerator:
                 assets.add(item["affected_asset"])
         if assets:
             lines.extend([
-                "## 4. Asset inventory",
+                section_heading("Asset inventory"),
                 "",
             ])
             for asset in sorted(assets):
@@ -100,7 +113,7 @@ class ReportGenerator:
 
         # ── Scope and rules of engagement ───────────────────────────────
         lines.extend([
-            "## 5. Scope and rules of engagement",
+            section_heading("Scope and rules of engagement"),
             "",
             f"- **Approved scope:** {engagement.get('scope', target or 'Not provided')}",
             f"- **Rules:** {engagement.get('rules_of_engagement', 'Not provided')}",
@@ -113,16 +126,18 @@ class ReportGenerator:
         verified_count = sum(1 for f in normalised if f.get("verification_status") == "verified")
         if any(f.get("verification_status") for f in normalised):
             lines.extend([
-                "## 6. Verification summary",
+                section_heading("Verification summary"),
                 "",
                 "Every finding below carries a deterministic (non-LLM) replay result where one could be "
                 "computed — see `verification_agent`. `non_replayable` means no automated replay evidence "
-                "was available, not that the finding is unverified-and-suspect.",
+                "was available, not that the finding is unverified-and-suspect. `likely_false_positive` means "
+                "a timing-based claim (e.g. blind/time-based injection) collapsed to baseline network noise "
+                "on replay — worth a second look before trusting it.",
                 "",
                 f"- **Verified:** {verified_count} / {len(normalised)}",
                 "",
             ])
-            for status in ("verified", "unverified", "failed", "non_replayable"):
+            for status in ("verified", "unverified", "likely_false_positive", "failed", "non_replayable"):
                 count = sum(1 for f in normalised if f.get("verification_status") == status)
                 if count:
                     lines.append(f"  - `{status}`: {count}")
@@ -134,7 +149,7 @@ class ReportGenerator:
             for t in item.get("mitre_techniques") or []:
                 technique_findings.setdefault(f"{t.get('id', '?')} — {t.get('name', '')}", []).append(item.get("id", ""))
         if technique_findings:
-            lines.extend(["## 7. MITRE ATT&CK coverage", ""])
+            lines.extend([section_heading("MITRE ATT&CK coverage"), ""])
             for technique, ids in sorted(technique_findings.items()):
                 lines.append(f"- **{technique}** — {len(ids)} finding(s): {', '.join(ids)}")
             lines.append("")
@@ -142,14 +157,14 @@ class ReportGenerator:
         # ── Attack chains (attack_chain_agent) ───────────────────────────
         chain_findings = [f for f in normalised if f.get("kind") == "synthetic_chain"]
         if chain_findings:
-            lines.extend(["## 8. Attack chains", ""])
+            lines.extend([section_heading("Attack chains"), ""])
             for chain in chain_findings:
                 lines.append(f"- **{chain.get('id')}** ({chain.get('severity', 'info').upper()}): "
                              f"{' -> '.join(chain.get('chain_assets', []))}")
             lines.append("")
 
         lines.extend([
-            "## 9. Findings",
+            section_heading("Findings"),
             "",
         ])
 
@@ -195,7 +210,7 @@ class ReportGenerator:
 
         # ── Remediation priorities ──────────────────────────────────────
         lines.extend([
-            "## 10. Remediation priorities",
+            section_heading("Remediation priorities"),
             "",
             "| Priority | Finding ID | Title | Owner | Due date | Retest status |",
             "|----------|-----------|-------|-------|----------|---------------|",
@@ -211,7 +226,7 @@ class ReportGenerator:
 
         # ── Evidence appendix ───────────────────────────────────────────
         lines.extend([
-            "## 11. Evidence appendix",
+            section_heading("Evidence appendix"),
             "",
             "Raw evidence for each finding is included in the finding entries above. "
             "The complete audit log and tool outputs are preserved alongside this report.",

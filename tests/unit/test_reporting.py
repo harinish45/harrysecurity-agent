@@ -6,15 +6,24 @@ from nexus.reporting.exporters.sarif_export import SarifExport
 from nexus.reporting.exporters.pdf_export import PdfExport
 from nexus.foundation.schema import redact_findings
 from nexus.foundation.paths import safe_slug
+import atexit
 import json
 import os
+import re
+import shutil
 import tempfile
 from pathlib import Path
 
 
 def _make_tmpdir():
-    """Create a temp dir inside the project to avoid Windows AppData permission issues."""
+    """Create a temp dir inside the project to avoid Windows AppData permission
+    issues. Registered for best-effort cleanup at interpreter exit rather than
+    per-test teardown, since callers use it as a plain helper (not a fixture)
+    across 9 call sites — this at least stops it from leaving nexus_test_*
+    directories behind after every test run (296 had accumulated in the repo
+    root before this fix)."""
     d = Path(tempfile.mkdtemp(prefix="nexus_test_", dir=os.getcwd()))
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
     return d
 
 
@@ -50,6 +59,23 @@ def test_report_never_renders_a_blank_finding_id():
     # The remediation table's Finding ID column must not be blank either.
     table_row = next(line for line in report.splitlines() if "SQL injection in login form" in line and line.startswith("|"))
     assert "| P1 | F-" in table_row
+
+
+def test_finding_normalizes_none_or_non_string_severity_and_confidence_instead_of_crashing():
+    """Regression test: Finding.__post_init__ called self.severity.lower()
+    unconditionally — a finding with severity=None (a check that failed to
+    classify) or a non-string severity crashed every exporter/report that
+    funnels findings through normalize_findings()/Finding()."""
+    from nexus.foundation.schema import normalize_findings
+
+    result = normalize_findings([
+        {"title": "unclassified check", "severity": None, "confidence": None},
+        {"title": "bad type", "severity": 5, "confidence": 5},
+    ])
+    assert result[0]["severity"] == "info"
+    assert result[0]["confidence"] == "medium"
+    assert result[1]["severity"] == "info"
+    assert result[1]["confidence"] == "medium"
 
 
 def test_portable_exporters_create_valid_artifacts():
@@ -146,6 +172,28 @@ def test_sarif_export_redacts_by_default_and_opt_out():
     assert "abcDEF123456xyz" in (tmp / "r2.sarif").read_text(encoding="utf-8")
 
 
+def test_sarif_artifact_location_is_a_well_formed_uri_for_bare_host_port():
+    """affected_asset is often a bare "host:port" ("10.0.0.1:22"), not a
+    valid SARIF 2.1.0 artifactLocation.uri — some strict SARIF consumers
+    reject it. Confirmed via this session's audit and fixed."""
+    tmp = _make_tmpdir()
+    findings = [{"severity": "medium", "title": "open port", "affected_asset": "10.0.0.1:22"}]
+    out = SarifExport().export(findings, tmp / "r.sarif")
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    uri = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+    assert re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", uri), f"not a well-formed URI: {uri!r}"
+    assert uri == "asset://10.0.0.1:22"
+
+
+def test_sarif_artifact_location_passes_through_an_existing_scheme():
+    tmp = _make_tmpdir()
+    findings = [{"severity": "medium", "title": "x", "affected_asset": "https://example.com/path"}]
+    out = SarifExport().export(findings, tmp / "r.sarif")
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    uri = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+    assert uri == "https://example.com/path"
+
+
 def test_pdf_export_redacts_via_html_sidecar_and_opt_out():
     # No PDF rendering backend (weasyprint/playwright/wkhtmltopdf) is
     # guaranteed to be installed in the test environment, so PdfExport.export
@@ -224,6 +272,38 @@ def test_timeline_viz_empty_and_nonempty():
     svg = viz.render(_viz_findings())
     assert "<svg" in svg
     assert "supersecretplanted1" not in svg
+
+
+# ── section numbering regression ────────────────────────────────────────
+# Sections 4 (asset inventory)/6 (verification)/7 (MITRE)/8 (attack chains)
+# only appear when there's data for them; they used to be hardcoded literal
+# "## N." headings, so skipping one left a gap in the visible numbering
+# (e.g. "## 5." straight to "## 7." with no "## 6."). Confirmed via this
+# session's audit and fixed with a running counter instead.
+
+def _section_numbers(report: str) -> list[int]:
+    import re
+    return [int(n) for n in re.findall(r"^## (\d+)\.", report, re.MULTILINE)]
+
+
+def test_section_numbers_are_contiguous_with_no_findings():
+    report = ReportGenerator().generate([], target="x", mission_id="m")
+    numbers = _section_numbers(report)
+    assert numbers == list(range(1, len(numbers) + 1))
+
+
+def test_section_numbers_are_contiguous_with_every_optional_section_present():
+    findings = [{
+        "id": "F-1", "title": "SQLi", "severity": "critical", "affected_asset": "host-a",
+        "tool": "webapp.sqli_scan", "verification_status": "verified",
+        "mitre_techniques": [{"id": "T1190", "name": "Exploit Public-Facing Application"}],
+        "kind": "synthetic_chain", "chain_assets": ["host-a", "host-b"],
+    }]
+    report = ReportGenerator().generate(findings, target="x", mission_id="m")
+    numbers = _section_numbers(report)
+    assert numbers == list(range(1, len(numbers) + 1))
+    # All optional sections actually rendered, not just skipped-and-still-contiguous.
+    assert len(numbers) == 11
 
 
 # ── path traversal regression (nexus_report.py slug logic) ─────────────────

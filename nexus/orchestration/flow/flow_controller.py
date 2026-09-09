@@ -41,15 +41,50 @@ class FlowController:
         except Exception:  # noqa: BLE001 - progress reporting must never break the mission
             logger.debug("FlowController on_event callback raised", exc_info=True)
 
-    async def run(self, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def run(self, tasks: list[dict[str, Any]], *, resume: bool = False) -> list[dict[str, Any]]:
+        try:
+            return await self._run(tasks, resume=resume)
+        finally:
+            # A fresh ResourceAllocator (and its ThreadPoolExecutor) is
+            # built per FlowController/per mission — nothing ever called
+            # shutdown() on it, so every mission run in a long-lived process
+            # (repeated run_mission() calls, a test suite) leaked up to
+            # nexus_max_concurrent_tools idle worker threads. wait=False:
+            # by this point every batch's futures have already been awaited
+            # in `_run`, so there's nothing left running to wait on — this
+            # just stops the pool from accepting new work and lets its
+            # already-idle threads exit.
+            self._executor.shutdown(wait=False)
+
+    async def _run(self, tasks: list[dict[str, Any]], *, resume: bool = False) -> list[dict[str, Any]]:
+        completed: list[dict[str, Any]] = []
+        context: dict[str, Any] = {}
+        # Batches are a deterministic function of `tasks` (topological sort,
+        # see TaskManager.plan) — so re-running the SAME tasks list this
+        # mission's checkpoint saved reproduces the identical batch
+        # structure, and "already completed through batch N" is enough to
+        # safely skip 1..N without needing to match individual task ids
+        # back to checkpointed results.
+        already_done_through_batch = 0
+        if resume and self._checkpoint:
+            existing = self._checkpoint.load(self.mission_id)
+            if existing and existing.get("tasks"):
+                tasks = existing["tasks"]
+                completed = existing.get("completed", [])
+                context = existing.get("context", {})
+                already_done_through_batch = existing.get("batch", 0)
+                logger.info(
+                    f"FlowController[{self.mission_id}]: resuming, batch "
+                    f"{already_done_through_batch}/{existing.get('total_batches')} already completed"
+                )
+
         batches = TaskManager.plan(tasks)
         self.strategy = StrategyEngine.choose([[t["id"] for t in b] for b in batches])
         logger.info(f"FlowController[{self.mission_id}]: {len(batches)} batch(es), strategy={self.strategy}")
 
-        completed: list[dict[str, Any]] = []
-        context: dict[str, Any] = {}
-
         for batch_num, batch in enumerate(batches, start=1):
+            if batch_num <= already_done_through_batch:
+                continue  # already completed in a prior run of this mission
             agent_names = [t.get("agent", "?") for t in batch]
             self._emit({
                 "type": "batch_start", "batch": batch_num, "total_batches": len(batches),
@@ -94,6 +129,7 @@ class FlowController:
                     "total_batches": len(batches),
                     "completed": completed,
                     "context": context,
+                    "tasks": tasks,  # the original plan — required to resume deterministically
                 })
 
         if self._checkpoint:

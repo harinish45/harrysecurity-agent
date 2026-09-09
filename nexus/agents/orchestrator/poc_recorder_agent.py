@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from nexus.agents.base_agent import BaseAgent
-from nexus.foundation.schema import STATUS_COMPLETED, STATUS_NO_FINDINGS, tool_result
+from nexus.foundation.schema import STATUS_COMPLETED, STATUS_NO_FINDINGS, redact_findings, tool_result
 
 
 class PocRecorderAgent(BaseAgent):
@@ -28,6 +28,14 @@ class PocRecorderAgent(BaseAgent):
         if not verified:
             return tool_result(self.name, target or "unknown", status=STATUS_NO_FINDINGS,
                                 summary="No verified findings to record PoC transcripts for")
+
+        # PoC transcripts are meant to be shareable bounty/audit artifacts —
+        # every report exporter redacts secret-shaped text out of
+        # evidence/raw before writing anything to disk (see
+        # nexus/foundation/schema.py's redact_findings()); this path must
+        # too, or a live credential/token captured as evidence would persist
+        # here unredacted even though the report right next to it strips it.
+        verified = redact_findings(verified)
 
         out_dir = Path("engagements") / self._safe_name(mission_id) / "poc"
         out_dir.mkdir(parents=True, exist_ok=True)

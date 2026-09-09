@@ -1,53 +1,49 @@
 #!/usr/bin/env python3
 """
-NEXUS-STRIKE — appsec tool: Dependency Analysis
+NEXUS-STRIKE — appsec.dependency_analysis
 Domain: appsec
+Real dependency-manifest parsing (requirements.txt, package.json,
+package-lock.json, Pipfile.lock) plus a real OSV.dev lookup per declared
+package+version.
+
+Previously this ignored `target` as a manifest/path entirely and did a bare
+DNS resolve + HTTP GET on "/" (byte-for-byte identical to 19 other stub
+tools) — caught during this session's audit. `target` is now honestly
+reinterpreted as a local path (a manifest file or a source tree containing
+one), since "what versions of what packages does this codebase declare" is
+not a network-observable property. A non-local-path target degrades to
+STATUS_OUT_OF_SCOPE instead of fabricating results.
 """
-from nexus.foundation.net import safe_urlopen
+from __future__ import annotations
+
+from typing import Any
+
+from nexus.tools.appsec._manifest_scan import scan_dependencies
 from nexus.tools.registry import tool_registry
-from nexus.foundation.ssl_config import get_ssl_context
 
 
-def run(target: str, **kwargs) -> dict:
-    """appsec tool: Dependency Analysis"""
-    findings = []
-    try:
-        import urllib.request
-        import urllib.parse
-        import ssl
-        url = target if "://" in target else f"http://{target}/"
-        ctx = get_ssl_context(target, allow_insecure=True)
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = safe_urlopen(req, timeout=5, context=ctx)
-            body = resp.read(8192).decode('utf-8', errors='replace')
-            findings.append(f"HTTP {resp.status}: Server={resp.headers.get('Server', 'unknown')}")
-            # Check for security headers
-            headers = dict(resp.headers)
-            for h in ["X-Frame-Options", "X-Content-Type-Options", "Strict-Transport-Security", "Content-Security-Policy"]:
-                if h not in headers:
-                    findings.append(f"Missing security header: {h}")
-            # Check for common vulnerabilities in body
-            if "<form" in body.lower():
-                findings.append("Form found - potential for input-based attacks")
-            if "admin" in body.lower():
-                findings.append("Admin reference found in page")
-        except urllib.error.HTTPError as e:
-            findings.append(f"HTTP {e.code}: {url}")
-        except Exception as e:
-            findings.append(f"HTTP error: {str(e)[:80]}")
-    except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "appsec.dependency_analysis", "domain": "appsec", "target": target, "status": "completed", "findings": findings}
+def run(target: str, max_packages: int = 200, **kwargs: Any) -> dict:
+    """Parse declared dependencies from a local manifest/source tree and check OSV.dev for known vulns.
+
+    Parameters
+    ----------
+    target : str
+        Path to a manifest file (requirements.txt, package.json,
+        package-lock.json, Pipfile.lock) or a directory containing one.
+    max_packages : int
+        Maximum number of declared packages to check against OSV.dev.
+    """
+    return scan_dependencies("appsec.dependency_analysis", target, max_packages=max_packages)
 
 
-# Register with tool registry
 tool_registry.register("appsec.dependency_analysis", run, metadata={
     "name": "appsec.dependency_analysis",
     "domain": "appsec",
     "status": "completed",
-    "description": "appsec tool: Dependency Analysis",
+    "description": "Real dependency manifest parsing (requirements.txt/package.json/package-lock.json/"
+                    "Pipfile.lock) with OSV.dev known-vulnerability lookup per package+version",
     "parameters": {
-        "target": "Target domain, IP, or URL",
+        "target": "Local path to a manifest file or a directory containing one",
+        "max_packages": "Maximum declared packages to check against OSV.dev (default: 200)",
     },
 })

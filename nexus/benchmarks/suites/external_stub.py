@@ -10,6 +10,7 @@ datasets in this repo.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from nexus.benchmarks.base import Benchmark, Challenge, regex_checker
@@ -31,7 +32,10 @@ def _load_from_disk(suite_key: str) -> list[Challenge]:
                 prompt=data["prompt"],
                 checker=regex_checker(data["answer_pattern"]),
             ))
-        except (json.JSONDecodeError, KeyError, OSError):
+        # re.error wasn't caught here — one challenge file with an invalid
+        # answer_pattern regex would crash the whole suite's load() instead
+        # of being skipped like every other malformed-file case below.
+        except (json.JSONDecodeError, KeyError, OSError, re.error):
             continue
     return challenges
 

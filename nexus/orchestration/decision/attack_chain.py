@@ -32,7 +32,14 @@ class AttackChain:
             tool = finding.get("tool") or ""
             domain = tool.split(".", 1)[0] if "." in tool else "reconnaissance"
             weight = _SEVERITY_WEIGHT.get(str(finding.get("severity", "info")).lower(), 0)
-            prior = graph.nodes[domain]["weight"] if domain in graph.nodes else 0
+            # `add_edge(domain, nxt)` below can create `nxt` as a bare node
+            # with no "weight" attribute at all (only `add_node(..., weight=)`
+            # sets one) — a later finding whose own domain happens to be one
+            # of those bare `nxt` nodes then hits `graph.nodes[domain]["weight"]`
+            # on a node that exists but was never given that key, raising
+            # KeyError. `.get(..., {})` degrades to "no prior weight" instead,
+            # matching the `domain not in graph.nodes` case just below it.
+            prior = graph.nodes.get(domain, {}).get("weight", 0)
             graph.add_node(domain, weight=prior + weight)
             for nxt in _NEXT_DOMAIN.get(domain, []):
                 graph.add_edge(domain, nxt)

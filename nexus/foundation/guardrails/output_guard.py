@@ -12,8 +12,21 @@ class OutputGuard:
     ENTROPY_THRESHOLD = 4.5
     ENTROPY_MIN_TOKEN_LENGTH = 32
 
+    # `redact_findings()` (called by ToolExecutor before this guard runs)
+    # replaces a secret's *value* with the literal marker "[REDACTED]" but
+    # keeps the "key=" prefix for readability — without an exclusion for
+    # that marker, it is itself a non-whitespace token and the pattern
+    # re-blocks its own sanitized output, turning a legitimate "found an
+    # exposed API key" finding into a dropped STATUS_FAILED result even
+    # after successful redaction. The lookahead requires "[REDACTED]" to be
+    # a *complete* token — followed by whitespace, one of the punctuation
+    # characters redact_findings()'s own value pattern (`[^\s,;]+`) already
+    # stops at, or end-of-string — before exempting it. A bare
+    # `(?!\[REDACTED\])` would let `api_key=[REDACTED]realSecretHere`
+    # (marker glued directly to more content, no separating whitespace)
+    # smuggle a real secret past this guard by hiding behind the exemption.
     _blocked = [
-        re.compile(r"(?i)(password|passwd|secret|api_key|token)\s*[:=]\s*[^\s]+"),
+        re.compile(r"(?i)(password|passwd|secret|api_key|token)\s*[:=]\s*(?!\[REDACTED\](?:[\s,;.!?)\]]|$))[^\s]+"),
         re.compile(r"(?i)PRIVATE\s+KEY"),
         re.compile(r"(?i)-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"),
         re.compile(r'(?i)(bash|sh|csh|zsh)\s+-c\s+"'),

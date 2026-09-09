@@ -28,6 +28,9 @@ class ParallelExecutor:
     def __init__(self, allocator: ResourceAllocator | None = None) -> None:
         self._allocator = allocator or ResourceAllocator()
 
+    def shutdown(self, wait: bool = True) -> None:
+        self._allocator.shutdown(wait=wait)
+
     async def run_batch(self, jobs: dict[str, Callable[[], Any]]) -> dict[str, ExecutionResult]:
         if not jobs:
             return {}

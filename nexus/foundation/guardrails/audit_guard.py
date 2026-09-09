@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -19,6 +20,15 @@ class AuditGuard:
     GENESIS_HASH = "0" * 64
 
     _last_hash: str | None = None
+    # `ToolExecutor` calls `validate()` synchronously before every tool call,
+    # and tool calls genuinely run concurrently (FlowController batches
+    # agents across a thread pool). Without a lock, two threads can read the
+    # same prev_hash, both append an entry claiming it, and corrupt the
+    # chain — `verify_chain()` would then report a legitimate concurrent
+    # audit log as tampered. This lock makes read-prev-hash -> compute ->
+    # write -> update-last-hash one atomic critical section, same pattern as
+    # RateGuard's `_lock` elsewhere in this package.
+    _lock = threading.Lock()
 
     @classmethod
     def _safe_value(cls, key: str, value: Any) -> Any:
@@ -71,15 +81,20 @@ class AuditGuard:
             "target": target,
             "kwargs": {key: cls._safe_value(key, value) for key, value in kwargs.items()},
         }
-        prev_hash = cls._get_last_hash()
-        entry["prev_hash"] = prev_hash
-        entry["hash"] = cls._compute_hash(prev_hash, entry)
-        try:
-            with open(cls._log_file, "a", encoding="utf-8") as file:
-                file.write(json.dumps(entry, sort_keys=True) + "\n")
-        except OSError as exc:
-            raise AuditGuardError(f"Audit log write failed: {exc}") from exc
-        cls._last_hash = entry["hash"]
+        # Read-prev-hash -> compute -> write -> update-last-hash must be one
+        # atomic step: this runs from ToolExecutor on every real tool call,
+        # and tool calls genuinely execute concurrently across FlowController's
+        # thread pool.
+        with cls._lock:
+            prev_hash = cls._get_last_hash()
+            entry["prev_hash"] = prev_hash
+            entry["hash"] = cls._compute_hash(prev_hash, entry)
+            try:
+                with open(cls._log_file, "a", encoding="utf-8") as file:
+                    file.write(json.dumps(entry, sort_keys=True) + "\n")
+            except OSError as exc:
+                raise AuditGuardError(f"Audit log write failed: {exc}") from exc
+            cls._last_hash = entry["hash"]
         return True
 
     @classmethod

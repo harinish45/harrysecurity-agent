@@ -1,45 +1,55 @@
 #!/usr/bin/env python3
 """
-NEXUS-STRIKE — cloud tool: Secret Detection
+NEXUS-STRIKE — cloud.secret_detection
 Domain: cloud
+
+This previously ignored `target` entirely and did a DNS resolve + bare HTTP
+GET on `/` against it — byte-for-byte identical to eight other "cloud"
+stubs, none of which had anything to do with secret detection. Caught
+during this session's audit. nexus/tools/appsec/secret_scanning.py already
+implements real regex-based secret scanning (AWS keys, GitHub/OpenAI/Slack
+tokens, PEM private key headers, generic api_key/password/secret patterns)
+against a local file or directory. Rather than duplicate that pattern set
+and file-walking logic here, this delegates to it directly and simply
+relabels the result under the `cloud.secret_detection` tool name — this is
+the "cloud-focused" entry point (e.g. scanning a checked-out IaC/config repo
+for leaked cloud credentials specifically), while appsec.secret_scanning
+remains the general-purpose source-code scanner.
 """
-from nexus.foundation.net import safe_urlopen
+from __future__ import annotations
+
+from typing import Any
+
+from nexus.tools.appsec import secret_scanning as _appsec_secret_scanning
 from nexus.tools.registry import tool_registry
 
 
-def run(target: str, **kwargs) -> dict:
-    """cloud tool: Secret Detection"""
-    findings = []
-    try:
-        import socket
-        import urllib.request
-        # Check if target resolves
-        try:
-            ip = socket.gethostbyname(target)
-            findings.append(f"Target {target} resolves to {ip}")
-        except:
-            findings.append(f"Target {target} does not resolve")
-        # Check HTTP
-        for scheme in ("http", "https"):
-            url = f"{scheme}://{target}/"
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-                resp = safe_urlopen(req, timeout=5)
-                findings.append(f"{scheme}://{target}: status={resp.status}")
-            except Exception as e:
-                findings.append(f"{scheme}://{target}: {str(e)[:60]}")
-    except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "cloud.secret_detection", "domain": "cloud", "target": target, "status": "completed", "findings": findings}
+def run(target: str, **kwargs: Any) -> dict:
+    """Regex-based secret scan of a local file or directory (delegates to
+    appsec.secret_scanning; see that module's SECRET_PATTERNS for the full
+    detection list: AWS keys, GitHub/OpenAI/Google/Slack tokens, PEM private
+    key headers, generic api_key/password/secret key=value pairs).
+
+    Parameters
+    ----------
+    target : str
+        Path to a local file or directory to scan. Not a hostname/URL.
+    """
+    result = _appsec_secret_scanning.run(target, **kwargs)
+    result["tool"] = "cloud.secret_detection"
+    for finding in result.get("findings", []):
+        if finding.get("tool") == "appsec.secret_scanning":
+            finding["tool"] = "cloud.secret_detection"
+    return result
 
 
-# Register with tool registry
 tool_registry.register("cloud.secret_detection", run, metadata={
     "name": "cloud.secret_detection",
     "domain": "cloud",
     "status": "completed",
-    "description": "cloud tool: Secret Detection",
+    "description": "Regex-based secret/credential scan of a local file or directory (delegates to appsec.secret_scanning's real detection patterns: AWS keys, tokens, private keys, generic secrets)",
     "parameters": {
-        "target": "Target domain, IP, or URL",
+        "target": "Path to a local file or directory to scan",
+        "max_size_mb": "Skip files larger than this size (default: 10MB)",
     },
 })

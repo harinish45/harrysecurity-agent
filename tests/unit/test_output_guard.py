@@ -34,3 +34,21 @@ def test_non_string_and_empty_output_pass():
     assert OutputGuard.validate(None)
     assert OutputGuard.validate("")
     assert OutputGuard.validate(42)
+
+
+def test_already_redacted_key_value_marker_is_not_reblocked():
+    """redact_findings() (nexus/foundation/schema.py) replaces a secret's
+    value with the literal marker "[REDACTED]" but keeps the "key=" prefix
+    for readability, e.g. "api_key=[REDACTED]". Without the negative
+    lookahead in the key=value pattern, that marker is itself a
+    non-whitespace token and re-trips this same rule — silently discarding
+    an already-safely-redacted finding. Confirm it now passes."""
+    assert OutputGuard.validate("api_key=[REDACTED] found in config.py line 12")
+    assert OutputGuard.validate("password: [REDACTED]")
+
+
+def test_unredacted_key_value_secret_next_to_a_redacted_one_is_still_blocked():
+    """The lookahead exclusion must be narrowly scoped to the literal
+    "[REDACTED]" marker, not accidentally swallow a real adjacent secret."""
+    with pytest.raises(OutputGuardError):
+        OutputGuard.validate("api_key=[REDACTED] but password: hunter2")

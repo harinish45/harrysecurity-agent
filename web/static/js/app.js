@@ -7,6 +7,7 @@
 
 // ── State ──────────────────────────────────────────────────────
 let severityChart = null;
+let benchmarkScoreChart = null;
 let scanPolling = null;
 let allFindings = [];
 let scanSocket = null;
@@ -195,6 +196,7 @@ function navigate(pageName) {
         'pentests':     ['Pentests',                'Live Assessment Control'],
         'issues':       ['Security Issues',         'Findings & Vulnerabilities'],
         'reports':      ['Reports',                 'Generated Security Reports'],
+        'benchmarks':   ['Benchmark Dashboard',      'Suite scores, debate precision/recall, agent latency'],
         'supply-chain': ['Supply Chain',            'Third-party & Vendor Risk'],
         'repositories': ['Repositories',            'Code Security & Secrets'],
         'domains':      ['Tool Domains',            '277 tools across 29 domains'],
@@ -218,9 +220,10 @@ function navigate(pageName) {
 /** Lazy page data loaders */
 async function onPageLoad(page) {
     switch (page) {
-        case 'pentests':    await loadAgentTiers(); break;
+        case 'pentests':    await loadAgentTiers(); initAnalysisTabs(); await loadMitreCoverage(); startBudgetMeterPolling(); break;
         case 'issues':      await loadIssues(); break;
         case 'reports':     await loadReportsGrid(); break;
+        case 'benchmarks':  await loadBenchmarksPage(); break;
         case 'supply-chain': await loadSkills(); break;
         case 'repositories': await loadToolDomains(); break;
         case 'domains':     await loadDomains(); break;
@@ -709,13 +712,29 @@ function renderAgentEvent(evt) {
             findings: evt.findings_count,
             error: evt.error,
         };
+    } else if (evt.type === 'debate_round') {
+        const name = `debate_consensus_agent (${evt.finding_id})`;
+        const verdict = evt.verdict?.verdict || evt.verdict?.consensus || '?';
+        agentStreamGroups[name] = {
+            status: evt.role === 'consensus' ? (verdict === 'disagreement' ? 'failed' : 'completed') : 'running',
+            batch: '—',
+            findings: undefined,
+            error: undefined,
+            debateRole: evt.role,
+            debateVerdict: verdict,
+        };
     }
 
     const rows = Object.entries(agentStreamGroups).map(([name, info]) => {
         const icon = info.status === 'failed' ? '❌' : (info.status === 'running' ? '⏳' : '✅');
-        const detail = info.error
-            ? `error: ${escHtml(info.error)}`
-            : (info.findings !== undefined ? `${info.findings} finding(s)` : 'running…');
+        let detail;
+        if (info.debateRole) {
+            detail = `${info.debateRole}: ${escHtml(info.debateVerdict)}`;
+        } else {
+            detail = info.error
+                ? `error: ${escHtml(info.error)}`
+                : (info.findings !== undefined ? `${info.findings} finding(s)` : 'running…');
+        }
         return `<div class="agent-stream-row"><span class="agent-stream-name">${icon} ${escHtml(name)}</span>`
              + `<span class="agent-stream-detail">batch ${info.batch ?? '?'} — ${detail}</span></div>`;
     });
@@ -726,6 +745,282 @@ async function stopScan() {
     const output = document.getElementById('scan-output');
     await apiFetch('/api/scan/stop', { method:'POST' }).catch(() => {});
     if (output) output.textContent += '\n⏹ Stop requested.';
+}
+
+// ── Mission Analysis panel (MITRE coverage / attack graph / report preview) ──
+function initAnalysisTabs() {
+    const bar = document.getElementById('analysis-tabs');
+    if (!bar || bar.dataset.wired) return;
+    bar.dataset.wired = '1';
+
+    bar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.tab-btn');
+        if (!btn) return;
+        bar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.tab;
+        ['mitre', 'graph', 'triage', 'report'].forEach(name => {
+            const panel = document.getElementById(`analysis-${name}`);
+            if (panel) panel.hidden = name !== tab;
+        });
+        if (tab === 'graph') loadAttackGraph();
+        if (tab === 'triage') loadTriageBoard();
+        if (tab === 'report') loadReportTonePreview();
+    });
+
+    const modeSelect = document.getElementById('report-tone-mode');
+    if (modeSelect) modeSelect.addEventListener('change', loadReportTonePreview);
+}
+
+async function loadMitreCoverage() {
+    const el = document.getElementById('analysis-mitre');
+    if (!el) return;
+    try {
+        const res = await apiFetch('/api/mitre-coverage');
+        const data = await res.json();
+        if (!data.techniques || !data.techniques.length) {
+            el.innerHTML = '<span class="muted">No MITRE ATT&CK-tagged findings in the latest report yet.</span>';
+            return;
+        }
+        const sevClass = { critical: 'sev-critical', high: 'sev-high', medium: 'sev-medium', low: 'sev-low', info: 'sev-info' };
+        el.innerHTML = `<div class="mitre-heatmap">${data.techniques.map(t => `
+            <div class="mitre-cell ${sevClass[t.max_severity] || 'sev-info'}" title="${escHtml(t.name)} — ${t.count} finding(s)">
+                <div class="mitre-cell-id">${escHtml(t.id)}</div>
+                <div class="mitre-cell-count">${t.count}</div>
+            </div>`).join('')}</div>`;
+    } catch (e) {
+        el.innerHTML = '<span class="muted">Could not load MITRE coverage.</span>';
+    }
+}
+
+async function loadAttackGraph() {
+    const el = document.getElementById('analysis-graph');
+    if (!el || el.dataset.loaded) return;
+    try {
+        const res = await apiFetch('/api/attack-graph');
+        const data = await res.json();
+        el.innerHTML = data.svg || '<span class="muted">No graph data.</span>';
+        el.dataset.loaded = '1';
+    } catch (e) {
+        el.innerHTML = '<span class="muted">Could not load attack graph.</span>';
+    }
+}
+
+// Triage board columns, in the order XBOW-style verification moves a
+// finding through: unverified/non_replayable -> failed -> verified, with
+// any finding debate_consensus_agent flagged "disagreement" surfaced too.
+const _TRIAGE_COLUMNS = [
+    { key: 'non_replayable', label: 'Unverified (no replay evidence)' },
+    { key: 'unverified', label: 'Verification Failed' },
+    { key: 'failed', label: 'Replay Errored' },
+    { key: 'verified', label: 'Verified' },
+];
+
+async function loadTriageBoard() {
+    const el = document.getElementById('analysis-triage');
+    if (!el) return;
+    el.innerHTML = '<span class="muted">Loading…</span>';
+    try {
+        const res = await apiFetch('/api/findings?limit=200');
+        const data = await res.json();
+        const findings = data.findings || [];
+        const buckets = {};
+        _TRIAGE_COLUMNS.forEach(c => { buckets[c.key] = []; });
+        buckets.unclassified = [];
+        findings.forEach(f => {
+            const status = f.verification_status;
+            (buckets[status] ? buckets[status] : buckets.unclassified).push(f);
+        });
+        const columns = [..._TRIAGE_COLUMNS, { key: 'unclassified', label: 'Not Yet Verified' }];
+        el.innerHTML = `<div class="triage-board">${columns.map(col => `
+            <div class="triage-column">
+                <div class="triage-column-header">${escHtml(col.label)} <span class="triage-count">${buckets[col.key].length}</span></div>
+                ${buckets[col.key].slice(0, 20).map(f => `
+                    <div class="triage-card sev-${f.severity || 'info'}">
+                        <div class="triage-card-title">${escHtml(f.title || 'Untitled')}</div>
+                        <div class="triage-card-meta">${escHtml(f.id || '')} · ${escHtml(f.severity || 'info')}</div>
+                    </div>`).join('') || '<span class="muted triage-empty">—</span>'}
+            </div>`).join('')}</div>`;
+    } catch (e) {
+        el.innerHTML = '<span class="muted">Could not load triage board.</span>';
+    }
+}
+
+async function loadReportTonePreview() {
+    const body = document.getElementById('report-tone-body');
+    const mode = document.getElementById('report-tone-mode')?.value || 'pentest';
+    if (!body) return;
+    body.textContent = 'Loading…';
+    try {
+        const res = await apiFetch(`/api/report-tone?mode=${encodeURIComponent(mode)}`);
+        const data = await res.json();
+        body.textContent = data.report || 'No report data yet — run a mission first.';
+    } catch (e) {
+        body.textContent = 'Could not load report preview.';
+    }
+}
+
+// ── Budget meter ───────────────────────────────────────────────
+let budgetMeterInterval = null;
+
+function startBudgetMeterPolling() {
+    if (budgetMeterInterval) return;
+    loadBudgetMeter();
+    budgetMeterInterval = setInterval(loadBudgetMeter, 5000);
+}
+
+async function loadBudgetMeter() {
+    const fill = document.getElementById('budget-meter-fill');
+    const text = document.getElementById('budget-meter-text');
+    if (!fill || !text) return;
+    try {
+        const res = await apiFetch('/api/budget');
+        const data = await res.json();
+        if (!data.mission_id) {
+            text.textContent = 'No active mission';
+            fill.style.width = '0%';
+            return;
+        }
+        // NEXUS_BUDGET_MAX_TOKENS/_MAX_USD are optional — only render the bar
+        // as a fraction of an actual configured cap; otherwise just show the
+        // running total without implying a limit that isn't set.
+        if (data.max_tokens) {
+            fill.style.width = `${Math.min(100, (data.estimated_tokens / data.max_tokens) * 100)}%`;
+        } else {
+            fill.style.width = '0%';
+        }
+        const capNote = data.max_tokens ? ` / ${data.max_tokens} cap` : ' (no cap set)';
+        text.textContent = `${data.estimated_tokens}${capNote} tokens (~$${(data.estimated_usd || 0).toFixed(4)}) — ${data.calls} call(s)`;
+    } catch (e) {
+        // Silent — budget endpoint may not be reachable yet.
+    }
+}
+
+// ── Benchmark Dashboard page ─────────────────────────────────────
+const _BENCHMARK_SUITE_COLORS = {
+    intercode_ctf: '#3fb950',
+    cybench: '#d29922',
+    nyu_ctf: '#a371f7',
+    debate_consensus_eval: '#58a6ff',
+};
+
+async function loadBenchmarksPage() {
+    await Promise.all([
+        loadBenchmarkScoreChart(),
+        loadDebateEvalTable(),
+        loadLatencyTable(),
+    ]);
+}
+
+async function loadBenchmarkScoreChart() {
+    const canvas = document.getElementById('benchmarkScoreChart');
+    const empty = document.getElementById('benchmark-score-empty');
+    if (!canvas) return;
+    try {
+        const res = await apiFetch('/api/benchmarks?limit=200');
+        const data = await res.json();
+        const runs = (data.runs || []).filter(r => r.run_at && typeof r.score === 'number');
+
+        if (!runs.length) {
+            canvas.hidden = true;
+            if (empty) empty.hidden = false;
+            return;
+        }
+        canvas.hidden = false;
+        if (empty) empty.hidden = true;
+
+        // Group by suite, oldest -> newest per suite, so each suite draws
+        // its own score-over-time line.
+        const bySuite = {};
+        runs.forEach(r => { (bySuite[r.suite] = bySuite[r.suite] || []).push(r); });
+        Object.values(bySuite).forEach(list => list.sort((a, b) => a.run_at.localeCompare(b.run_at)));
+
+        // Shared x-axis: every distinct run_at across all suites, sorted.
+        const allTimestamps = [...new Set(runs.map(r => r.run_at))].sort();
+
+        const datasets = Object.entries(bySuite).map(([suite, list]) => {
+            const bySuiteTime = Object.fromEntries(list.map(r => [r.run_at, r.score]));
+            return {
+                label: suite,
+                data: allTimestamps.map(ts => bySuiteTime[ts] ?? null),
+                borderColor: _BENCHMARK_SUITE_COLORS[suite] || '#8b949e',
+                backgroundColor: 'transparent',
+                spanGaps: true,
+                tension: 0.25,
+            };
+        });
+
+        if (benchmarkScoreChart) { benchmarkScoreChart.destroy(); }
+        benchmarkScoreChart = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: { labels: allTimestamps.map(t => t.replace('T', ' ').replace('Z', '')), datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { min: 0, max: 1, ticks: { color: '#8b949e' } },
+                    x: { ticks: { color: '#8b949e', maxRotation: 45, minRotation: 45 } },
+                },
+                plugins: {
+                    legend: { position: 'top', labels: { color: '#8b949e', font: { family: 'Inter', size: 11 } } },
+                },
+            },
+        });
+    } catch (e) {
+        console.warn('Benchmark score chart load failed:', e);
+        if (empty) { empty.hidden = false; empty.textContent = 'Could not load benchmark history.'; }
+    }
+}
+
+async function loadDebateEvalTable() {
+    const tbody = document.getElementById('debate-eval-tbody');
+    if (!tbody) return;
+    try {
+        const res = await apiFetch('/api/benchmarks/debate-eval');
+        const data = await res.json();
+        const runs = data.runs || [];
+        if (!runs.length) {
+            tbody.innerHTML = '<tr><td colspan="9" class="loading-cell">No debate_consensus_eval runs yet — run <code>nexus benchmark --suite debate_consensus_eval</code>.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = runs.map(r => `
+            <tr>
+                <td>${escHtml((r.run_at || '').replace('T', ' ').replace('Z', ''))}</td>
+                <td>${(r.precision ?? 0).toFixed(2)}</td>
+                <td>${(r.recall ?? 0).toFixed(2)}</td>
+                <td>${(r.f1 ?? 0).toFixed(2)}</td>
+                <td>${r.tp ?? 0}</td>
+                <td>${r.fp ?? 0}</td>
+                <td>${r.fn ?? 0}</td>
+                <td>${r.tn ?? 0}</td>
+                <td>${r.abstained ?? 0}</td>
+            </tr>`).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="9" class="loading-cell">Could not load debate-eval history.</td></tr>';
+    }
+}
+
+async function loadLatencyTable() {
+    const tbody = document.getElementById('latency-tbody');
+    if (!tbody) return;
+    try {
+        const res = await apiFetch('/api/benchmarks/latency?limit=1');
+        const data = await res.json();
+        const latest = (data.runs || [])[0];
+        if (!latest || !latest.results || !latest.results.length) {
+            tbody.innerHTML = '<tr><td colspan="3" class="loading-cell">No latency runs yet — run <code>nexus benchmark --latency</code>.</td></tr>';
+            return;
+        }
+        // Already sorted slowest-first by benchmark_agent_latency().
+        tbody.innerHTML = latest.results.map(r => `
+            <tr>
+                <td>${escHtml(r.agent)}</td>
+                <td>${r.latency_ms ?? '—'}</td>
+                <td>${escHtml(r.status)}</td>
+            </tr>`).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="3" class="loading-cell">Could not load latency history.</td></tr>';
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────

@@ -34,7 +34,7 @@ class TaskPlannerAgent(BaseAgent):
             {"id": "T2", "title": "DNS and WHOIS enumeration", "agent": "recon_agent", "depends_on": ["T1"], "priority": "high"},
             {"id": "T3", "title": "Port scanning and service detection", "agent": "network_agent", "depends_on": ["T1"], "priority": "high"},
             {"id": "T4", "title": "Vulnerability scanning", "agent": "vuln_analyst_agent", "depends_on": ["T2", "T3"], "priority": "critical"},
-            {"id": "T5", "title": "Exploit verification", "agent": "exploitation_agent", "depends_on": ["T4"], "priority": "medium"},
+            {"id": "T5", "title": "Exploit verification", "agent": "exploit_agent", "depends_on": ["T4"], "priority": "medium"},
             {"id": "T6", "title": "Reporting and documentation", "agent": "reporter_agent", "depends_on": ["T4", "T5"], "priority": "high"},
         ]
 

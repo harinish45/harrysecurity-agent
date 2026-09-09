@@ -51,3 +51,21 @@ def test_attack_chain_recommends_next_domains_from_findings():
 
 def test_attack_chain_defaults_to_reconnaissance_with_no_findings():
     assert AttackChain.recommend_next([]) == ["reconnaissance"]
+
+
+def test_attack_chain_handles_multi_domain_findings_without_crashing():
+    """Real bug caught during a live end-to-end mission run: `build()`'s
+    `graph.nodes[domain]["weight"]` direct-index lookup raised KeyError
+    whenever a later finding's domain matched an earlier finding's
+    `_NEXT_DOMAIN` target — `add_edge(domain, nxt)` creates `nxt` as a bare
+    node with no "weight" attribute, so a subsequent "reconnaissance" ->
+    "network" edge followed by an actual `network.*` finding hit exactly
+    this path. Every pre-existing test here only used same-domain findings,
+    which never exercised it — this reproduces the real crash scenario."""
+    findings = [
+        {"tool": "reconnaissance.dns_recon", "severity": "high"},
+        {"tool": "network.port_scan", "severity": "critical"},
+        {"tool": "webapp.sqli_scan", "severity": "medium"},
+    ]
+    recommendations = AttackChain.recommend_next(findings)
+    assert recommendations  # must not raise, must produce something

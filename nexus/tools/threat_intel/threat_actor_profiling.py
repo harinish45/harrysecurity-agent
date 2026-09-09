@@ -2,44 +2,96 @@
 """
 NEXUS-STRIKE — threat_intel tool: Threat Actor Profiling
 Domain: threat_intel
+
+Threat actor profiling fundamentally needs a history of observed TTPs
+across multiple incidents — a single target/finding carries no
+attribution signal by itself, and this tool never invents an actor name
+(that would be pure fabrication no honest data source backs). Given a real
+TTP history, it performs a real frequency-aggregation pass and surfaces
+the most-recurring techniques as the profile; without one, it honestly
+reports that it can't profile anything.
+
+This was previously one of 8 threat_intel tools sharing byte-for-byte
+identical fake logic (DNS resolve + bare HTTP GET on `/`, unrelated to
+actor profiling) — caught during this session's audit.
 """
+from __future__ import annotations
+
+from collections import Counter
+from typing import Any
+
+from nexus.foundation.schema import (
+    Finding,
+    STATUS_COMPLETED,
+    STATUS_NO_FINDINGS,
+    STATUS_UNAVAILABLE,
+    tool_result,
+)
 from nexus.tools.registry import tool_registry
 
-
-def run(target: str, **kwargs) -> dict:
-    """threat_intel tool: Threat Actor Profiling"""
-    findings = []
-    try:
-        import socket
-        # Check if target is an IP/domain
-        try:
-            ip = socket.gethostbyname(target)
-            findings.append(f"Target {target} -> {ip}")
-        except:
-            # Maybe it's already an IP
-            try:
-                socket.inet_aton(target)
-                findings.append(f"Target {target} is a valid IP address")
-            except:
-                findings.append(f"Target {target} is not a valid IP or domain")
-        # Check reverse DNS
-        try:
-            rev = socket.gethostbyaddr(target)
-            findings.append(f"Reverse DNS: {rev[0]}")
-        except:
-            findings.append("No PTR record")
-    except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "threat_intel.threat_actor_profiling", "domain": "threat_intel", "target": target, "status": "completed", "findings": findings}
+_TOOL_NAME = "threat_intel.threat_actor_profiling"
+_MIN_HISTORY = 3
 
 
-# Register with tool registry
-tool_registry.register("threat_intel.threat_actor_profiling", run, metadata={
-    "name": "threat_intel.threat_actor_profiling",
+def run(target: str, **kwargs: Any) -> dict:
+    """Real TTP-frequency profiling across a supplied observation history."""
+    history = kwargs.get("ttp_history")
+    if not isinstance(history, list) or len(history) < _MIN_HISTORY:
+        got = len(history) if isinstance(history, list) else 0
+        return tool_result(
+            _TOOL_NAME, target, status=STATUS_UNAVAILABLE,
+            summary="Threat actor profiling needs a TTP history across multiple observed incidents — "
+                    "a single target/finding carries no attribution signal",
+            error=f"requires_case_data: pass ttp_history=[{{'technique_id': 'T1190', "
+                  f"'timestamp': ...}}, ...] with at least {_MIN_HISTORY} entries; got {got}",
+        )
+
+    tech_counts: Counter[str] = Counter()
+    for entry in history:
+        if isinstance(entry, dict):
+            tid = entry.get("technique_id") or entry.get("id")
+            if tid:
+                tech_counts[str(tid)] += 1
+        elif isinstance(entry, str) and entry.strip():
+            tech_counts[entry.strip()] += 1
+
+    if not tech_counts:
+        return tool_result(
+            _TOOL_NAME, target, status=STATUS_NO_FINDINGS,
+            summary="ttp_history entries had no recognizable technique_id field to profile",
+        )
+
+    top = tech_counts.most_common(10)
+    findings = [
+        Finding(
+            title=f"Recurring TTP: {tid} ({count}x)",
+            severity="info",
+            confidence="medium",
+            affected_asset=target,
+            evidence=f"Technique {tid} appears {count} time(s) across the supplied TTP history — a "
+                     f"real frequency signal, not an inferred/fabricated actor name or attribution",
+            tool=_TOOL_NAME,
+            references=[f"https://attack.mitre.org/techniques/{tid}/"],
+        )
+        for tid, count in top
+    ]
+
+    return tool_result(
+        _TOOL_NAME, target, status=STATUS_COMPLETED, findings=findings,
+        summary=f"Profiled {len(history)} TTP observation(s) into {len(tech_counts)} distinct "
+                f"technique(s); most recurring: {top[0][0]} ({top[0][1]}x)",
+        metadata={"technique_frequency": dict(tech_counts)},
+    )
+
+
+tool_registry.register(_TOOL_NAME, run, metadata={
+    "name": _TOOL_NAME,
     "domain": "threat_intel",
     "status": "completed",
-    "description": "threat_intel tool: Threat Actor Profiling",
+    "description": "Real TTP-frequency profiling across a supplied multi-incident observation "
+                    "history (does not fabricate actor names/attribution)",
     "parameters": {
-        "target": "Target domain, IP, or URL",
+        "target": "Case/investigation label",
+        "ttp_history": "Required: list of 3+ {'technique_id': 'Txxxx', 'timestamp': ...} entries",
     },
 })

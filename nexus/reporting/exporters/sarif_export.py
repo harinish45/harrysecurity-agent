@@ -2,10 +2,25 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from nexus.foundation.schema import normalize_findings, redact_findings
+
+_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+
+
+def _as_uri(affected_asset: str) -> str:
+    """`affected_asset` is often a bare host:port ("10.0.0.1:22") or plain
+    hostname — not a syntactically valid URI per the SARIF 2.1.0 spec's
+    `artifactLocation.uri` field, which some strict SARIF consumers reject.
+    Pass through anything that already has a scheme; wrap anything else in
+    a neutral scheme so it's always at least well-formed."""
+    asset = affected_asset or "unknown"
+    if _SCHEME_RE.match(asset):
+        return asset
+    return f"asset://{asset}"
 
 
 class SarifExport:
@@ -42,7 +57,7 @@ class SarifExport:
                 "message": {"text": item.get("title", "")},
                 "locations": [{
                     "physicalLocation": {
-                        "artifactLocation": {"uri": item.get("affected_asset", "")},
+                        "artifactLocation": {"uri": _as_uri(item.get("affected_asset", ""))},
                     }
                 }],
                 "properties": {

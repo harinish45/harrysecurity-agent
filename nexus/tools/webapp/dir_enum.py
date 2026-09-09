@@ -120,7 +120,14 @@ def run(
     discovered: list[dict] = []
 
     def check_path(path: str) -> Optional[dict]:
-        test_url = f"{base}{path}"
+        # COMMON_DIRS mixes leading-slash entries ("/admin") with bare
+        # filename entries (".env", "wp-config.php", ...) — `f"{base}{path}"`
+        # silently produced malformed URLs like "http://127.0.0.1.env" and
+        # "http://127.0.0.1admin.php" for every entry in the second group
+        # (confirmed live: these are exactly the highest-severity checks
+        # this tool exists to run — see the severity list below). Always
+        # join through exactly one "/" regardless of which form `path` is in.
+        test_url = f"{base}/{path.lstrip('/')}"
         resp = _http_request(test_url, timeout)
         if resp["status"] and resp["status"] not in (404,):
             return {"path": path, "status": resp["status"], "size": resp["size"], "url": test_url}

@@ -24,3 +24,6 @@ check_stubs.py
 test_tools.py
 tools_to_fill.txt
 final_pytest.txt
+.coverage
+coverage*.json
+_scratch_fixtures/

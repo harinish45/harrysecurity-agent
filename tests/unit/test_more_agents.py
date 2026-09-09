@@ -5,17 +5,78 @@ check in test_agent_registry.py — defensive (soc_agent), analysis
 import pytest
 
 from nexus.agents.analysis.malware_agent import MalwareAgent
+from nexus.agents.analysis.vuln_analyst_agent import VulnAnalystAgent
 from nexus.agents.defensive.soc_agent import SocAgent
 from nexus.agents.specialized.iot_agent import IotAgent
+from nexus.agents.support.reporter_agent import ReporterAgent
 from nexus.agents.support.searcher_agent import SearcherAgent
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("agent_cls", [SocAgent, MalwareAgent, IotAgent, SearcherAgent])
+@pytest.mark.parametrize("agent_cls", [SocAgent, MalwareAgent, IotAgent, SearcherAgent, VulnAnalystAgent])
 async def test_fails_cleanly_with_no_target(agent_cls):
     result = await agent_cls().run("some task", target="")
     assert result["status"] == "failed"
     assert result["error"]
+
+
+@pytest.mark.asyncio
+async def test_vuln_analyst_agent_calls_real_registered_vuln_assessment_tools(monkeypatch):
+    """Regression test: this agent used to call 'vuln_assessment.vuln_scan'
+    and 'vuln_assessment.cve_lookup', neither of which was ever registered
+    anywhere in nexus/tools/ — every real run silently no-op'd both calls.
+    It's the agent OrchestrationEngine's default fallback plan uses for its
+    vulnerability-analysis phase, so this was a real gap in the default
+    pipeline, not just a directly-invoked agent."""
+    from nexus.tools.registry import tool_registry
+
+    real_names = set(tool_registry.list_tools().keys())
+    calls = []
+
+    def fake_run(name, **kwargs):
+        calls.append(name)
+        return {"status": "completed", "findings": [{"title": f"finding from {name}", "severity": "medium"}]}
+
+    monkeypatch.setattr("nexus.agents.analysis.vuln_analyst_agent.tool_registry.run", fake_run)
+
+    result = await VulnAnalystAgent().run("scan", target="127.0.0.1")
+
+    assert result["status"] == "completed"
+    assert calls  # actually called something
+    assert set(calls) <= real_names, f"called unregistered tool(s): {set(calls) - real_names}"
+    assert len(result["findings"]) == len(calls)
+
+
+@pytest.mark.asyncio
+async def test_reporter_agent_does_not_crash_on_explicit_none_target(tmp_path, monkeypatch):
+    """Regression test: kwargs.get("target", "") only supplies the default
+    when the key is *missing*, not when it's explicitly None — a caller
+    passing target=None got AttributeError on target.replace(...)."""
+    monkeypatch.chdir(tmp_path)
+    result = await ReporterAgent().run("report", target=None, findings=[{"severity": "critical", "title": "SQLi"}])
+    assert result["status"] == "completed"
+    assert result["target"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_reporter_agent_writes_a_real_markdown_report(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    findings = [{"severity": "critical", "title": "SQLi"}, {"severity": "high", "title": "XSS"}]
+    result = await ReporterAgent().run("report", target="10.0.0.1", findings=findings)
+
+    assert result["status"] == "completed"
+    report = result["metadata"]["report"]
+    assert "Critical" in report and "1" in report
+    assert (tmp_path / "reports").is_dir()
+    saved = list((tmp_path / "reports").glob("report_10_0_0_1_*.md"))
+    assert len(saved) == 1
+
+
+@pytest.mark.asyncio
+async def test_vuln_analyst_agent_correlates_high_severity_upstream_findings():
+    upstream = [{"severity": "critical", "title": "SQLi"}, {"severity": "low", "title": "info leak"}]
+    result = await VulnAnalystAgent().run("scan", target="127.0.0.1", findings=upstream)
+    assert any("1 high/critical" in f.get("title", "") for f in result["findings"])
 
 
 @pytest.mark.asyncio

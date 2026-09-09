@@ -77,3 +77,71 @@ async def test_flow_controller_runs_independent_phases_as_one_batch(monkeypatch)
 
     assert controller.strategy == "parallel"
     assert sorted(seen_order) == ["network_agent", "webapp_agent"]
+
+
+@pytest.mark.asyncio
+async def test_flow_controller_resume_skips_already_completed_batches(monkeypatch, tmp_path):
+    """Checkpoint.load()/save() existed but nothing ever called load() to
+    actually resume a crashed mission — checkpointing was write-only
+    telemetry. This confirms a fresh FlowController picking up a prior
+    partial checkpoint (resume=True) re-executes only the batch that never
+    completed, not the whole plan from scratch."""
+    monkeypatch.setenv("NEXUS_CHECKPOINT_DIR", str(tmp_path / "checkpoints"))
+    calls = []
+
+    async def fake_run(self, task, **kwargs):
+        calls.append(self.name)
+        return {"agent": self.name, "status": "completed", "findings": []}
+
+    from nexus.agents.offensive.recon_agent import ReconAgent
+    from nexus.agents.offensive.network_agent import NetworkAgent
+    monkeypatch.setattr(ReconAgent, "run", fake_run)
+    monkeypatch.setattr(NetworkAgent, "run", fake_run)
+
+    tasks = [
+        {"id": "P1", "agent": "recon_agent", "task": "recon", "target": "127.0.0.1", "depends_on": []},
+        {"id": "P2", "agent": "network_agent", "task": "scan", "target": "127.0.0.1", "depends_on": ["P1"]},
+    ]
+    mission_id = "test-mission-resume"
+
+    # Simulate a mission that crashed after batch 1 completed and was
+    # checkpointed, but before batch 2 ran — FlowController._run only ever
+    # clears the checkpoint on a clean full completion, so a real crash
+    # leaves exactly this state on disk (see flow_controller.py's Checkpoint
+    # usage), which is precisely what `resume=True` needs to pick back up.
+    from nexus.orchestration.recovery.checkpoint import Checkpoint
+    checkpoint = Checkpoint()
+    checkpoint.save(mission_id, {
+        "batch": 1, "total_batches": 2,
+        "completed": [{"agent": "recon_agent", "status": "completed", "findings": []}],
+        "context": {}, "tasks": tasks,
+    })
+
+    controller = FlowController(mission_id, checkpoint=True)
+    second_results = await controller.run(tasks, resume=True)
+
+    # recon_agent must NOT run again — only the not-yet-completed batch does.
+    assert calls == ["network_agent"]
+    assert len(second_results) == 2
+    assert not checkpoint.exists(mission_id)  # cleared on successful completion
+
+
+@pytest.mark.asyncio
+async def test_flow_controller_resume_with_no_checkpoint_runs_fresh(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_CHECKPOINT_DIR", str(tmp_path / "checkpoints"))
+    calls = []
+
+    async def fake_run(self, task, **kwargs):
+        calls.append(self.name)
+        return {"agent": self.name, "status": "completed", "findings": []}
+
+    from nexus.agents.offensive.recon_agent import ReconAgent
+    monkeypatch.setattr(ReconAgent, "run", fake_run)
+
+    controller = FlowController("test-mission-no-checkpoint-yet", checkpoint=True)
+    results = await controller.run(
+        [{"id": "P1", "agent": "recon_agent", "task": "recon", "target": "127.0.0.1", "depends_on": []}],
+        resume=True,
+    )
+    assert calls == ["recon_agent"]
+    assert len(results) == 1

@@ -20,7 +20,7 @@ try:
         anthropic_model: str = "claude-3-opus-20240229"
 
         openrouter_api_key: Optional[str] = None
-        openrouter_model: str = "openai/gpt-4-turbo"
+        openrouter_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
         openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
         ollama_base_url: str = "http://localhost:11434/v1"
@@ -35,7 +35,7 @@ try:
         azure_openai_model: str = "gpt-4"
 
         groq_api_key: Optional[str] = None
-        groq_model: str = "mixtral-8x7b-32768"
+        groq_model: str = "openai/gpt-oss-20b"
         groq_base_url: str = "https://api.groq.com/openai/v1"
 
         deepseek_api_key: Optional[str] = None
@@ -100,7 +100,7 @@ except ImportError:
             self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
             self.anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-3-opus-20240229")
             self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-            self.openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4-turbo")
+            self.openrouter_model = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
             self.openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
             self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
             self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:latest")
@@ -111,7 +111,7 @@ except ImportError:
             self.azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
             self.azure_openai_model = os.getenv("AZURE_OPENAI_MODEL", "gpt-4")
             self.groq_api_key = os.getenv("GROQ_API_KEY")
-            self.groq_model = os.getenv("GROQ_MODEL", "mixtral-8x7b-32768")
+            self.groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
             self.groq_base_url = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
             self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
             self.deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")

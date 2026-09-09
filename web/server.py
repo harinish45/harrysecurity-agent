@@ -377,32 +377,115 @@ async def websocket_steer(websocket: WebSocket):
         pass
 
 
-@app.get("/api/findings")
-async def get_findings(request: Request, limit: int = 50):
-    """Return findings from the most recent JSON report."""
-    _require_token(request)
+def _latest_report_findings() -> tuple[list[dict], dict]:
+    """Findings + `_meta` from the most recent JSON report, normalized —
+    shared by /api/findings and the newer mission-analysis endpoints below
+    (MITRE coverage, attack graph, report-tone preview) so they all read
+    the same "latest mission" source of truth."""
     if not REPORTS_DIR.exists():
-        return {"findings": [], "total": 0, "target": None}
-
+        return [], {}
     json_files = sorted(
         [f for f in REPORTS_DIR.iterdir() if f.suffix == ".json"],
         key=lambda x: x.stat().st_mtime,
         reverse=True,
     )
     if not json_files:
-        return {"findings": [], "total": 0, "target": None}
-
+        return [], {}
     with open(json_files[0], "r", encoding="utf-8") as fh:
         data = json.load(fh)
+    findings = [_normalize_finding(f) for f in data.get("findings", [])]
+    meta = {**data.get("_meta", {}), "report": json_files[0].name}
+    return findings, meta
 
-    raw_findings = data.get("findings", [])
-    findings = [_normalize_finding(f) for f in raw_findings]
+
+@app.get("/api/findings")
+async def get_findings(request: Request, limit: int = 50):
+    """Return findings from the most recent JSON report."""
+    _require_token(request)
+    findings, meta = _latest_report_findings()
     return {
         "findings": findings[:limit],
         "total": len(findings),
-        "target": data.get("_meta", {}).get("target"),
-        "report": json_files[0].name,
+        "target": meta.get("target"),
+        "report": meta.get("report"),
     }
+
+
+@app.get("/api/mitre-coverage")
+async def get_mitre_coverage(request: Request):
+    """MITRE ATT&CK technique coverage across the latest mission's findings
+    — feeds the dashboard's MITRE heat-map panel. Technique tags come from
+    `mitre_mapping_agent`; a finding with none simply doesn't contribute."""
+    _require_token(request)
+    findings, meta = _latest_report_findings()
+    coverage: dict[str, dict] = {}
+    for f in findings:
+        for t in f.get("mitre_techniques") or []:
+            tid = t.get("id", "?")
+            entry = coverage.setdefault(tid, {"id": tid, "name": t.get("name", ""), "count": 0, "max_severity": "info"})
+            entry["count"] += 1
+            severities = ["critical", "high", "medium", "low", "info"]
+            sev = f.get("severity", "info")
+            if sev in severities and severities.index(sev) < severities.index(entry["max_severity"]):
+                entry["max_severity"] = sev
+    return {"target": meta.get("target"), "techniques": sorted(coverage.values(), key=lambda e: -e["count"])}
+
+
+@app.get("/api/attack-graph")
+async def get_attack_graph(request: Request):
+    """Render the latest mission's findings as an attack-graph SVG (same
+    renderer the HTML report export uses) for the dashboard's Attack Graph
+    view — a live look at the same visualization, not a separate model."""
+    _require_token(request)
+    from nexus.reporting.visualizations.attack_graph_viz import AttackGraphViz
+
+    findings, meta = _latest_report_findings()
+    svg = AttackGraphViz().render(findings)
+    return {"target": meta.get("target"), "svg": svg, "finding_count": len(findings)}
+
+
+@app.get("/api/report-tone")
+async def get_report_tone(request: Request, mode: str = "pentest"):
+    """Render the latest mission's findings through `report_tone_agent` for
+    the given mode — powers the dashboard's Report Viewer (tabs across
+    pentest/bounty/ctf/redteam/blueteam/compliance, same underlying finding
+    data, different prose)."""
+    _require_token(request)
+    from nexus.agents.orchestrator.report_tone_agent import ReportToneAgent
+
+    findings, meta = _latest_report_findings()
+    result = await ReportToneAgent().run("Render report preview", target=meta.get("target", ""),
+                                          mode=mode, findings=findings)
+    return {"mode": mode, "target": meta.get("target"), "report": result.get("metadata", {}).get("rendered_report", "")}
+
+
+@app.get("/api/budget")
+async def get_budget(request: Request, mission_id: str = ""):
+    """Live estimated LLM spend for a mission — powers the dashboard's
+    budget meter. Without a `mission_id`, returns the active scan's mission
+    id if one is running (mission-mode launches use `dashboard-<mode>-<ts>`
+    — see `scan_start`).
+
+    Mission-mode scans run in a separate subprocess with their own
+    in-memory BudgetGuard — this server process's own BudgetGuard is never
+    touched by them. `_stream_output` captures each `budget_update`
+    NEXUS-EVENT the subprocess emits into `_active_scan["budget"]`; prefer
+    that live snapshot for the currently-active mission, and fall back to
+    this process's own BudgetGuard (correct for e.g. /api/agent/run, which
+    executes in-process) otherwise."""
+    _require_token(request)
+    from nexus.foundation.guardrails.budget_guard import BudgetGuard
+
+    mid = mission_id or _active_scan.get("mission_id", "")
+    caps = {
+        "max_tokens": int(os.environ["NEXUS_BUDGET_MAX_TOKENS"]) if os.environ.get("NEXUS_BUDGET_MAX_TOKENS") else None,
+        "max_usd": float(os.environ["NEXUS_BUDGET_MAX_USD"]) if os.environ.get("NEXUS_BUDGET_MAX_USD") else None,
+    }
+    if not mid:
+        return {"mission_id": None, "calls": 0, "estimated_tokens": 0, "estimated_usd": 0.0, **caps}
+    if mid == _active_scan.get("mission_id") and _active_scan.get("budget"):
+        return {**_active_scan["budget"], **caps}
+    return {**BudgetGuard.report(mid), **caps}
 
 
 @app.get("/api/benchmarks")
@@ -429,6 +512,44 @@ async def get_benchmarks(request: Request, limit: int = 50):
 
     runs.sort(key=lambda r: r.get("run_at", ""), reverse=True)
     return {"runs": runs[:limit], "total": len(runs)}
+
+
+def _read_jsonl_history(path: Path, limit: int) -> dict:
+    """Shared reader for the benchmark history sidecars — same tolerant
+    read-newest-first behavior as `get_benchmarks` above, factored out so
+    the latency/debate-eval endpoints don't duplicate it."""
+    if not path.exists():
+        return {"runs": [], "total": 0}
+    runs = []
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                runs.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    runs.sort(key=lambda r: r.get("run_at", ""), reverse=True)
+    return {"runs": runs[:limit], "total": len(runs)}
+
+
+@app.get("/api/benchmarks/latency")
+async def get_benchmarks_latency(request: Request, limit: int = 20):
+    """Agent execution-latency history, read from
+    `benchmarks/latency_history.jsonl` (appended to by
+    `benchmark_agent_latency()` in nexus/benchmarks/agent_eval.py)."""
+    _require_token(request)
+    return _read_jsonl_history(Path("benchmarks") / "latency_history.jsonl", limit)
+
+
+@app.get("/api/benchmarks/debate-eval")
+async def get_benchmarks_debate_eval(request: Request, limit: int = 20):
+    """debate_consensus_agent precision/recall/F1 evaluation history, read
+    from `benchmarks/debate_eval_history.jsonl` (appended to by
+    `evaluate_debate_consensus()` in nexus/benchmarks/agent_eval.py)."""
+    _require_token(request)
+    return _read_jsonl_history(Path("benchmarks") / "debate_eval_history.jsonl", limit)
 
 
 @app.get("/api/config")
@@ -517,6 +638,7 @@ async def scan_start(payload: dict, request: Request):
     await _broadcast_scan_event({"type": "phase", "target": target, "phase": 0, "message": "Scan starting…", "mode": mode})
 
     scan_env = {k: v for k, v in os.environ.items() if k in _SCAN_ENV_ALLOWLIST}
+    mission_id = None
     if mode == "live":
         cmd = [_sys.executable, "-m", "nexus", "live", "--target", target]
     else:
@@ -534,7 +656,7 @@ async def scan_start(payload: dict, request: Request):
         text=True,
         env=scan_env,
     )
-    _active_scan = {"process": proc, "target": target, "status": "running", "mode": mode}
+    _active_scan = {"process": proc, "target": target, "status": "running", "mode": mode, "mission_id": mission_id}
     await _broadcast_scan_event({"type": "status", "status": "running", "target": target, "mode": mode})
 
     # Background reader: stream stdout lines to WebSocket clients. Lines
@@ -545,17 +667,9 @@ async def scan_start(payload: dict, request: Request):
     import threading
 
     def _stream_output(process):
-        for line in process.stdout:
-            line = line.rstrip()
-            if not line:
-                continue
-            import asyncio
-            event = {"type": "output", "target": target, "line": line}
-            if line.startswith("NEXUS-EVENT:"):
-                try:
-                    event = {"type": "agent_event", "target": target, "event": json.loads(line[len("NEXUS-EVENT:"):])}
-                except json.JSONDecodeError:
-                    pass
+        import asyncio
+
+        def _broadcast(event):
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -563,6 +677,39 @@ async def scan_start(payload: dict, request: Request):
                 loop.close()
             except Exception:
                 pass
+
+        for line in process.stdout:
+            line = line.rstrip()
+            if not line:
+                continue
+            event = {"type": "output", "target": target, "line": line}
+            if line.startswith("NEXUS-EVENT:"):
+                try:
+                    inner = json.loads(line[len("NEXUS-EVENT:"):])
+                    event = {"type": "agent_event", "target": target, "event": inner}
+                    if inner.get("type") == "budget_update":
+                        # Mission-mode scans run in this subprocess, with
+                        # their own in-memory BudgetGuard the dashboard
+                        # server process can never see directly — capture
+                        # the snapshot here so GET /api/budget can serve
+                        # real numbers instead of always reading 0 for a
+                        # running mission (see engine.py's emit_events).
+                        _active_scan["budget"] = inner
+                except json.JSONDecodeError:
+                    pass
+            _broadcast(event)
+
+        # The stdout loop above only ends when the subprocess exits (clean
+        # completion, failure, or crash) — nothing previously told connected
+        # clients that happened. `_active_scan["status"]` only ever changed
+        # via the explicit POST /api/scan/stop, so a mission that finished
+        # normally left the dashboard UI believing it was still "running"
+        # until someone manually re-polled /api/scan/status.
+        returncode = process.wait()
+        final_status = "completed" if returncode == 0 else "failed"
+        if _active_scan.get("process") is process:
+            _active_scan["status"] = final_status
+        _broadcast({"type": "status", "status": final_status, "target": target, "mode": mode, "returncode": returncode})
 
     threading.Thread(target=_stream_output, args=(proc,), daemon=True).start()
 
@@ -663,8 +810,26 @@ def _open_browser_safe(url: str) -> None:
               f"Visit {url} manually.")
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
 def launch_dashboard(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
-    """Launch the Strix dashboard and optionally open the browser."""
+    """Launch the Strix dashboard and optionally open the browser.
+
+    The default-open auth behavior in _require_token (no DASHBOARD_TOKEN set
+    -> unauthenticated access allowed) is only safe when the server can't be
+    reached from outside this machine. is_production already refuses to
+    start without a token; this closes the other way an operator could
+    expose an unauthenticated dashboard — binding to a non-loopback host
+    (e.g. --host 0.0.0.0) in dev mode, where is_production never fires."""
+    if host not in _LOOPBACK_HOSTS and not DASHBOARD_TOKEN:
+        raise RuntimeError(
+            f"Refusing to bind the dashboard to non-loopback host {host!r} "
+            "without NEXUS_DASHBOARD_TOKEN set — this would expose an "
+            "unauthenticated dashboard to the network. Set "
+            "NEXUS_DASHBOARD_TOKEN (see .env.example) or use "
+            "--host 127.0.0.1 for local-only use."
+        )
     url = f"http://{host}:{port}"
     if open_browser:
         import threading

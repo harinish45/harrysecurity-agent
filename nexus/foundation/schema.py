@@ -21,6 +21,8 @@ STATUS_UNAVAILABLE = "unavailable"           # Tool cannot run in this environme
 STATUS_OUT_OF_SCOPE = "out_of_scope"         # Target not covered by this tool
 STATUS_REQUIRES_CREDENTIALS = "requires_credentials"   # Need API keys / creds
 STATUS_REQUIRES_HARDWARE = "requires_hardware"         # Need hardware device
+STATUS_REQUIRES_FILE = "requires_file"       # Need a local file path (not a network host)
+STATUS_REQUIRES_SANDBOX = "requires_sandbox"  # Needs dynamic/sandboxed execution, not performed here
 STATUS_NOT_IMPLEMENTED = "not_implemented"   # Not yet written
 
 ALL_STATUSES = frozenset({
@@ -31,6 +33,8 @@ ALL_STATUSES = frozenset({
     STATUS_OUT_OF_SCOPE,
     STATUS_REQUIRES_CREDENTIALS,
     STATUS_REQUIRES_HARDWARE,
+    STATUS_REQUIRES_FILE,
+    STATUS_REQUIRES_SANDBOX,
     STATUS_NOT_IMPLEMENTED,
 })
 
@@ -96,10 +100,17 @@ class Finding:
             # (not sequential) avoids collisions between Finding objects built
             # independently across concurrent FlowController batches.
             self.id = f"F-{uuid.uuid4().hex[:8].upper()}"
-        sev = self.severity.lower()
+        # An upstream agent/tool emitting severity/confidence as None (a
+        # check that failed to classify) or a non-string (e.g. an int) used
+        # to crash here with AttributeError on .lower() — since every
+        # exporter/report/agent funnels findings through this constructor,
+        # that took down the whole reporting pipeline for one bad finding.
+        # Treat anything that isn't a recognized string value as "info"/
+        # "medium" instead of trusting it's already a lowercase string.
+        sev = str(self.severity).lower() if self.severity is not None else ""
         if sev not in self.SEVERITY_ORDER:
             self.severity = "info"
-        conf = self.confidence.lower()
+        conf = str(self.confidence).lower() if self.confidence is not None else ""
         if conf not in self.CONFIDENCE_ORDER:
             self.confidence = "medium"
 
@@ -130,13 +141,32 @@ def tool_result(
         status = STATUS_FAILED
 
     normalised: list[dict[str, Any]] = []
-    for f in (findings or []):
+    for i, f in enumerate(findings or [], 1):
         if isinstance(f, Finding):
             normalised.append(f.to_dict())
         elif isinstance(f, dict):
             normalised.append(Finding(**f).to_dict())
         else:
-            normalised.append(Finding(description=str(f)).to_dict())
+            # A plain string finding (several agents/tools still emit these,
+            # e.g. mission_commander_agent's recon summaries) — `Finding` has
+            # no `description` field, so building one with `description=...`
+            # raised TypeError on every such call. Match `normalize_findings`
+            # below, which already handles this correctly: title from the
+            # text itself, severity inferred by keyword, id/tool/target
+            # filled in from this call's own context.
+            desc = str(f)
+            sev = "info"
+            for s in Finding.SEVERITY_ORDER:
+                if s in desc.lower():
+                    sev = s
+                    break
+            normalised.append(Finding(
+                id=f"F-{i:03d}",
+                title=desc[:80],
+                severity=sev,
+                tool=tool_name,
+                affected_asset=target,
+            ).to_dict())
 
     result: dict[str, Any] = {
         "tool": tool_name,

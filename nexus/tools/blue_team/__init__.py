@@ -6,6 +6,7 @@ from . import threat_hunting_blue
 from . import log_review
 from . import hardening
 from . import incident_handling
+from . import canary_token_deployment
 
 __all__ = [
     "detection_engineering_blue",
@@ -15,5 +16,6 @@ __all__ = [
     "threat_hunting_blue",
     "log_review",
     "hardening",
-    "incident_handling"
+    "incident_handling",
+    "canary_token_deployment",
 ]

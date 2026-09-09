@@ -7,10 +7,12 @@ class GroqProvider:
     """Provider for Groq API - fastest LLM inference available.
 
     Uses LPU inference engine for extremely fast responses.
-    Supports: mixtral-8x7b, llama3-70b, llama3-8b, gemma-7b, and more.
+    Mixtral/Llama-3.1/Llama-3.3 model IDs have since been decommissioned by
+    Groq (confirmed live: 404 model_not_found as of 2026-09) — current
+    default is openai/gpt-oss-20b, verified reachable against a real key.
     """
 
-    def __init__(self, api_key: str, model: str = "mixtral-8x7b-32768", base_url: str = "https://api.groq.com/openai/v1"):
+    def __init__(self, api_key: str, model: str = "openai/gpt-oss-20b", base_url: str = "https://api.groq.com/openai/v1"):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url

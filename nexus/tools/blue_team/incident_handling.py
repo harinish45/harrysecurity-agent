@@ -2,48 +2,50 @@
 """
 NEXUS-STRIKE — blue_team tool: Incident Handling
 Domain: blue_team
+
+Incident handling coordinates an already-open response using its ticket/
+playbook and the evidence collected so far — it does not discover an
+incident by probing a target. This previously did a DNS resolve on
+`target` and checked a handful of HTTP security response headers, calling
+that "incident handling" — unrelated to any incident — caught during this
+session's audit. There is no network-observable substitute for handling
+input: a bare target has no ticket, playbook, or evidence bundle attached
+to it. Now it honestly reports STATUS_OUT_OF_SCOPE instead of fabricating
+a handling result from an unrelated HTTP header check.
 """
-from nexus.foundation.net import safe_urlopen
+from nexus.foundation.schema import STATUS_OUT_OF_SCOPE, tool_result
 from nexus.tools.registry import tool_registry
 
 
 def run(target: str, **kwargs) -> dict:
     """blue_team tool: Incident Handling"""
-    findings = []
-    try:
-        import socket
-        import urllib.request
-        # Check if target is reachable
-        try:
-            ip = socket.gethostbyname(target)
-            findings.append(f"Target {target} -> {ip}")
-        except:
-            findings.append(f"DNS resolution failed for {target}")
-        # Check for security headers
-        url = f"http://{target}/"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = safe_urlopen(req, timeout=5)
-            headers = dict(resp.headers)
-            for h in ["X-Frame-Options", "X-Content-Type-Options", "Strict-Transport-Security", "Content-Security-Policy"]:
-                if h in headers:
-                    findings.append(f"{h}: {headers[h]}")
-                else:
-                    findings.append(f"{h}: MISSING")
-        except Exception as e:
-            findings.append(f"HTTP check: {str(e)[:60]}")
-    except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "blue_team.incident_handling", "domain": "blue_team", "target": target, "status": "completed", "findings": findings}
+    return tool_result(
+        "blue_team.incident_handling", target,
+        status=STATUS_OUT_OF_SCOPE,
+        summary=f"Handling an incident touching {target} requires the incident ticket/"
+                f"playbook and the evidence bundle collected so far — incident handling "
+                f"coordinates an existing response, it doesn't discover one by probing a "
+                f"target",
+        error="requires_case_data: no incident ticket/playbook or evidence bundle supplied",
+        metadata={
+            "requires": [
+                "incident ticket/playbook reference",
+                "evidence collected so far",
+                "current containment status",
+            ],
+        },
+    )
 
 
 # Register with tool registry
 tool_registry.register("blue_team.incident_handling", run, metadata={
     "name": "blue_team.incident_handling",
     "domain": "blue_team",
-    "status": "completed",
-    "description": "blue_team tool: Incident Handling",
+    "status": "out_of_scope",
+    "description": "blue_team tool: incident handling requires an open ticket/playbook and "
+                    "evidence bundle — honestly reports STATUS_OUT_OF_SCOPE for a bare network "
+                    "target instead of fabricating a handling result",
     "parameters": {
-        "target": "Target domain, IP, or URL",
+        "target": "Target domain, IP, or URL (not used — this tool requires case data, see description)",
     },
 })

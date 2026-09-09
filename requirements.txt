@@ -9,6 +9,7 @@ pyyaml>=6.0.1
 boto3>=1.34.0
 botocore>=1.34.0
 dnspython>=2.4.0
+ldap3>=2.9  # real LDAP SPN enumeration in nexus/tools/active_directory/kerberoast.py
 beautifulsoup4>=4.12.0
 weasyprint>=60.0
 xhtml2pdf>=0.2.11
@@ -22,6 +23,9 @@ jinja2>=3.1.0
 bcrypt>=4.0
 pyotp>=2.9
 cryptography>=45.0
+
+# Cross-platform process resource-limit enforcement (nexus/tools/sandbox.py)
+psutil>=5.9
 
 # Report visualizations / graph algorithms (nexus/reporting/visualizations,
 # nexus/advanced/threat_modeling.py, nexus/orchestration/decision/attack_chain.py,

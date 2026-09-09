@@ -22,10 +22,8 @@ if sys.platform == "win32":
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.tree import Tree
 from rich import box
 from nexus.foundation.config import config
-from nexus.foundation.logging import logger
 from nexus.tools.registry import tool_registry
 from nexus.agents.agent_registry import list_agents, get_agent_count
 from nexus.intelligence.llm.router import LLMRouter
@@ -54,9 +52,10 @@ def run(
                                   help="Mission objective: full_assessment, quick_scan, vuln_scan, osint"),
     provider: str = typer.Option(None, "--provider", "-p",
                                  help="LLM provider: openai, anthropic, openrouter, ollama, groq, deepseek, omniroute, custom"),
+    resume: bool = typer.Option(False, "--resume", help="Resume mission <mission> from its last checkpoint instead of re-planning from scratch"),
 ):
     """🚀 Launch a security assessment mission."""
-    result = _launch_mission(target, engagement, mode, mission, objective, provider)
+    result = _launch_mission(target, engagement, mode, mission, objective, provider, resume=resume)
     _display_mission_result(result, target, mode, objective, mission)
 
 
@@ -87,6 +86,7 @@ def _launch_mission(
     objective: str,
     provider: str | None,
     allowed_domains: list[str] | None = None,
+    resume: bool = False,
 ) -> dict:
     """Shared mission-launch path for `nexus run` and every mode command
     (`nexus pentest`/`bounty`/`ctf`/`redteam`/`blueteam`/`compliance assess`)
@@ -94,8 +94,9 @@ def _launch_mission(
     `allowed_domains` differ per mode."""
     engagement_record = _resolve_engagement(engagement, target)
 
+    from nexus import __version__ as _nexus_version
     console.print(Panel.fit(
-        "🏴‍☠️ [bold green]NEXUS-STRIKE[/] v0.1.0 — Ultimate AI-Powered Cybersecurity Platform",
+        f"🏴‍☠️ [bold green]NEXUS-STRIKE[/] v{_nexus_version} — Ultimate AI-Powered Cybersecurity Platform",
         style="bold green",
     ))
 
@@ -117,6 +118,7 @@ def _launch_mission(
             objective=objective,
             engagement=engagement_record,
             allowed_domains=allowed_domains,
+            resume=resume,
         )
 
     return asyncio.run(_run())
@@ -140,7 +142,13 @@ def _display_mission_result(result: dict, target: str, mode: str, objective: str
         console.print(f"[bold]Overall risk score:[/] {quality['overall_risk_score']}/10")
     verification = result.get("verification_summary") or {}
     if verification:
-        console.print(f"[bold]Verification:[/] " + ", ".join(f"{k}={v}" for k, v in verification.items()))
+        console.print("[bold]Verification:[/] " + ", ".join(f"{k}={v}" for k, v in verification.items()))
+    hitl = result.get("hitl_summary") or {}
+    if hitl.get("review_items"):
+        console.print(f"[bold]Human review queued:[/] {hitl['review_items']} finding(s) -> {hitl.get('path')}")
+    next_steps = result.get("next_step_recommendation") or []
+    if next_steps:
+        console.print(f"[bold]Recommended next domains:[/] {', '.join(next_steps)}")
     budget = result.get("budget_report") or {}
     if budget.get("estimated_tokens"):
         console.print(f"[bold]Estimated LLM spend:[/] ~{budget['estimated_tokens']} tokens "
@@ -254,16 +262,51 @@ def blueteam(
 
 @app.command()
 def benchmark(
-    suite: str = typer.Option("intercode_ctf", "--suite", help="intercode_ctf|cybench|nyu_ctf"),
+    suite: str = typer.Option("intercode_ctf", "--suite", help="intercode_ctf|cybench|nyu_ctf|debate_consensus_eval"),
     provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+    latency: bool = typer.Option(False, "--latency", help="Time every registered agent's run() once instead of scoring a suite"),
+    agent: list[str] = typer.Option(None, "--agent", help="With --latency, only time these agent names (repeatable)"),
 ):
-    """📊 Score the agent stack against Cybench/NYU-CTF/InterCode-CTF-style suites."""
+    """📊 Score the agent stack against Cybench/NYU-CTF/InterCode-CTF-style
+    suites, evaluate debate_consensus_agent's precision/recall, or benchmark
+    per-agent execution latency."""
+    if latency:
+        from nexus.benchmarks.agent_eval import benchmark_agent_latency
+
+        console.print(f"[cyan]Timing {'selected' if agent else 'all registered'} agents...[/]")
+        summary = asyncio.run(benchmark_agent_latency(agent or None))
+        table = Table(title=f"Agent Latency Benchmark ({summary['agent_count']} agents)", box=box.ROUNDED)
+        table.add_column("Agent", style="cyan")
+        table.add_column("Latency (ms)", style="green")
+        table.add_column("Status", style="yellow")
+        for row in summary["results"]:
+            table.add_row(row["agent"], f"{row['latency_ms']}" if row["latency_ms"] is not None else "—", row["status"])
+        console.print(table)
+        console.print("[dim]Appended to benchmarks/latency_history.jsonl.[/]")
+        return
+
+    if suite == "debate_consensus_eval":
+        from nexus.benchmarks.agent_eval import evaluate_debate_consensus
+        from nexus.intelligence.llm.router import LLMRouter as _Router
+
+        console.print("[cyan]Evaluating debate_consensus_agent precision/recall against labeled cases...[/]")
+        summary = asyncio.run(evaluate_debate_consensus(_Router(provider=provider)))
+        table = Table(title=f"debate_consensus_agent — precision {summary['precision']:.2f}, "
+                            f"recall {summary['recall']:.2f}, F1 {summary['f1']:.2f}", box=box.ROUNDED)
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        for key in ("total_cases", "tp", "fp", "fn", "tn", "abstained"):
+            table.add_row(key, str(summary[key]))
+        console.print(table)
+        console.print("[dim]Appended to benchmarks/debate_eval_history.jsonl.[/]")
+        return
+
     from nexus.benchmarks.runner import BenchmarkRunner
     from nexus.benchmarks.suites import SUITES
 
     suite_cls = SUITES.get(suite)
     if not suite_cls:
-        console.print(f"[red]Unknown suite '{suite}'. Available: {', '.join(sorted(SUITES))}[/]")
+        console.print(f"[red]Unknown suite '{suite}'. Available: {', '.join(sorted(SUITES))}, debate_consensus_eval[/]")
         raise typer.Exit(1)
 
     router = LLMRouter(provider=provider)
@@ -282,7 +325,7 @@ def benchmark(
     for category, bucket in summary.get("by_category", {}).items():
         table.add_row(category, f"{bucket['correct']}/{bucket['total']} ({bucket['score'] * 100:.1f}%)")
     console.print(table)
-    console.print(f"[dim]Appended to benchmarks/history.jsonl for score-over-time tracking.[/]")
+    console.print("[dim]Appended to benchmarks/history.jsonl for score-over-time tracking.[/]")
 
 
 @app.command()
@@ -370,7 +413,6 @@ def preflight(
     """Check whether this host is ready for an authorised assessment."""
     import importlib.util
     from urllib.parse import urlparse
-    import urllib.request
 
     checks = []
     for dependency in ("httpx", "fastapi", "pydantic", "yaml"):
@@ -425,12 +467,15 @@ def export_report(
     findings = payload.get("findings", payload) if isinstance(payload, dict) else payload
     if not isinstance(findings, list):
         raise typer.BadParameter("Input must be a JSON findings array or an object with a findings array")
+    from nexus.reporting.exporters.base import ReportExporter
     from nexus.reporting.exporters.csv_export import CsvExport
     from nexus.reporting.exporters.html_export import HtmlExport
     from nexus.reporting.exporters.json_export import JsonExport
     from nexus.reporting.exporters.sarif_export import SarifExport
 
-    exporters = {"json": JsonExport(), "csv": CsvExport(), "html": HtmlExport(), "sarif": SarifExport()}
+    exporters: dict[str, ReportExporter] = {
+        "json": JsonExport(), "csv": CsvExport(), "html": HtmlExport(), "sarif": SarifExport(),
+    }
     selected = exporters.get(format.lower())
     if selected is None:
         raise typer.BadParameter("format must be one of: json, csv, html, sarif")
@@ -510,6 +555,25 @@ def providers():
     table.add_column("Status", style="green")
     table.add_column("Model", style="yellow")
     table.add_column("Configured", style="white")
+    table.add_column("Cost", style="magenta")
+
+    # Real cost classification, not marketing copy — verified against each provider's
+    # published pricing (checked 2026-09): "free" = genuinely $0 with no usage cap that
+    # forces payment (Ollama runs locally; you're paying your own electricity, not them).
+    # "free tier" = $0 up to a real rate/quota limit, then requires payment to go further.
+    # "paid" = no usable free tier for this platform's workload.
+    _PROVIDER_COST = {
+        "openai": "🔴 Paid only",
+        "anthropic": "🔴 Paid only",
+        "openrouter": "🟢 Free tier (:free models, 20 req/min)",
+        "ollama": "🟢 Free (local, no key, unlimited)",
+        "nvidia": "🟢 Free tier (NIM free credits)",
+        "azure": "🔴 Paid only",
+        "groq": "🟢 Free tier (30 req/min, no card needed)",
+        "deepseek": "🟡 Very low cost (not free)",
+        "omniroute": "🟢 Free tier (per dashboard quota)",
+        "custom": "❓ Depends on your endpoint",
+    }
 
     all_providers = [
         ("openai", "OpenAI", config.openai_api_key is not None),
@@ -527,12 +591,20 @@ def providers():
     for key, name, configured in all_providers:
         status = "🟢 Active" if key == info["active_provider"] else ("🔵 Available" if configured else "⚪ Not configured")
         model = getattr(config, f"{key}_model", "N/A")
-        table.add_row(name, status, model, "✅" if configured else "❌")
+        table.add_row(name, status, model, "✅" if configured else "❌", _PROVIDER_COST.get(key, "❓"))
 
     console.print(table)
     console.print(f"\n[bold]Active Provider:[/] [cyan]{info['active_provider']}[/]")
+    active_cost = _PROVIDER_COST.get(info["active_provider"], "❓")
+    if "Paid" in active_cost:
+        console.print(
+            f"[yellow]⚠ Your active provider ({info['active_provider']}) has no free tier.[/] "
+            "Run [cyan]nexus providers[/] to compare, or set LLM_PROVIDER=ollama / groq / "
+            "openrouter / nvidia in .env for $0 operation. See README.md → "
+            "'Running nexus-strike for free'."
+        )
     console.print(f"[bold]Active Model:[/] [cyan]{info['model']}[/]")
-    console.print(f"\n[dim]Set [bold]LLM_PROVIDER=<name>[/] in .env to change the active provider[/]")
+    console.print("\n[dim]Set [bold]LLM_PROVIDER=<name>[/] in .env to change the active provider[/]")
 
 
 @app.command()
@@ -615,10 +687,13 @@ def verify():
 @app.command()
 def version():
     """📦 Show version information."""
+    from nexus import __version__ as _nexus_version
+
     console.print(Panel.fit(
-        "[bold green]NEXUS-STRIKE[/] v1.0.0\n"
+        f"[bold green]NEXUS-STRIKE[/] v{_nexus_version}\n"
         "[dim]The Ultimate AI-Powered Cybersecurity Platform[/]\n\n"
-        "29 security domains | 270+ tools | 50 agents | 6 patterns | 10 LLM providers",
+        f"29 security domains | {tool_registry.count}+ tools | {get_agent_count()} agents | "
+        "6 patterns | 10 LLM providers",
         style="bold",
     ))
 
@@ -687,8 +762,8 @@ def skills(
             if skill.name not in seen:
                 table.add_row(skill.name, skill.category, skill.description[:70])
         console.print(table)
-        console.print(f"\n[dim]Run [bold]nexus skills show <name>[/] for details | "
-                      f"[bold]nexus skills run <name> --target <host>[/] to invoke[/]")
+        console.print("\n[dim]Run [bold]nexus skills show <name>[/] for details | "
+                      "[bold]nexus skills run <name> --target <host>[/] to invoke[/]")
 
     elif action_lower == "show":
         if not name:

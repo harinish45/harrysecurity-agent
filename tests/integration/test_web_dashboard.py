@@ -88,6 +88,192 @@ def test_api_report_not_found(client):
     assert response.status_code == 404
 
 
+@pytest.fixture
+def latest_report(tmp_path, monkeypatch):
+    """Redirect REPORTS_DIR to an isolated tmp_path holding one synthetic
+    JSON report — the source the mission-analysis endpoints below (MITRE
+    coverage, attack graph, report-tone preview) read from."""
+    import web.server as server_module
+
+    monkeypatch.setattr(server_module, "REPORTS_DIR", tmp_path)
+    report = {
+        "_meta": {"target": "example.com"},
+        "findings": [
+            {"id": "F-1", "title": "SQL Injection", "severity": "critical", "affected_asset": "host-a",
+             "tool": "webapp.sqli_scan", "evidence": "quote in param", "remediation": "parameterize queries",
+             "mitre_techniques": [{"id": "T1190", "name": "Exploit Public-Facing Application"}]},
+            {"id": "F-2", "title": "Open port", "severity": "low", "affected_asset": "host-b",
+             "tool": "network.port_scan"},
+        ],
+    }
+    import json as _json
+    (tmp_path / "mission.json").write_text(_json.dumps(report), encoding="utf-8")
+    return tmp_path
+
+
+def test_api_mitre_coverage_endpoint(client, latest_report):
+    response = client.get("/api/mitre-coverage")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["target"] == "example.com"
+    assert data["techniques"] == [{"id": "T1190", "name": "Exploit Public-Facing Application",
+                                    "count": 1, "max_severity": "critical"}]
+
+
+def test_api_mitre_coverage_empty_when_no_reports(client, tmp_path, monkeypatch):
+    import web.server as server_module
+    monkeypatch.setattr(server_module, "REPORTS_DIR", tmp_path / "does-not-exist")
+    response = client.get("/api/mitre-coverage")
+    assert response.status_code == 200
+    assert response.json()["techniques"] == []
+
+
+def test_api_attack_graph_endpoint(client, latest_report):
+    response = client.get("/api/attack-graph")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["target"] == "example.com"
+    assert "<svg" in data["svg"]
+    assert data["finding_count"] == 2
+
+
+def test_api_report_tone_endpoint(client, latest_report):
+    response = client.get("/api/report-tone", params={"mode": "bounty"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mode"] == "bounty"
+    assert "# Bounty Report" in data["report"]
+
+
+def test_api_budget_endpoint_with_no_active_mission(client):
+    response = client.get("/api/budget")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mission_id"] is None
+    assert data["estimated_tokens"] == 0
+
+
+def test_api_budget_endpoint_reports_a_named_mission(client):
+    from nexus.foundation.guardrails.budget_guard import BudgetGuard
+
+    BudgetGuard.reset("dash-test-mission")
+    BudgetGuard.record("dash-test-mission", "x" * 400)
+    response = client.get("/api/budget", params={"mission_id": "dash-test-mission"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["estimated_tokens"] == 100
+    BudgetGuard.reset("dash-test-mission")
+
+
+def test_api_budget_prefers_live_subprocess_snapshot_over_local_budget_guard(client, monkeypatch):
+    """Regression test: mission-mode scans run in a separate subprocess with
+    their own in-memory BudgetGuard — this server process's BudgetGuard is
+    never touched by them, so /api/budget always read 0 for an active
+    mission-mode scan. `_stream_output` now captures each `budget_update`
+    NEXUS-EVENT into `_active_scan["budget"]`; the endpoint must prefer that
+    live snapshot over its own (empty) local BudgetGuard for the active
+    mission."""
+    import web.server as server_module
+    from nexus.foundation.guardrails.budget_guard import BudgetGuard
+
+    # This process's own BudgetGuard knows nothing about this mission —
+    # simulating the real cross-process gap.
+    BudgetGuard.reset("dashboard-pentest-123")
+
+    monkeypatch.setattr(server_module, "_active_scan", {
+        "process": None, "target": "example.com", "status": "running", "mode": "pentest",
+        "mission_id": "dashboard-pentest-123",
+        "budget": {"mission_id": "dashboard-pentest-123", "calls": 3, "estimated_tokens": 4200, "estimated_usd": 0.042},
+    })
+
+    response = client.get("/api/budget", params={"mission_id": "dashboard-pentest-123"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["estimated_tokens"] == 4200  # from the captured subprocess snapshot, not the local (empty) BudgetGuard
+    assert data["calls"] == 3
+
+
+def test_api_benchmarks_endpoint_empty_when_no_history(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    response = client.get("/api/benchmarks")
+    assert response.status_code == 200
+    assert response.json() == {"runs": [], "total": 0}
+
+
+def test_api_benchmarks_latency_endpoint_reads_history(client, tmp_path, monkeypatch):
+    import json as _json
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "benchmarks").mkdir()
+    run_1 = {"run_at": "2026-01-01T00:00:00Z", "agent_count": 2,
+             "results": [{"agent": "slow_agent", "status": "completed", "latency_ms": 120.5},
+                         {"agent": "fast_agent", "status": "completed", "latency_ms": 3.2}]}
+    run_2 = {"run_at": "2026-01-02T00:00:00Z", "agent_count": 1,
+             "results": [{"agent": "only_agent", "status": "completed", "latency_ms": 9.9}]}
+    with (tmp_path / "benchmarks" / "latency_history.jsonl").open("w", encoding="utf-8") as fh:
+        fh.write(_json.dumps(run_1) + "\n")
+        fh.write(_json.dumps(run_2) + "\n")
+
+    response = client.get("/api/benchmarks/latency")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+    # Newest run_at first.
+    assert data["runs"][0]["run_at"] == "2026-01-02T00:00:00Z"
+    assert data["runs"][1]["results"][0]["agent"] == "slow_agent"
+
+
+def test_api_benchmarks_latency_endpoint_empty_when_no_history(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    response = client.get("/api/benchmarks/latency")
+    assert response.status_code == 200
+    assert response.json() == {"runs": [], "total": 0}
+
+
+def test_api_benchmarks_latency_endpoint_tolerates_malformed_lines(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "benchmarks").mkdir()
+    (tmp_path / "benchmarks" / "latency_history.jsonl").write_text(
+        'not json\n{"run_at": "2026-01-01T00:00:00Z", "agent_count": 0, "results": []}\n\n', encoding="utf-8"
+    )
+    response = client.get("/api/benchmarks/latency")
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+
+
+def test_api_benchmarks_debate_eval_endpoint_reads_history(client, tmp_path, monkeypatch):
+    import json as _json
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "benchmarks").mkdir()
+    run = {"suite": "debate_consensus_eval", "run_at": "2026-01-01T00:00:00Z", "total_cases": 6,
+           "tp": 3, "fp": 0, "fn": 0, "tn": 3, "abstained": 0, "precision": 1.0, "recall": 1.0, "f1": 1.0,
+           "predictions": []}
+    (tmp_path / "benchmarks" / "debate_eval_history.jsonl").write_text(_json.dumps(run) + "\n", encoding="utf-8")
+
+    response = client.get("/api/benchmarks/debate-eval")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["runs"][0]["f1"] == 1.0
+
+
+def test_api_benchmarks_debate_eval_endpoint_empty_when_no_history(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    response = client.get("/api/benchmarks/debate-eval")
+    assert response.status_code == 200
+    assert response.json() == {"runs": [], "total": 0}
+
+
+def test_dashboard_has_a_benchmarks_page(client):
+    """The Benchmarks nav item and page must actually exist in the served
+    HTML — same "don't ship a backend-only endpoint" bar as agent/run."""
+    response = client.get("/")
+    assert "nav-benchmarks" in response.text
+    assert "page-benchmarks" in response.text
+    assert "benchmarkScoreChart" in response.text
+
+
 def test_dashboard_has_a_frontend_for_agent_run(client):
     """/api/agent/run existed with zero frontend until now — the Pentests
     page must actually offer a way to reach it."""

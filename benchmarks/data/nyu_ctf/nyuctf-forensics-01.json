@@ -1,0 +1,6 @@
+{
+  "id": "nyuctf-forensics-01",
+  "category": "forensics",
+  "prompt": "A memory-forensics analyst runs Volatility's `malfind` plugin against a Windows memory image and finds a process with a memory region marked `PAGE_EXECUTE_READWRITE` that is not backed by any file on disk or loaded module. Name the single technique category this finding is the classic forensic indicator of (a short phrase).",
+  "answer_pattern": "inject"
+}

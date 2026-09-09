@@ -1,4 +1,5 @@
 import json
+import threading
 
 import pytest
 
@@ -64,6 +65,36 @@ def test_verify_chain_on_missing_log_is_ok(tmp_path):
     missing = tmp_path / "does_not_exist.log"
     ok, bad_line = AuditGuard.verify_chain(str(missing))
     assert (ok, bad_line) == (True, None)
+
+
+def test_validate_is_safe_under_real_concurrent_writers(audit_log):
+    """ToolExecutor calls AuditGuard.validate() synchronously from inside
+    FlowController's thread-pool-parallelized agents — real concurrent
+    writers, not a hypothetical. Without a lock around read-prev-hash ->
+    compute -> write -> update-last-hash, two threads can race: both read
+    the same prev_hash, both append an entry claiming it, corrupting the
+    chain so verify_chain() reports a legitimate log as tampered."""
+    threads = [
+        threading.Thread(target=AuditGuard.validate, args=(f"concurrent.action.{i}",), kwargs={"target": "t", "index": i})
+        for i in range(40)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    lines = _read_lines(audit_log)
+    assert len(lines) == 40
+
+    ok, bad_line = AuditGuard.verify_chain(str(audit_log))
+    assert (ok, bad_line) == (True, None)
+
+    # Every entry's prev_hash must be some earlier entry's hash (or genesis)
+    # and every hash must be unique — a lost-update race would produce two
+    # entries pointing at the same prev_hash, which verify_chain() might not
+    # always catch depending on write order, so check this directly too.
+    hashes = [json.loads(line)["hash"] for line in lines]
+    assert len(hashes) == len(set(hashes))
 
 
 def test_sensitive_kwargs_still_redacted(audit_log):

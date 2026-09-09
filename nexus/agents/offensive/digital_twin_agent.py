@@ -45,6 +45,20 @@ class DigitalTwinAgent(BaseAgent):
                 summary="Digital-twin rehearsal needs a fingerprinted image and a check_command to run against it",
                 error="missing 'image' or 'check_command'",
             )
+        if isinstance(check_command, (str, bytes)) or not isinstance(check_command, (list, tuple)):
+            # subprocess.run(check_command, shell=False, ...) below requires a
+            # list/tuple of args, matching every other subprocess.run() call in
+            # this codebase (installer_agent.py, pdf_export.py, sandbox.py,
+            # wpa_test.py) — none of them pass a shell string. A plain string
+            # here would make Python try to execute a program literally named
+            # after the whole string and fail with a cryptic OS error instead
+            # of this clear one.
+            return tool_result(
+                self.name, target or "unknown",
+                status=STATUS_UNAVAILABLE,
+                summary="check_command must be a list of args (e.g. ['curl', '-s', 'http://twin:8080/']), not a shell string",
+                error=f"check_command has unsupported type {type(check_command).__name__}",
+            )
 
         container_name = f"nexus-twin-{uuid.uuid4().hex[:8]}"
         try:
@@ -53,6 +67,17 @@ class DigitalTwinAgent(BaseAgent):
                 capture_output=True, timeout=_DEFAULT_TIMEOUT, check=True,
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            # A CalledProcessError means `docker run` genuinely failed (nonzero
+            # exit) — no container exists, nothing to clean up. A
+            # TimeoutExpired is more ambiguous: the container may have started
+            # server-side even though the client-side call didn't return in
+            # time, which would leak a running (if `--rm`-flagged) container.
+            # TODO: on timeout specifically, consider a best-effort
+            # `docker rm -f container_name` here too — left as a TODO rather
+            # than guessed at, since it changes this branch's error semantics
+            # (a cleanup call that itself fails/hangs would need its own
+            # handling) and there's no test environment with a live Docker
+            # daemon available to validate the fix against.
             return tool_result(
                 self.name, target or "unknown",
                 status=STATUS_FAILED,

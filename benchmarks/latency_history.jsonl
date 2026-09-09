@@ -1,0 +1,1 @@
+{"run_at": "2026-09-08T13:42:26Z", "agent_count": 3, "results": [{"agent": "mitre_mapping_agent", "status": "completed", "latency_ms": 0.01}, {"agent": "blast_radius_agent", "status": "completed", "latency_ms": 0.01}, {"agent": "verification_agent", "status": "completed", "latency_ms": 0.01}]}
