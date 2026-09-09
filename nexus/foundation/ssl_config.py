@@ -30,9 +30,46 @@ import logging
 import os
 import socket
 import ssl
+import threading
 from urllib.parse import urlparse
 
 logger = logging.getLogger("nexus.ssl_config")
+
+# `ssl.create_default_context()` calls `load_default_certs()`, which on
+# Windows enumerates the OS certificate store (`_load_windows_store_certs`)
+# — a genuinely slow Win32 call, sometimes taking tens of seconds on a
+# machine with a large enterprise cert store. Every one of this codebase's
+# ~280 tools calls `get_ssl_context()` once per HTTP request, and it used to
+# build a brand-new context (paying that cost again) every single time —
+# live-reproduced during a full smoke-test run: one call took long enough to
+# trip a 60s per-test timeout. `ssl.SSLContext` objects are safely reusable
+# across many separate TLS connections/threads (the same pattern `requests`/
+# `urllib3` already rely on), so build each variant exactly once per process
+# and hand out the cached instance from then on.
+_context_cache: dict[tuple[ssl.Purpose, bool], ssl.SSLContext] = {}
+_context_cache_lock = threading.Lock()
+
+
+def _build_context(purpose: ssl.Purpose, insecure: bool) -> ssl.SSLContext:
+    ctx = ssl.create_default_context(purpose)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    if insecure:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _cached_context(purpose: ssl.Purpose, insecure: bool) -> ssl.SSLContext:
+    key = (purpose, insecure)
+    ctx = _context_cache.get(key)
+    if ctx is not None:
+        return ctx
+    with _context_cache_lock:
+        ctx = _context_cache.get(key)
+        if ctx is None:
+            ctx = _build_context(purpose, insecure)
+            _context_cache[key] = ctx
+    return ctx
 
 
 def _hostname(target: str) -> str:
@@ -88,17 +125,12 @@ def get_ssl_context(
     otherwise this call transparently returns a *secure* context instead and
     logs the downgrade rather than silently doing what was asked.
     """
-    ctx = ssl.create_default_context(purpose)
-    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-
     if not allow_insecure:
-        return ctx
+        return _cached_context(purpose, insecure=False)
 
     if _insecure_allowed(target):
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
         _audit_insecure(target)
-        return ctx
+        return _cached_context(purpose, insecure=True)
 
     logger.warning(
         "Insecure TLS context requested for %r but the target is not in "
@@ -108,7 +140,7 @@ def get_ssl_context(
         "an authorised engagement.",
         target,
     )
-    return ctx
+    return _cached_context(purpose, insecure=False)
 
 
 def _audit_insecure(target: str) -> None:
