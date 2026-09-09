@@ -193,6 +193,116 @@ def test_api_budget_prefers_live_subprocess_snapshot_over_local_budget_guard(cli
     assert data["calls"] == 3
 
 
+def test_stale_budget_update_from_a_superseded_scans_reader_thread_does_not_clobber_active_mission(client, monkeypatch):
+    """Regression test for a race in `_stream_output` (web/server.py):
+    its background reader thread keeps consuming buffered subprocess
+    stdout even after `_active_scan` has moved on to a new mission — e.g.
+    an operator calls POST /api/scan/stop immediately followed by
+    POST /api/scan/start. Unlike the final-status write a few lines below
+    it (`if _active_scan.get("process") is process: ...`), the
+    `budget_update` handler used to write `_active_scan["budget"]`
+    unconditionally, with no check that the event actually belonged to
+    the process/mission `_active_scan` currently tracks.
+
+    This spawns the real `scan_start` route (with `subprocess.Popen`
+    faked out) so it exercises the actual production `_stream_output`
+    thread, not a reimplementation of its logic.
+    """
+    import threading
+    import time
+    import web.server as server_module
+
+    original_active_scan = dict(server_module._active_scan)
+    release_stale_line = threading.Event()
+
+    class FakeOldProcess:
+        pid = 111
+
+        def __init__(self):
+            self._terminated = False
+
+        def poll(self):
+            # Mirrors real life: the OS reports the process as exited
+            # almost immediately after terminate(), well before its
+            # stdout reader thread has necessarily drained every
+            # buffered line.
+            return 0 if self._terminated else None
+
+        def terminate(self):
+            self._terminated = True
+
+        @property
+        def stdout(self):
+            # Blocks here to simulate the reader thread still being
+            # mid-loop, catching up on buffered output, when the new
+            # scan starts below.
+            release_stale_line.wait(timeout=5)
+            yield (
+                'NEXUS-EVENT:{"type": "budget_update", "mission_id": "old-mission", '
+                '"calls": 999, "estimated_tokens": 999999, "estimated_usd": 9.99}'
+            )
+
+        def wait(self):
+            return 0
+
+    class FakeNewProcess:
+        pid = 222
+
+        def poll(self):
+            return None
+
+        @property
+        def stdout(self):
+            return iter([])
+
+        def wait(self):
+            return 0
+
+        def terminate(self):
+            pass
+
+    fake_procs = [FakeOldProcess(), FakeNewProcess()]
+    monkeypatch.setattr(server_module._subprocess, "Popen", lambda *a, **k: fake_procs.pop(0))
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+
+    try:
+        r1 = client.post(
+            "/api/scan/start",
+            json={"target": "127.0.0.1", "mode": "pentest"},
+            headers={"X-Requested-With": "NEXUS-Dashboard"},
+        )
+        assert r1.status_code == 200
+        # _stream_output's thread for the old scan is now alive and
+        # blocked inside FakeOldProcess.stdout, waiting on the Event.
+        old_mission_id = server_module._active_scan.get("mission_id")
+        assert old_mission_id
+
+        client.post("/api/scan/stop", headers={"X-Requested-With": "NEXUS-Dashboard"})
+
+        r2 = client.post(
+            "/api/scan/start",
+            json={"target": "127.0.0.1", "mode": "bounty"},
+            headers={"X-Requested-With": "NEXUS-Dashboard"},
+        )
+        assert r2.status_code == 200
+        new_mission_id = server_module._active_scan.get("mission_id")
+        assert new_mission_id and new_mission_id != old_mission_id
+
+        # Now let the OLD subprocess's reader thread deliver its stale
+        # budget_update line, well after _active_scan has moved on.
+        release_stale_line.set()
+        for _ in range(50):  # give the background thread time to run
+            time.sleep(0.02)
+            if server_module._active_scan.get("budget") is not None:
+                break
+
+        assert server_module._active_scan.get("mission_id") == new_mission_id
+        stale_budget = server_module._active_scan.get("budget")
+        assert stale_budget is None or stale_budget.get("mission_id") != "old-mission"
+    finally:
+        server_module._active_scan = original_active_scan
+
+
 def test_api_benchmarks_endpoint_empty_when_no_history(client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     response = client.get("/api/benchmarks")
@@ -402,6 +512,103 @@ def test_scan_start_rejects_a_real_out_of_scope_ip(client, monkeypatch):
     assert response.status_code == 400
 
 
+@pytest.mark.asyncio
+async def test_concurrent_scan_start_requests_do_not_orphan_a_process(monkeypatch):
+    """Regression test: /api/scan/start did a check-then-act on the shared
+    module-level _active_scan dict with a real `await` (broadcasting to
+    connected WS clients) sitting between the "already running?" check and
+    the point _active_scan is actually populated with the new subprocess
+    handle. Two concurrent POSTs could both pass the check while
+    _active_scan still looked idle/"starting", both call subprocess.Popen,
+    and both overwrite _active_scan — orphaning whichever process lost the
+    race (invisible to /api/scan/status and /api/scan/stop forever after).
+
+    This drives two real concurrent requests through the actual ASGI app
+    (not TestClient's synchronous wrapper) with a WS client stand-in whose
+    send_json() genuinely suspends, exactly like the awaited broadcast in
+    the real bug, to prove the added _active_scan_lock closes the window:
+    exactly one request must reach Popen() and get "started"; the other
+    must see "already_running"."""
+    import asyncio
+
+    import web.server as server_module
+    from nexus.foundation.config import config
+
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+    monkeypatch.setattr(config, "nexus_allowed_targets", "127.0.0.1,localhost")
+    monkeypatch.setattr(server_module, "_active_scan", {"process": None, "target": None, "status": "idle"})
+
+    popen_calls = []
+
+    class FakeProc:
+        def __init__(self):
+            self.pid = 4242
+            self.stdout = iter([])  # no output lines -> reader thread exits immediately
+
+        def poll(self):
+            return None
+
+        def wait(self):
+            return 0
+
+        def terminate(self):
+            pass
+
+    def fake_popen(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return FakeProc()
+
+    monkeypatch.setattr(server_module._subprocess, "Popen", fake_popen)
+
+    class SlowWSClient:
+        """Stands in for a real connected dashboard WS client: send_json()
+        genuinely suspends the coroutine, the same way `await
+        ws.send_json(event)` does for a real socket — this is what turns
+        the broadcast inside scan_start into a real interleaving point."""
+
+        async def send_json(self, event):
+            await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(server_module, "_ws_clients", [SlowWSClient()])
+
+    from httpx import ASGITransport, AsyncClient
+
+    transport = ASGITransport(app=server_module.app)
+    headers = {"X-Requested-With": "NEXUS-Dashboard"}
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        response_a, response_b = await asyncio.gather(
+            ac.post("/api/scan/start", json={"target": "127.0.0.1"}, headers=headers),
+            ac.post("/api/scan/start", json={"target": "127.0.0.1"}, headers=headers),
+        )
+
+    statuses = sorted(r.json()["status"] for r in (response_a, response_b))
+    assert statuses == ["already_running", "started"]
+    # The critical assertion: only the winner of the race ever reaches
+    # Popen() -- before the fix, both requests spawned a subprocess and the
+    # loser's process/handle was silently dropped on the floor.
+    assert len(popen_calls) == 1
+
+
+def test_scan_start_rejects_unhashable_mode_with_400(client, monkeypatch):
+    """Regression test: a non-string `mode` (e.g. a JSON array or object)
+    used to blow past the `mode != "live"` check straight into
+    `mode not in _MISSION_MODES` — membership-testing an unhashable value
+    against that set raised an uncaught `TypeError`, turning a malformed
+    request into a generic 500 instead of the clean 400 every other bad
+    `mode`/target path returns. It must now come back as a 400 for both
+    a list and a dict payload."""
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+
+    for bad_mode in [["x"], {}]:
+        response = client.post(
+            "/api/scan/start",
+            json={"target": "127.0.0.1", "mode": bad_mode},
+            headers={"X-Requested-With": "NEXUS-Dashboard"},
+        )
+        assert response.status_code == 400
+        assert "Unknown mode" in response.json()["detail"]
+
+
 def test_production_mode_requires_dashboard_token():
     """NEXUS_ENV=production with no NEXUS_DASHBOARD_TOKEN must refuse to
     start the server at all (a fresh interpreter is required since
@@ -453,6 +660,97 @@ def test_ws_steer_requires_token_when_configured():
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_ws_scan_rejects_oversized_message(client):
+    """Regression test: neither /ws/scan nor /ws/steer used to impose any
+    application-level cap on an incoming message before calling
+    receive_text(), relying entirely on uvicorn's transport-level
+    ws_max_size (never overridden by launch_dashboard()'s uvicorn.run()).
+    A client streaming large frames could drive server memory up with no
+    circuit breaker. The handler must now reject an over-cap message by
+    closing the connection instead of echoing it back."""
+    from web.server import MAX_WS_MESSAGE_BYTES
+
+    oversized = "x" * (MAX_WS_MESSAGE_BYTES + 1)
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.receive_json()  # initial status message sent on connect
+        ws.send_text(oversized)
+        # The server must close the connection rather than ack the
+        # oversized payload back to the client.
+        with pytest.raises(Exception):
+            ws.receive_json()
+
+
+def test_ws_steer_rejects_oversized_message(client):
+    """Same cap, enforced on /ws/steer."""
+    from web.server import MAX_WS_MESSAGE_BYTES
+
+    oversized = "x" * (MAX_WS_MESSAGE_BYTES + 1)
+    with client.websocket_connect("/ws/steer") as ws:
+        ws.send_text(oversized)
+        with pytest.raises(Exception):
+            ws.receive_text()
+
+
+def test_ws_scan_acks_message_within_cap(client):
+    """Sanity check: a normal, within-cap message still gets echoed back
+    as before — the cap must not reject legitimate traffic."""
+    with client.websocket_connect("/ws/scan") as ws:
+        ws.receive_json()  # initial status message sent on connect
+        ws.send_text("hello")
+        response = ws.receive_json()
+        assert response == {"type": "ack", "message": "hello"}
+
+
+def test_ws_scan_enforces_max_connections(monkeypatch):
+    """/ws/scan used to accept an unbounded number of concurrent
+    connections — no cap in the handler and no `limit_concurrency` on
+    uvicorn.run(). Any client that can reach the port (the no-token dev
+    default) could open thousands of connections in a loop, each holding
+    an OS socket fd + asyncio task, exhausting the server's fd limit and
+    taking the whole dashboard down (EMFILE) for everyone else. A
+    connection beyond WS_MAX_CONNECTIONS must now be rejected before being
+    accepted, and accepted clients must still be tracked correctly."""
+    import web.server as server
+
+    monkeypatch.setattr(server, "WS_MAX_CONNECTIONS", 2)
+    monkeypatch.setattr(server, "_ws_clients", [])
+    client = TestClient(server.app)
+
+    with client.websocket_connect("/ws/scan") as ws1:
+        ws1.receive_json()  # initial status message
+        with client.websocket_connect("/ws/scan") as ws2:
+            ws2.receive_json()
+            assert len(server._ws_clients) == 2
+
+            # A third connection is over the cap and must be refused.
+            with pytest.raises(Exception):
+                with client.websocket_connect("/ws/scan") as ws3:
+                    ws3.receive_json()
+
+            # The rejected connection must not have been counted, and the
+            # two legitimately-accepted clients must remain intact.
+            assert len(server._ws_clients) == 2
+
+
+def test_ws_steer_enforces_max_connections(monkeypatch):
+    """/ws/steer has no client list to broadcast through, but it must
+    still be capped independently — otherwise it's an uncapped second
+    attack surface for the same fd-exhaustion DoS as /ws/scan."""
+    import web.server as server
+
+    monkeypatch.setattr(server, "WS_MAX_CONNECTIONS", 1)
+    monkeypatch.setattr(server, "_ws_steer_count", 0)
+    client = TestClient(server.app)
+
+    with client.websocket_connect("/ws/steer"):
+        assert server._ws_steer_count == 1
+        with pytest.raises(Exception):
+            with client.websocket_connect("/ws/steer"):
+                pass
+        # the rejected attempt must not have incremented the counter
+        assert server._ws_steer_count == 1
 
 
 # ── Per-user login / RBAC (nexus/foundation/auth.py wired into the API) ──
@@ -685,6 +983,82 @@ def test_agent_run_reaches_orchestrator_tier_agents(client, monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["agent"] == "task_planner_agent"
+
+
+# ── Request body size cap (unauthenticated-DoS hardening) ───────────────
+
+def test_oversized_body_rejected_before_auth_check(client):
+    """A large JSON body posted to a `payload: dict` route with NO
+    Authorization header at all must be rejected with 413 by the body-size
+    cap, not parsed first and then hit the (unrelated) auth/CSRF checks.
+    Regression test for: FastAPI resolves `payload: dict` via dependency
+    injection before the route body — and therefore before
+    `_require_token()` — ever runs, so an unauthenticated caller could
+    previously force the server to buffer/decode an arbitrarily large body
+    in memory before any check rejected it."""
+    huge = "x" * (3 * 1024 * 1024)  # 3 MiB, over the 2 MiB default cap
+    response = client.post("/api/scan/start", json={"target": huge})
+    assert response.status_code == 413
+    assert "too large" in response.json()["detail"].lower()
+
+
+def test_oversized_body_rejected_on_every_payload_route(client):
+    """Same cap applies to every `payload: dict` route, not just one."""
+    huge_payload = {"x": "y" * (3 * 1024 * 1024)}
+    for path in ("/api/auth/login", "/api/config", "/api/scan/start", "/api/agent/run"):
+        response = client.post(path, json=huge_payload)
+        assert response.status_code == 413, f"{path} did not enforce the body-size cap"
+
+
+def test_small_body_still_reaches_the_normal_csrf_check(client):
+    """Sanity check the cap isn't overly aggressive: a small, legitimate
+    body must NOT be rejected by the size limit — it should proceed to the
+    route's own checks (here, the CSRF header check) exactly as before."""
+    response = client.post("/api/scan/start", json={"target": "127.0.0.1"})
+    assert response.status_code == 403
+    assert "X-Requested-With" in response.json()["detail"]
+
+
+def test_max_body_size_middleware_enforces_cap_without_content_length():
+    """Direct ASGI-level test of the streaming enforcement path: a request
+    with no Content-Length header at all (e.g. chunked transfer) must still
+    be capped as the body streams in, not just when Content-Length is
+    present and honest."""
+    import anyio
+    from web.middleware import MaxBodySizeMiddleware
+
+    async def downstream_app(scope, receive, send):
+        # Drain the body exactly like Starlette's request.body() would.
+        while True:
+            message = await receive()
+            if not message.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    middleware = MaxBodySizeMiddleware(downstream_app, max_body_size=10)
+
+    scope = {"type": "http", "headers": []}  # no content-length header
+    chunks = [b"a" * 5, b"b" * 5, b"c" * 5]  # 15 bytes total, over the 10-byte cap
+
+    async def receive():
+        if chunks:
+            body = chunks.pop(0)
+            return {"type": "http.request", "body": body, "more_body": bool(chunks)}
+        return {"type": "http.disconnect"}
+
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    async def run():
+        await middleware(scope, receive, send)
+
+    anyio.run(run)
+
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 413
 
 
 def test_viewer_role_cannot_run_an_agent(client, isolated_auth_vault):

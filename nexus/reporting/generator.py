@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timezone
+import html
 from pathlib import Path
 import re
 from typing import Any, Iterable
@@ -147,7 +148,8 @@ class ReportGenerator:
         technique_findings: dict[str, list[str]] = {}
         for item in normalised:
             for t in item.get("mitre_techniques") or []:
-                technique_findings.setdefault(f"{t.get('id', '?')} — {t.get('name', '')}", []).append(item.get("id", ""))
+                key = f"{self._escape(t.get('id', '?'))} — {self._escape(t.get('name', ''))}"
+                technique_findings.setdefault(key, []).append(item.get("id", ""))
         if technique_findings:
             lines.extend([section_heading("MITRE ATT&CK coverage"), ""])
             for technique, ids in sorted(technique_findings.items()):
@@ -159,8 +161,9 @@ class ReportGenerator:
         if chain_findings:
             lines.extend([section_heading("Attack chains"), ""])
             for chain in chain_findings:
+                escaped_assets = [self._escape(a) for a in chain.get("chain_assets", [])]
                 lines.append(f"- **{chain.get('id')}** ({chain.get('severity', 'info').upper()}): "
-                             f"{' -> '.join(chain.get('chain_assets', []))}")
+                             f"{' -> '.join(escaped_assets)}")
             lines.append("")
 
         lines.extend([
@@ -196,10 +199,13 @@ class ReportGenerator:
                 if verification_status:
                     lines.append(f"**Verification:** `{verification_status}` — {item.get('verification_detail', '')}")
                 if mitre_techniques:
-                    tags = ", ".join(f"[{t.get('id')}]({t.get('url', '')}) {t.get('name', '')}" for t in mitre_techniques)
+                    tags = ", ".join(
+                        f"[{self._escape(t.get('id'))}]({self._escape(t.get('url', ''))}) {self._escape(t.get('name', ''))}"
+                        for t in mitre_techniques
+                    )
                     lines.append(f"**MITRE ATT&CK:** {tags}")
                 if business_impact:
-                    lines.append(f"**Business impact:** {business_impact}")
+                    lines.append(f"**Business impact:** {self._escape(business_impact)}")
                 lines.append("")
                 if evidence:
                     lines.extend(["**Evidence:**", "", "```", evidence, "```", ""])
@@ -242,6 +248,18 @@ class ReportGenerator:
     def normalize_findings(self, findings: Iterable[Any]) -> list[dict[str, str]]:
         """Convert tool output into the common report/export finding schema."""
         return normalize_findings(list(findings))
+
+    @staticmethod
+    def _escape(value: Any) -> str:
+        """HTML-escape untrusted finding text before it is embedded in the
+        Markdown report. This is a plain-text/Markdown emitter with no HTML
+        renderer in this repo, but attacker-controlled fields (asset names in
+        attack chains, MITRE technique id/name/url, business_impact) would
+        become a live XSS if the .md is ever opened in an HTML-capable
+        Markdown viewer, so they are escaped defensively."""
+        if value is None:
+            return ""
+        return html.escape(str(value), quote=True)
 
     @staticmethod
     def _compute_risk_score(normalised: list[dict]) -> float:

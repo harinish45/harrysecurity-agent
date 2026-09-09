@@ -226,8 +226,8 @@ class HtmlExport:
             sev = f.get("severity", "info")
             verification = f.get("verification_status")
             verification_badge = (
-                f'<span class="badge badge-{verification}" title="{escape(f.get("verification_detail", ""))}">'
-                f'{verification.replace("_", " ")}</span>'
+                f'<span class="badge badge-{escape(verification, quote=True)}" title="{escape(f.get("verification_detail", ""))}">'
+                f'{escape(verification.replace("_", " "))}</span>'
                 if verification else ""
             )
             mitre_chips = "".join(

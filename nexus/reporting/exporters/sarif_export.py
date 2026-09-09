@@ -66,6 +66,18 @@ class SarifExport:
                     "evidence": item.get("evidence", ""),
                     "remediation": item.get("remediation", ""),
                     "tool": item.get("tool", ""),
+                    # Populated by the post-processing agents (verification_agent,
+                    # blast_radius_agent, mitre_mapping_agent, attack_chain_agent)
+                    # — carried through so SARIF consumers get the same
+                    # annotation depth as the HTML/Markdown reports (see
+                    # html_export.py's _build_rows/_build_chains and
+                    # generator.py), instead of silently dropping it.
+                    "verificationStatus": item.get("verification_status", ""),
+                    "verificationDetail": item.get("verification_detail", ""),
+                    "businessImpact": item.get("business_impact", ""),
+                    "mitreTechniques": item.get("mitre_techniques") or [],
+                    "kind": item.get("kind", ""),
+                    "chainAssets": item.get("chain_assets") or [],
                 },
             })
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -13,9 +14,24 @@ class AuditGuardError(Exception):
     pass
 
 
+def _restrict(path: str) -> None:
+    """Best-effort 0600 permissions, matching nexus/foundation/secrets.py's
+    vault-file treatment. An audit log that's world-readable/writable
+    undermines the point of a tamper-evident chain regardless of the hash
+    chain itself: anyone on the host could read sensitive audit data, or
+    (though the chain would then fail verification) overwrite entries.
+    Silently ignored on filesystems that don't support POSIX mode bits."""
+    try:
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+
+
 class AuditGuard:
     _log_file = os.environ.get("NEXUS_AUDIT_LOG", os.path.join(os.getcwd(), "nexus_audit.log"))
     _sensitive_terms = ("password", "passwd", "secret", "token", "api_key", "apikey", "credential", "private_key")
+    _max_bytes_env = "NEXUS_AUDIT_LOG_MAX_MB"
+    _default_max_mb = 100
 
     GENESIS_HASH = "0" * 64
 
@@ -74,6 +90,58 @@ class AuditGuard:
         return last_hash
 
     @classmethod
+    def _max_bytes(cls) -> int:
+        try:
+            max_mb = float(os.environ.get(cls._max_bytes_env, cls._default_max_mb))
+        except ValueError:
+            max_mb = cls._default_max_mb
+        return int(max_mb * 1024 * 1024)
+
+    @classmethod
+    def _rotate_if_needed_locked(cls) -> None:
+        """Called with cls._lock already held. Archives the live log file
+        once it crosses the size threshold and starts a fresh chain.
+
+        Each archived segment remains independently verifiable from
+        GENESIS_HASH (verify_chain() needs no cross-file awareness to check
+        any one segment) — rotation does NOT continue the same hash chain
+        across the file boundary, because splicing a chain across a rename
+        the way this method does it can't be made atomic with the OLD
+        file's last real write under this same lock without re-opening and
+        re-hashing it, and a chain that silently spans files is also a
+        chain `verify_chain()` can't check without being told to look
+        elsewhere. Instead, continuity is recorded explicitly: the new
+        segment's very first entry is a real audit event (not a synthetic
+        placeholder) carrying the archived file's name and its real final
+        hash in `kwargs`, so a reader can walk backwards through the
+        archive sequence and confirm segment N+1 correctly cites segment
+        N's true last hash — tamper-evidence across the rotation boundary,
+        without a cross-file chain.
+        """
+        path = cls._log_file
+        try:
+            if not os.path.exists(path) or os.path.getsize(path) < cls._max_bytes():
+                return
+        except OSError:
+            return
+
+        last_hash_of_segment = cls._get_last_hash()
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        archive_path = f"{path}.{timestamp}.archive"
+        try:
+            os.replace(path, archive_path)
+        except OSError as exc:
+            raise AuditGuardError(f"Audit log rotation failed: {exc}") from exc
+        _restrict(archive_path)
+        cls._last_hash = None  # force _get_last_hash() to see the (now-missing) fresh file -> GENESIS_HASH
+        cls._pending_rotation_note = {
+            "rotated_from": os.path.basename(archive_path),
+            "rotated_from_final_hash": last_hash_of_segment,
+        }
+
+    _pending_rotation_note: dict[str, str] | None = None
+
+    @classmethod
     def validate(cls, action: str, target: str | None = None, **kwargs: Any) -> bool:
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -86,12 +154,17 @@ class AuditGuard:
         # and tool calls genuinely execute concurrently across FlowController's
         # thread pool.
         with cls._lock:
+            cls._rotate_if_needed_locked()
+            if cls._pending_rotation_note is not None:
+                entry["kwargs"] = {**entry["kwargs"], **cls._pending_rotation_note}
+                cls._pending_rotation_note = None
             prev_hash = cls._get_last_hash()
             entry["prev_hash"] = prev_hash
             entry["hash"] = cls._compute_hash(prev_hash, entry)
             try:
                 with open(cls._log_file, "a", encoding="utf-8") as file:
                     file.write(json.dumps(entry, sort_keys=True) + "\n")
+                _restrict(cls._log_file)
             except OSError as exc:
                 raise AuditGuardError(f"Audit log write failed: {exc}") from exc
             cls._last_hash = entry["hash"]

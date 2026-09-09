@@ -315,11 +315,34 @@ async def get_tools(request: Request):
 
 
 # ── Scan control state (in-process only, resets on restart) ──────────────────
+import asyncio
 import subprocess as _subprocess
 _active_scan: dict = {"process": None, "target": None, "status": "idle"}
+# Guards the check-then-act sequence in scan_start(): without this, two
+# concurrent POSTs to /api/scan/start can both pass the "already running"
+# check (there's an `await` between the check and the point where
+# _active_scan is actually populated with the new subprocess handle) and
+# both spawn a subprocess, with the loser's process left untracked/orphaned.
+# Must be held across every await in that section so a second request
+# blocks until the first has fully published its new state, then re-checks
+# it — not just around the synchronous read/write.
+_active_scan_lock = asyncio.Lock()
 
 # Connected WebSocket clients for real-time scan progress
 _ws_clients: list[WebSocket] = []
+
+# Cap on concurrent WebSocket connections, enforced separately for /ws/scan
+# and /ws/steer. Without this, any client that can reach the port (trivially
+# true when NEXUS_DASHBOARD_TOKEN is unset, the documented dev default) can
+# open unbounded connections in a loop, each holding an OS socket fd + asyncio
+# task, exhausting the server process's fd limit and taking the whole
+# dashboard down (EMFILE) for everyone else. A valid token only gates who can
+# connect, not how many times, so the cap applies regardless of auth state.
+WS_MAX_CONNECTIONS = int(os.environ.get("NEXUS_WS_MAX_CONNECTIONS", "100"))
+
+# /ws/steer has no client list of its own (it doesn't broadcast), so track
+# just a count for its cap.
+_ws_steer_count = 0
 
 
 async def _broadcast_scan_event(event: dict):
@@ -330,6 +353,21 @@ async def _broadcast_scan_event(event: dict):
         except Exception:
             if ws in _ws_clients:
                 _ws_clients.remove(ws)
+
+
+# Application-level cap on a single incoming WebSocket text frame. This is
+# enforced here rather than relying solely on uvicorn's transport-level
+# ws_max_size: uvicorn's default is 16 MiB and launch_dashboard()'s
+# uvicorn.run() call never overrode it, so an authenticated (or, in the
+# common no-token dev config, any) client could stream near-16MB frames
+# back-to-back — with uvicorn's default ws_max_queue=32 letting up to ~32
+# of them queue per connection — driving memory usage up sharply with no
+# server-side circuit breaker. Checking length here also protects the
+# ASGI test transport (TestClient), which doesn't go through uvicorn's
+# websocket frame parser at all.
+MAX_WS_MESSAGE_BYTES = 65536  # 64 KiB — these endpoints only ever carry
+# small control/ack JSON payloads, never scan output (that's pushed via
+# _ws_clients broadcast, not read from the client).
 
 
 def _websocket_auth_check(websocket: WebSocket, query_params: dict) -> bool:
@@ -351,6 +389,9 @@ async def websocket_scan(websocket: WebSocket):
     if not _websocket_auth_check(websocket, dict(websocket.query_params)):
         await websocket.close(code=4401, reason="Unauthorized")
         return
+    if len(_ws_clients) >= WS_MAX_CONNECTIONS:
+        await websocket.close(code=1013, reason="Too many connections")
+        return
     await websocket.accept()
     _ws_clients.append(websocket)
     try:
@@ -364,6 +405,9 @@ async def websocket_scan(websocket: WebSocket):
         })
         while True:
             data = await websocket.receive_text()
+            if len(data.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
+                await websocket.close(code=1009, reason="Message too big")
+                break
             # Client commands are acknowledged; scan control is via REST API
             await websocket.send_json({"type": "ack", "message": data})
     except Exception:
@@ -382,16 +426,26 @@ async def websocket_steer(websocket: WebSocket):
     rather than removed, since the dashboard JS references it; do not
     build UI features assuming it does anything beyond echo back an ack.
     """
+    global _ws_steer_count
     if not _websocket_auth_check(websocket, dict(websocket.query_params)):
         await websocket.close(code=4401, reason="Unauthorized")
         return
+    if _ws_steer_count >= WS_MAX_CONNECTIONS:
+        await websocket.close(code=1013, reason="Too many connections")
+        return
     await websocket.accept()
+    _ws_steer_count += 1
     try:
         while True:
             data = await websocket.receive_text()
+            if len(data.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
+                await websocket.close(code=1009, reason="Message too big")
+                break
             await websocket.send_text(f"Acknowledged (not yet actioned): {data}")
     except Exception:
         pass
+    finally:
+        _ws_steer_count -= 1
 
 
 def _latest_report_findings() -> tuple[list[dict], dict]:
@@ -623,7 +677,7 @@ async def scan_start(payload: dict, request: Request):
     global _active_scan
     target = payload.get("target", "127.0.0.1")
     mode = payload.get("mode", "live")
-    if mode != "live" and mode not in _MISSION_MODES:
+    if not isinstance(mode, str) or (mode != "live" and mode not in _MISSION_MODES):
         raise HTTPException(status_code=400, detail=f"Unknown mode '{mode}'. Available: live, {', '.join(sorted(_MISSION_MODES))}")
 
     if not os.environ.get("NEXUS_LEGAL_ACK"):
@@ -644,37 +698,53 @@ async def scan_start(payload: dict, request: Request):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Target rejected: {exc}")
 
-    if _active_scan["process"] and _active_scan["process"].poll() is None:
-        return {"status": "already_running", "target": _active_scan["target"]}
+    # Hold the lock across the whole check-then-act sequence, INCLUDING the
+    # `await _broadcast_scan_event(...)` below. Without this, that await is
+    # a suspension point between the "already running?" check and the point
+    # where _active_scan is populated with the new subprocess handle — two
+    # concurrent POSTs could both pass the check while _active_scan still
+    # looked idle/"starting", and both go on to spawn and independently
+    # overwrite _active_scan, orphaning whichever process lost the race
+    # (never visible to /api/scan/status or /api/scan/stop again). Because
+    # this is an asyncio.Lock, a second request that arrives while the first
+    # is inside this block simply awaits its turn instead of racing it, and
+    # then re-runs the same check against the now fully-updated state.
+    async with _active_scan_lock:
+        if _active_scan["process"] and _active_scan["process"].poll() is None:
+            return {"status": "already_running", "target": _active_scan["target"]}
+        if _active_scan.get("status") == "starting":
+            # Another request already claimed the slot and is still in the
+            # middle of spawning its subprocess (process handle not set yet).
+            return {"status": "already_running", "target": _active_scan.get("target")}
 
-    import sys as _sys
-    import time as _time
+        import sys as _sys
+        import time as _time
 
-    # Notify clients that a scan is starting
-    _active_scan = {"process": None, "target": target, "status": "starting", "mode": mode}
-    await _broadcast_scan_event({"type": "phase", "target": target, "phase": 0, "message": "Scan starting…", "mode": mode})
+        # Notify clients that a scan is starting
+        _active_scan = {"process": None, "target": target, "status": "starting", "mode": mode}
+        await _broadcast_scan_event({"type": "phase", "target": target, "phase": 0, "message": "Scan starting…", "mode": mode})
 
-    scan_env = {k: v for k, v in os.environ.items() if k in _SCAN_ENV_ALLOWLIST}
-    mission_id = None
-    if mode == "live":
-        cmd = [_sys.executable, "-m", "nexus", "live", "--target", target]
-    else:
-        # Mission-mode launch — same OrchestrationEngine pipeline as the CLI
-        # (`nexus pentest/bounty/ctf/redteam/blueteam`), with structured
-        # per-agent progress events turned on so `_stream_output` below can
-        # relay real batch/agent progress instead of only raw text lines.
-        mission_id = f"dashboard-{mode}-{int(_time.time())}"
-        cmd = [_sys.executable, "-m", "nexus", mode, "--target", target, "--mission", mission_id]
-        scan_env["NEXUS_EMIT_EVENTS"] = "1"
-    proc = _subprocess.Popen(
-        cmd,
-        stdout=_subprocess.PIPE,
-        stderr=_subprocess.STDOUT,
-        text=True,
-        env=scan_env,
-    )
-    _active_scan = {"process": proc, "target": target, "status": "running", "mode": mode, "mission_id": mission_id}
-    await _broadcast_scan_event({"type": "status", "status": "running", "target": target, "mode": mode})
+        scan_env = {k: v for k, v in os.environ.items() if k in _SCAN_ENV_ALLOWLIST}
+        mission_id = None
+        if mode == "live":
+            cmd = [_sys.executable, "-m", "nexus", "live", "--target", target]
+        else:
+            # Mission-mode launch — same OrchestrationEngine pipeline as the CLI
+            # (`nexus pentest/bounty/ctf/redteam/blueteam`), with structured
+            # per-agent progress events turned on so `_stream_output` below can
+            # relay real batch/agent progress instead of only raw text lines.
+            mission_id = f"dashboard-{mode}-{int(_time.time())}"
+            cmd = [_sys.executable, "-m", "nexus", mode, "--target", target, "--mission", mission_id]
+            scan_env["NEXUS_EMIT_EVENTS"] = "1"
+        proc = _subprocess.Popen(
+            cmd,
+            stdout=_subprocess.PIPE,
+            stderr=_subprocess.STDOUT,
+            text=True,
+            env=scan_env,
+        )
+        _active_scan = {"process": proc, "target": target, "status": "running", "mode": mode, "mission_id": mission_id}
+        await _broadcast_scan_event({"type": "status", "status": "running", "target": target, "mode": mode})
 
     # Background reader: stream stdout lines to WebSocket clients. Lines
     # tagged `NEXUS-EVENT:{json}` (emitted by OrchestrationEngine/
@@ -704,13 +774,24 @@ async def scan_start(payload: dict, request: Request):
                 try:
                     inner = json.loads(line[len("NEXUS-EVENT:"):])
                     event = {"type": "agent_event", "target": target, "event": inner}
-                    if inner.get("type") == "budget_update":
+                    if inner.get("type") == "budget_update" and _active_scan.get("process") is process:
                         # Mission-mode scans run in this subprocess, with
                         # their own in-memory BudgetGuard the dashboard
                         # server process can never see directly — capture
                         # the snapshot here so GET /api/budget can serve
                         # real numbers instead of always reading 0 for a
                         # running mission (see engine.py's emit_events).
+                        #
+                        # The identity check mirrors the final-status write
+                        # below (`_active_scan.get("process") is process`):
+                        # this reader thread keeps consuming buffered stdout
+                        # lines for a little while after its own subprocess
+                        # is terminated/superseded (e.g. POST /api/scan/stop
+                        # followed immediately by a new /api/scan/start), so
+                        # without it a stale budget_update from an old/
+                        # orphaned mission could clobber the snapshot that
+                        # GET /api/budget serves for the mission that is
+                        # actually active now.
                         _active_scan["budget"] = inner
                 except json.JSONDecodeError:
                     pass
@@ -853,7 +934,25 @@ def launch_dashboard(host: str = "127.0.0.1", port: int = 8765, open_browser: bo
         # Open browser after a short delay so the server is ready
         threading.Timer(1.5, lambda: _open_browser_safe(url)).start()
     print(f"[nexus] 🖥️ Dashboard available at: {url}")
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",
+        # Cap a single incoming WebSocket frame at the transport layer too
+        # (defense in depth alongside the MAX_WS_MESSAGE_BYTES check in the
+        # handlers themselves) — uvicorn's default is 16 MiB, which combined
+        # with its default ws_max_queue=32 lets ~512 MB queue up in flight
+        # on one connection with nothing here to reject it earlier.
+        ws_max_size=MAX_WS_MESSAGE_BYTES,
+        ws_max_queue=8,
+        # Defense in depth alongside the WS_MAX_CONNECTIONS check in the
+        # handlers: this bounds ALL concurrent in-flight connections (HTTP
+        # and WebSocket) at the ASGI-server layer, so a client can't route
+        # around the per-endpoint counters by hitting both endpoints (or
+        # HTTP routes) at once and still exhaust the process's fd limit.
+        limit_concurrency=WS_MAX_CONNECTIONS * 4,
+    )
 
 
 if __name__ == "__main__":

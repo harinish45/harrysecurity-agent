@@ -119,6 +119,36 @@ async def test_run_tool_authorized_in_scope_call_succeeds_end_to_end(monkeypatch
 
     payload = _payload(result)
     assert payload["status"] in ("completed", "no_findings")
+
+
+async def test_run_tool_params_target_collision_is_a_clean_error_not_a_crash(monkeypatch):
+    """`run_tool(tool_name, target, params)` used to expand `params` straight
+    into `tool_registry.run(tool_name, target, **params)`. An MCP client's
+    `params` dict is arbitrary, caller-controlled input (unlike every other
+    tool_registry.run() call site in this codebase, which passes a fixed,
+    hardcoded kwarg set) — if it happens to contain a `target` key, that
+    collides with the `target` keyword this call already supplies, and
+    Python raises "got multiple values for argument 'target'" as an
+    unhandled TypeError at the call itself, before any guardrail runs.
+    Confirms this now degrades to a clean failed tool_result instead."""
+    from mcp.client import Client
+
+    monkeypatch.setattr(config, "nexus_allowed_targets", "127.0.0.1,localhost")
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+    server = create_server()
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "run_tool",
+            {
+                "tool_name": "network.port_scan",
+                "target": "127.0.0.1",
+                "params": {"target": "evil-override", "extra": "x"},
+            },
+        )
+
+    payload = _payload(result)
+    assert payload["status"] == "failed"
+    assert "target" in payload["error"].lower()
     assert payload["tool"] == "network.port_scan"
     assert "findings" in payload
 

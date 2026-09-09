@@ -97,6 +97,27 @@ def test_portable_exporters_create_valid_artifacts():
     assert json.loads((tmp / "findings.sarif").read_text())["version"] == "2.1.0"
 
 
+def test_html_export_escapes_verification_status_in_class_attribute_and_text():
+    """Regression test: verification_status was interpolated into the
+    badge-{verification} class attribute and into element text without
+    html.escape(), unlike every other field in the same row. Not exploitable
+    today because verification_agent only ever emits 5 hardcoded literals,
+    but if that value space ever grows to include finding-derived text this
+    would be a quote-attribute-breakout XSS. Assert the sink escapes both
+    the attribute and the text context."""
+    tmp = _make_tmpdir()
+    findings = [{
+        "id": "F-1", "title": "SQLi", "severity": "high",
+        "verification_status": '"><script>alert(1)</script>',
+        "verification_detail": '"><script>alert(2)</script>',
+    }]
+    HtmlExport().export(findings, tmp / "verify.html")
+    html_content = (tmp / "verify.html").read_text(encoding="utf-8")
+    assert "<script>alert(1)</script>" not in html_content
+    assert "<script>alert(2)</script>" not in html_content
+    assert '"><script>' not in html_content
+
+
 # ── redaction ─────────────────────────────────────────────────────────────
 
 def test_redact_findings_strips_secrets_but_keeps_other_fields():
@@ -170,6 +191,52 @@ def test_sarif_export_redacts_by_default_and_opt_out():
     assert "abcDEF123456xyz" not in (tmp / "r.sarif").read_text(encoding="utf-8")
     SarifExport().export(findings, tmp / "r2.sarif", redact=False)
     assert "abcDEF123456xyz" in (tmp / "r2.sarif").read_text(encoding="utf-8")
+
+
+def test_sarif_export_includes_agent_enrichment_fields():
+    """verification_status, mitre_techniques, business_impact, and
+    chain_assets/kind (populated by the post-processing agents) used to be
+    silently dropped by the SARIF exporter — a SARIF consumer saw strictly
+    less annotation than the HTML/Markdown reports for the same mission,
+    and synthetic_chain findings were indistinguishable from ordinary ones.
+    Confirmed via this session's audit and fixed."""
+    tmp = _make_tmpdir()
+    findings = [
+        {
+            "severity": "high",
+            "title": "cred reuse unlocks db host",
+            "verification_status": "verified",
+            "verification_detail": "confirmed via replay",
+            "business_impact": "full database compromise",
+            "mitre_techniques": [{"id": "T1078", "name": "Valid Accounts", "url": "https://attack.mitre.org/techniques/T1078/"}],
+            "kind": "synthetic_chain",
+            "chain_assets": ["10.0.0.1", "10.0.0.2:5432"],
+        }
+    ]
+    out = SarifExport().export(findings, tmp / "enriched.sarif")
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    props = doc["runs"][0]["results"][0]["properties"]
+    assert props["verificationStatus"] == "verified"
+    assert props["verificationDetail"] == "confirmed via replay"
+    assert props["businessImpact"] == "full database compromise"
+    assert props["mitreTechniques"][0]["id"] == "T1078"
+    assert props["kind"] == "synthetic_chain"
+    assert props["chainAssets"] == ["10.0.0.1", "10.0.0.2:5432"]
+
+
+def test_sarif_export_agent_enrichment_fields_default_when_absent():
+    """A finding with no agent-added fields should still export cleanly,
+    with the new properties present but empty rather than missing/crashing."""
+    tmp = _make_tmpdir()
+    findings = [{"severity": "low", "title": "plain finding"}]
+    out = SarifExport().export(findings, tmp / "plain.sarif")
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    props = doc["runs"][0]["results"][0]["properties"]
+    assert props["verificationStatus"] == ""
+    assert props["businessImpact"] == ""
+    assert props["mitreTechniques"] == []
+    assert props["kind"] == ""
+    assert props["chainAssets"] == []
 
 
 def test_sarif_artifact_location_is_a_well_formed_uri_for_bare_host_port():
@@ -304,6 +371,49 @@ def test_section_numbers_are_contiguous_with_every_optional_section_present():
     assert numbers == list(range(1, len(numbers) + 1))
     # All optional sections actually rendered, not just skipped-and-still-contiguous.
     assert len(numbers) == 11
+
+
+# ── HTML-escaping regression (chain_assets / business_impact / MITRE tags) ─
+# chain_assets, business_impact, and MITRE id/name/url were embedded into the
+# .md report with no escaping. An affected_asset (or other attacker-
+# influenced field) of "<script>alert(1)</script>" would survive verbatim
+# into the report and execute if the .md is ever opened in an HTML-capable
+# Markdown viewer.
+
+def test_attack_chain_assets_are_html_escaped_in_report():
+    findings = [{
+        "id": "F-1", "title": "chain", "severity": "critical",
+        "kind": "synthetic_chain", "chain_assets": ["<script>alert(1)</script>", "host-b"],
+    }]
+    report = ReportGenerator().generate(findings, target="x", mission_id="m")
+    assert "<script>alert(1)</script>" not in report
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in report
+
+
+def test_business_impact_is_html_escaped_in_report():
+    findings = [{
+        "id": "F-1", "title": "finding", "severity": "high",
+        "business_impact": "<img src=x onerror=alert(1)>",
+    }]
+    report = ReportGenerator().generate(findings, target="x", mission_id="m")
+    assert "<img src=x onerror=alert(1)>" not in report
+    assert "&lt;img src=x onerror=alert(1)&gt;" in report
+
+
+def test_mitre_technique_fields_are_html_escaped_in_report():
+    findings = [{
+        "id": "F-1", "title": "finding", "severity": "medium",
+        "mitre_techniques": [{
+            "id": "<b>T1190</b>",
+            "name": "<script>alert(2)</script>",
+            "url": "javascript:alert(3)\"><script>x</script>",
+        }],
+    }]
+    report = ReportGenerator().generate(findings, target="x", mission_id="m")
+    assert "<script>alert(2)</script>" not in report
+    assert "<b>T1190</b>" not in report
+    assert "&lt;script&gt;alert(2)&lt;/script&gt;" in report
+    assert "&lt;b&gt;T1190&lt;/b&gt;" in report
 
 
 # ── path traversal regression (nexus_report.py slug logic) ─────────────────

@@ -55,9 +55,28 @@ class ToolRegistry:
         RateGuard/AuditGuard and normalizes the result to the canonical
         schema, exactly like a dashboard-triggered scan does.
         """
+        from nexus.foundation.schema import STATUS_FAILED, tool_result
         from nexus.tools.executor import ToolExecutor
 
-        return ToolExecutor().run(name, target=target, **kwargs)
+        try:
+            return ToolExecutor().run(name, target=target, **kwargs)
+        except TypeError as exc:
+            # A kwarg colliding with a keyword this call already supplies
+            # (most reachable case: `engagement`/`timeout`, or some future
+            # ToolExecutor.run() parameter) raises here rather than at the
+            # `tool_registry.run(...)` call site itself — Python only
+            # detects a `target`-vs-`target` collision at THAT outer call
+            # (see the fix in `nexus/mcp/server.py`'s `run_tool`, the one
+            # reachable place external, caller-controlled kwargs — an MCP
+            # client's `params` dict — flow into this signature); this
+            # try/except is the fallback for every other kwarg mismatch,
+            # so a less-trusted caller gets a normal failed tool_result
+            # instead of an unhandled Python exception either way.
+            return tool_result(
+                name, target,
+                status=STATUS_FAILED,
+                error=f"Invalid arguments for tool '{name}': {exc}",
+            )
 
     def list_tools(self) -> Dict[str, dict]:
         """List all registered tools with metadata."""

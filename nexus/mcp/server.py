@@ -159,7 +159,27 @@ def create_server() -> MCPServer:
         out-of-scope target, missing NEXUS_LEGAL_ACK, or a destructive
         action pending human approval is rejected the same way it would be
         from the CLI, returned as a normal (non-crashing) failed result."""
+        from nexus.foundation.schema import STATUS_FAILED, tool_result
         from nexus.tools.registry import tool_registry
+
+        # `params` is an MCP client's dict — a less-trusted caller than any
+        # existing tool_registry.run() call site in this codebase, every
+        # one of which passes a fixed, hardcoded kwarg set. `**(params or
+        # {})` below expands straight into this call's own `target`
+        # keyword if `params` happens to contain a `target` key, which
+        # Python raises as an unhandled TypeError ("got multiple values
+        # for argument 'target'") at the call itself — before any
+        # guardrail runs, and before tool_registry.run()'s own body even
+        # starts (Python's argument binding happens first). Reject that
+        # shape here, cleanly, rather than letting it crash the MCP tool
+        # call.
+        if params and "target" in params:
+            return tool_result(
+                tool_name, target,
+                status=STATUS_FAILED,
+                error="Invalid params: 'target' must be passed as the top-level `target` "
+                      "argument, not inside `params` — remove the duplicate 'target' key.",
+            )
 
         return tool_registry.run(tool_name, target, **(params or {}))
 

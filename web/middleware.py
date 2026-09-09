@@ -13,8 +13,102 @@ import os
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from nexus.foundation.config import config
+
+DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MiB — comfortably above any real
+# login/config/scan/agent-run JSON payload this API expects.
+
+
+class _RequestBodyTooLarge(Exception):
+    """Internal signal only: raised from the wrapped ASGI `receive()` once a
+    streamed request body crosses MaxBodySizeMiddleware's cap, so downstream
+    body-parsing code (FastAPI's `payload: dict` dependency, in particular)
+    is interrupted instead of buffering the rest of an oversized payload."""
+
+
+class MaxBodySizeMiddleware:
+    """Reject request bodies larger than `max_body_size` before any route
+    handler, dependency, or auth check ever runs.
+
+    FastAPI resolves a `payload: dict` parameter (used by /api/auth/login,
+    /api/config, /api/scan/start, /api/agent/run) via Starlette's dependency
+    injection, which fully buffers and JSON-decodes the request body BEFORE
+    the route body executes — i.e. before `_require_token()` gets a chance
+    to reject an unauthenticated caller. With no cap anywhere (no ASGI
+    server limit, no middleware), a fully unauthenticated client could POST
+    an arbitrarily large JSON body to any of those routes and force this
+    process to buffer/decode it all in memory first — a DoS reachable
+    without any credentials.
+
+    Implemented as a plain ASGI callable (not BaseHTTPMiddleware) wrapping
+    `receive()` so the body is measured as it streams in, rather than fully
+    read into memory here just to measure it. Must be the OUTERMOST
+    middleware — registered last in `install_middleware`, since Starlette
+    treats the most-recently-added middleware as outermost — so oversized
+    bodies are rejected before routing/dependency-injection ever touches
+    them, and before any other middleware does its own body handling.
+    """
+
+    def __init__(self, app: ASGIApp, max_body_size: int = DEFAULT_MAX_BODY_BYTES) -> None:
+        self.app = app
+        self.max_body_size = max_body_size
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Fast path: a well-formed Content-Length lets us reject before
+        # reading a single byte of body.
+        for name, value in scope.get("headers") or ():
+            if name == b"content-length":
+                try:
+                    if int(value) > self.max_body_size:
+                        await _send_413(send)
+                        return
+                except ValueError:
+                    pass
+                break
+
+        total = 0
+
+        async def guarded_receive() -> Message:
+            nonlocal total
+            message = await receive()
+            if message.get("type") == "http.request":
+                total += len(message.get("body") or b"")
+                if total > self.max_body_size:
+                    raise _RequestBodyTooLarge()
+            return message
+
+        response_started = False
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal response_started
+            if message.get("type") == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, guarded_receive, tracking_send)
+        except _RequestBodyTooLarge:
+            if not response_started:
+                await _send_413(send)
+
+
+async def _send_413(send: Send) -> None:
+    body = b'{"detail":"Request body too large"}'
+    await send({
+        "type": "http.response.start",
+        "status": 413,
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode("latin-1")),
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -63,6 +157,13 @@ def install_middleware(app: FastAPI) -> None:
             allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
             max_age=600,
         )
+
+    max_body_size = int(os.environ.get("NEXUS_DASHBOARD_MAX_BODY_BYTES", str(DEFAULT_MAX_BODY_BYTES)))
+    # Added last so it becomes the OUTERMOST middleware (see
+    # MaxBodySizeMiddleware's docstring) — it must see and reject an
+    # oversized request before anything else, including CORS and the
+    # security-headers middleware, ever touches it.
+    app.add_middleware(MaxBodySizeMiddleware, max_body_size=max_body_size)
 
 
 CSRF_HEADER = "X-Requested-With"
