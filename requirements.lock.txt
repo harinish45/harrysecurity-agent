@@ -4,21 +4,21 @@
 # --universal generates ONE file valid across every OS/Python-version this
 # project supports (requires-python = ">=3.10"), using PEP 508 environment
 # markers (e.g. `; python_full_version < '3.11'`, `; sys_platform ==
-# 'win32'`) instead of flat unconditional pins. This matters: a flat pin
-# like `backports-asyncio-runner==1.2.0` (a Python-3.10-only backport
-# package) or `pywin32==312` (Windows-only, no Linux wheel) is fine when
-# installed on the exact platform it was compiled for, but real `pip`
-# refuses it outright on any other interpreter/OS in the lock file's
-# declared range -- which is exactly what CI's pip-audit step hit on the
-# 3.11/3.12 matrix legs after two earlier non-universal regenerations of
-# this file (one pinned an unconditional numpy>=3.14-only version, the
-# next pinned unconditional Windows-only packages from being compiled on
-# a Windows dev machine). Verified with a REAL `pip install --dry-run
-# --report` (not just `uv`'s own resolver) before committing this file --
-# `uv`'s dry-run alone did not catch the backports-asyncio-runner marker
-# gap that real pip did. Regenerate the same way (`--universal`, never a
-# single `--python-version`/`--python-platform` pin alone) if
-# pyproject.toml's dependencies change and this file goes stale again.
+# 'win32'`) instead of flat unconditional pins. A flat, single-target pin
+# breaks a different leg of the CI matrix (3.10/3.11/3.12 on ubuntu-latest)
+# depending on what caused it: an unconditional pin for a Python-version-
+# gated package (e.g. backports-asyncio-runner, valid only on <3.11) fails
+# on the other Python versions; an unconditional pin resolved on Windows
+# pulls in Windows-only packages (pywin32, colorama) with no Linux
+# distribution at all. Verify any regeneration with a REAL `pip install
+# --dry-run --report -r requirements.lock.txt` (not just uv's own
+# resolver, which did not catch the backports-asyncio-runner gap in an
+# earlier attempt) before committing.
+#
+# click is pinned >=8.3.3 in pyproject.toml specifically to fix
+# PYSEC-2026-2132 (pip-audit blocking finding against click<8.3.3) --
+# verified typer>=0.9's CLI still renders and runs correctly against
+# click 8.5.0 (the resolved version here) before raising the floor.
 aiohappyeyeballs==2.7.1
     # via aiohttp
 aiohttp==3.14.3
@@ -91,13 +91,12 @@ charset-normalizer==3.5.1
     # via
     #   reportlab
     #   requests
-click==8.1.8
+click==8.5.0
     # via
     #   nexus-strike (pyproject.toml)
     #   uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
     # via
-    #   click
     #   pytest
     #   typer
 cryptography==50.0.1
