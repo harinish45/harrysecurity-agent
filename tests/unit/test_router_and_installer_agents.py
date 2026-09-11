@@ -67,9 +67,16 @@ async def test_installer_installs_nothing_for_an_irrelevant_task(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_installer_only_attempts_relevant_packages(monkeypatch):
-    with patch("builtins.__import__", side_effect=ImportError), \
-         patch("subprocess.run") as mock_subprocess, \
-         patch("nexus.tools.registry.tool_registry.run") as mock_tool_run:
+    # patch("builtins.__import__", ...) is entered LAST: entering it first
+    # would make the *other* patch() calls' own target resolution (which
+    # needs a real import of nexus.tools.registry to locate tool_registry)
+    # go through the now-globally-broken __import__ too, on some Python
+    # versions/interpreters -- whether importlib's sys.modules cache fast
+    # path bypasses the patched builtin is an internal-implementation
+    # detail that isn't safe to depend on across the 3.10-3.12 CI matrix.
+    with patch("subprocess.run") as mock_subprocess, \
+         patch("nexus.tools.registry.tool_registry.run") as mock_tool_run, \
+         patch("builtins.__import__", side_effect=ImportError):
         mock_subprocess.return_value.returncode = 0
         mock_subprocess.return_value.stderr = ""
         mock_tool_run.return_value = {"status": "completed", "findings": []}

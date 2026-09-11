@@ -132,11 +132,19 @@ def test_posix_memory_rlimit_is_actually_enforced():
     assert "ALLOCATED" not in result.stdout
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="_ResourceWatchdog is only started on win32 (nexus/tools/sandbox.py's "
+    "run_subprocess gates it behind sys.platform == 'win32'); on POSIX, memory_mb "
+    "is enforced by the real RLIMIT_AS kernel rlimit instead (covered by "
+    "test_posix_memory_rlimit_is_actually_enforced above), so this code path is "
+    "never reached there and the process would just crash with an uncaught "
+    "MemoryError in the child rather than run_subprocess raising SandboxError.",
+)
 def test_resource_watchdog_kills_on_memory_overshoot():
-    """Real enforcement path used on Windows (and exercisable on any
-    platform, since it's pure psutil polling, not an OS primitive): a
-    process that allocates and holds well past memory_mb must be killed
-    by the watchdog, not allowed to run to completion."""
+    """Real enforcement path used on Windows: a process that allocates and
+    holds well past memory_mb must be killed by the watchdog, not allowed
+    to run to completion."""
     pytest.importorskip("psutil")
     script = (
         "import time\n"

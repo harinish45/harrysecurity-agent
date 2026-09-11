@@ -2,17 +2,20 @@
 layer alongside nexus/tools/sandbox.py's host-process rlimit/watchdog
 enforcement, opt-in via NEXUS_SANDBOX_MODE=docker.
 
-This dev machine has the Docker Desktop CLI installed but the daemon is
-NOT running (`docker info` genuinely fails here, confirmed live) — so
-these tests split cleanly into two groups:
-  - REAL, live-verified: daemon-unreachable detection, the fail-closed
-    SandboxError path, the auto-mount path-rewriting logic (pure Python,
-    no daemon needed), and the exact `docker run` command construction
-    (mocked at the outer run_subprocess() call so no daemon is touched).
-  - NOT verifiable here: an actual container executing and returning
-    real output — that needs a live daemon this environment doesn't have.
-    No test in this file claims that path works; it's exercised only via
-    mocks that assert command construction, not actual execution.
+Whether a Docker daemon is actually reachable varies by environment (a
+dev machine with Docker Desktop stopped vs. a CI runner with Docker
+pre-installed and running, e.g. GitHub Actions' ubuntu-latest) -- so the
+fail-closed-when-no-daemon tests below explicitly mock
+docker_daemon_available() to force that condition rather than depending
+on ambient truth about the current machine, matching the pattern already
+used for the missing-CLI/hung-daemon detection tests. The auto-mount
+path-rewriting logic (pure Python, no daemon needed) and the exact
+`docker run` command construction (mocked at the outer run_subprocess()
+call) are also environment-independent. No test in this file claims an
+actual container executing and returning real output works -- that would
+need a live daemon and is out of scope here; everything is exercised via
+mocks that assert command construction and control flow, not actual
+execution.
 """
 from __future__ import annotations
 
@@ -32,13 +35,14 @@ from nexus.tools.docker_sandbox import (
 from nexus.tools.sandbox import SandboxError
 
 
-# ── docker_daemon_available() — real, live on this machine ─────────────
+# ── docker_daemon_available() ───────────────────────────────────────────
 
-def test_daemon_unavailable_is_correctly_detected_live():
-    """Real live check against this actual machine's Docker installation
-    (CLI present, daemon stopped) — must report False, not crash, and
-    not falsely report True."""
-    assert docker_daemon_available() is False
+def test_daemon_unreachable_is_correctly_detected():
+    """`docker info` returning a nonzero exit code (daemon installed but
+    not running/reachable) must report False, not crash, and not falsely
+    report True."""
+    with patch("subprocess.run", return_value=MagicMock(returncode=1)):
+        assert docker_daemon_available() is False
 
 
 def test_daemon_check_handles_missing_docker_cli_gracefully():
@@ -56,19 +60,25 @@ def test_daemon_check_true_when_docker_info_succeeds():
         assert docker_daemon_available() is True
 
 
-# ── Fail-closed: real, live-verified on this machine (no daemon) ───────
+# ── Fail-closed when no daemon is reachable ─────────────────────────────
+# Explicitly mocked rather than relying on the current machine's ambient
+# Docker state, which differs between a dev machine (daemon often
+# stopped) and CI runners like GitHub Actions' ubuntu-latest (Docker
+# pre-installed and running by default).
 
 def test_run_subprocess_sandboxed_docker_mode_fails_closed_when_no_daemon(monkeypatch):
     """The core safety property: NEXUS_SANDBOX_MODE=docker with no
     reachable daemon must raise, never silently execute on the host."""
     monkeypatch.setattr(config, "nexus_sandbox_mode", "docker")
-    with pytest.raises(SandboxError, match="no Docker daemon is reachable"):
-        run_subprocess_sandboxed(["echo", "hi"])
+    with patch("nexus.tools.docker_sandbox.docker_daemon_available", return_value=False):
+        with pytest.raises(SandboxError, match="no Docker daemon is reachable"):
+            run_subprocess_sandboxed(["echo", "hi"])
 
 
 def test_run_subprocess_in_container_fails_closed_when_no_daemon():
-    with pytest.raises(SandboxError, match="no Docker daemon is reachable"):
-        run_subprocess_in_container(["echo", "hi"])
+    with patch("nexus.tools.docker_sandbox.docker_daemon_available", return_value=False):
+        with pytest.raises(SandboxError, match="no Docker daemon is reachable"):
+            run_subprocess_in_container(["echo", "hi"])
 
 
 def test_run_subprocess_in_container_rejects_empty_cmd():
