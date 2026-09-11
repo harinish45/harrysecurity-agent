@@ -89,6 +89,14 @@ COPY requirements.txt ./
 # demand, so pip itself can't simply be stripped out of the image either.
 RUN pip install --no-cache-dir --upgrade "pip" "setuptools>=78.1.1" "wheel>=0.46.2" "msgpack>=1.2.1"
 
+# ensurepip ships bundled .whl archives (pip-24.0, setuptools-79.0.1 as of
+# this base image) purely for bootstrapping a NEW venv offline -- this
+# app never calls `python -m ensurepip`, so they're dormant, unused dead
+# weight that Trivy's archive scanner still unzips and flags for whatever
+# CVEs existed in those old, frozen releases. Safe to delete: nothing in
+# this image's actual runtime path touches them.
+RUN rm -f /usr/local/lib/python3.11/ensurepip/_bundled/*.whl
+
 RUN mkdir -p /app/reports /app/engagements /app/logs /app/.nexus \
     && chown -R nexus:nexus /app
 
