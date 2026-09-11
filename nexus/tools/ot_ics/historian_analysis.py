@@ -7,6 +7,7 @@ Wonderware, and generic OPC-DA/UA historian endpoints for authentication
 weaknesses, unencrypted data, and excessive data exposure.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import socket
 import struct
@@ -89,7 +90,7 @@ def _check_web_interface(target: str, timeout: int = 5) -> list[Finding]:
                     url,
                     headers={"User-Agent": "NexusStrike-OT/1.0"},
                 )
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with safe_urlopen(req, timeout=timeout) as resp:
                     body_preview = resp.read(512).decode("utf-8", errors="ignore")
                     # Flag if no authentication prompt and page contains data indicators
                     data_keywords = ["tagname", "value", "timestamp", "point", "datasource", "historian"]

@@ -5,6 +5,9 @@ dist/
 build/
 .venv/
 .env
+secrets/*.txt
+vault/
+.nexus/
 .vscode/
 .idea/
 *.zip
@@ -21,3 +24,7 @@ check_stubs.py
 test_tools.py
 tools_to_fill.txt
 final_pytest.txt
+.coverage
+coverage*.json
+_scratch_fixtures/
+bandit_report*.json

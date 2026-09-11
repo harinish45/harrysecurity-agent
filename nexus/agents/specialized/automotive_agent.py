@@ -15,8 +15,7 @@ class AutomotiveAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("automotive.can_bus_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("automotive.can_bus_analysis", target=target)
             tools_used.append("automotive.can_bus_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class AutomotiveAgent(BaseAgent):
             findings.append({"title": f"CAN bus analysis error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("automotive.ecu_reverse_engineering")
-            result = tool(target=target)
+            result = tool_registry.run("automotive.ecu_reverse_engineering", target=target)
             tools_used.append("automotive.ecu_reverse_engineering")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class AutomotiveAgent(BaseAgent):
             findings.append({"title": f"ECU reverse engineering error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("automotive.vehicle_network_testing")
-            result = tool(target=target)
+            result = tool_registry.run("automotive.vehicle_network_testing", target=target)
             tools_used.append("automotive.vehicle_network_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class AutomotiveAgent(BaseAgent):
             findings.append({"title": f"Vehicle network testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("automotive.automotive_firmware_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("automotive.automotive_firmware_analysis", target=target)
             tools_used.append("automotive.automotive_firmware_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])

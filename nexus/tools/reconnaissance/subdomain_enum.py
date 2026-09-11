@@ -5,6 +5,7 @@ Domain: reconnaissance
 Subdomain enumeration via DNS bruteforce, wordlist, and public sources.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import socket
 import json
@@ -52,7 +53,7 @@ def _crtsh_query(domain: str, timeout: float = 5.0) -> list[str]:
             headers={"User-Agent": "NEXUS-STRIKE/0.2.0"},
             method="GET",
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with safe_urlopen(req, timeout=timeout) as resp:
             if resp.status == 200:
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
                 subdomains = set()
@@ -79,7 +80,7 @@ def _securitytrails_query(domain: str, timeout: float = 5.0) -> list[str]:
             url,
             headers={"User-Agent": "NEXUS-STRIKE/0.2.0", "APIKEY": api_key},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with safe_urlopen(req, timeout=timeout) as resp:
             if resp.status == 200:
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
                 return [f"{s}.{domain}" for s in data.get("subdomains", [])]
@@ -96,7 +97,7 @@ def _hackertarget_query(domain: str, timeout: float = 5.0) -> list[str]:
             url,
             headers={"User-Agent": "NEXUS-STRIKE/0.2.0"},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with safe_urlopen(req, timeout=timeout) as resp:
             if resp.status == 200:
                 text = resp.read().decode("utf-8", errors="replace")
                 subdomains = []

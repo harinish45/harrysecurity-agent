@@ -8,6 +8,11 @@ import os
 from typing import Optional, Generator, AsyncGenerator
 from nexus.foundation.config import config
 from nexus.foundation.logging import logger
+from nexus.foundation.free_tier import (
+    free_tier_only_enabled,
+    is_free_tier_provider,
+    openrouter_model_is_free,
+)
 
 class LLMRouter:
     """
@@ -31,7 +36,7 @@ class LLMRouter:
         },
         "openrouter": {
             "env_key": "openrouter_api_key",
-            "default_model": "openai/gpt-4-turbo",
+            "default_model": "nvidia/nemotron-3-super-120b-a12b:free",
             "base_url_key": "openrouter_base_url",
             "api_type": "openai",
         },
@@ -55,7 +60,7 @@ class LLMRouter:
         },
         "groq": {
             "env_key": "groq_api_key",
-            "default_model": "mixtral-8x7b-32768",
+            "default_model": "openai/gpt-oss-20b",
             "base_url_key": "groq_base_url",
             "api_type": "openai",
         },
@@ -79,16 +84,36 @@ class LLMRouter:
         },
     }
 
-    def __init__(self, provider: Optional[str] = None):
+    def __init__(self, provider: Optional[str] = None, free_tier_only: Optional[bool] = None):
         self.provider = provider or config.llm_provider
         self._client = None
+        # `free_tier_only` param lets callers opt in/out explicitly; when
+        # omitted, NEXUS_FREE_TIER_ONLY decides — so the whole platform can
+        # be pinned to $0 LLM cost via one env var with no code changes.
+        self.free_tier_only = free_tier_only_enabled() if free_tier_only is None else free_tier_only
         self._available_providers = self._detect_available()
         self._validate_provider()
 
+    def _is_effectively_free(self, name: str) -> bool:
+        """Free-tier check that also accounts for OpenRouter's mixed
+        free/paid catalog — being 'openrouter' isn't enough, the
+        configured model slug must actually carry the :free suffix."""
+        if not is_free_tier_provider(name):
+            return False
+        if name == "openrouter":
+            model = getattr(config, "openrouter_model", None)
+            return openrouter_model_is_free(model)
+        return True
+
     def _detect_available(self) -> list:
-        """Detect which providers have credentials configured."""
+        """Detect which providers have credentials configured. Under
+        NEXUS_FREE_TIER_ONLY, paid/ambiguous providers are excluded even
+        if a key happens to be configured for them — so a leftover paid
+        key can never get silently auto-selected in free-only mode."""
         available = []
         for name, cfg in self.PROVIDER_CONFIGS.items():
+            if self.free_tier_only and not self._is_effectively_free(name):
+                continue
             if cfg["env_key"] is None:
                 # Always available (e.g., Ollama)
                 available.append(name)
@@ -99,6 +124,20 @@ class LLMRouter:
         return available
 
     def _validate_provider(self):
+        if (
+            self.free_tier_only
+            and self.provider not in self._available_providers
+            and not self._is_effectively_free(self.provider)
+            and self.provider != "mock"
+        ):
+            # An explicitly-configured paid/ambiguous provider under
+            # NEXUS_FREE_TIER_ONLY: log why it's being rejected (distinct
+            # from "not configured") before falling back below, so the
+            # cause is clear rather than a generic "not configured" line.
+            logger.warning(
+                f"NEXUS_FREE_TIER_ONLY is set — refusing paid/ambiguous provider "
+                f"'{self.provider}'. Free providers available: {self._available_providers}"
+            )
         if self.provider not in self._available_providers:
             logger.warning(f"Provider '{self.provider}' not configured. Available: {self._available_providers}")
             if self._available_providers:
@@ -175,6 +214,8 @@ class LLMRouter:
             "active_provider": self.provider,
             "available_providers": self._available_providers,
             "model": getattr(config, f"{self.provider}_model", "unknown"),
+            "free_tier_only": self.free_tier_only,
+            "active_provider_is_free": self._is_effectively_free(self.provider) or self.provider == "mock",
         }
 
 

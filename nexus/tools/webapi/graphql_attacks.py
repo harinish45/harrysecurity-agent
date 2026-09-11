@@ -5,6 +5,7 @@ Domain: webapi
 GraphQL security checks: introspection, batching DoS, and query depth abuse.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import json
 import ssl
@@ -21,6 +22,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 INTROSPECTION_QUERY = """{__schema{types{name}}}"""
 
@@ -43,9 +45,7 @@ DEPTH_QUERY = (
 
 def _post_graphql(url: str, query: str, timeout: int = 15, variables: dict = None) -> dict:
     """POST a GraphQL query; returns {'status': int, 'body': str, 'time': float}."""
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(url, allow_insecure=True)
     payload = json.dumps({"query": query, "variables": variables or {}}).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -59,7 +59,7 @@ def _post_graphql(url: str, query: str, timeout: int = 15, variables: dict = Non
     import time
     try:
         t0 = time.time()
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {"status": resp.status, "body": body, "time": round(time.time() - t0, 3)}
     except urllib.error.HTTPError as e:

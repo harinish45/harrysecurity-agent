@@ -5,6 +5,7 @@ Domain: webapp
 Real Server-Side Request Forgery (SSRF) detector.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 import urllib.request
 import urllib.parse
 import ssl
@@ -12,6 +13,7 @@ import time
 from typing import Any
 from nexus.foundation.schema import Finding, STATUS_COMPLETED, STATUS_NO_FINDINGS, STATUS_FAILED, tool_result
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 SSRF_PAYLOADS = [
     "http://127.0.0.1",
@@ -35,9 +37,7 @@ def run(target: str, **kwargs: Any) -> dict:
         if not params:
             params = {"url": "http://example.com", "redirect": "http://example.com", "path": "/"}
             
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(target, allow_insecure=True)
         
         for param in list(params.keys())[:3]:
             for payload in SSRF_PAYLOADS:
@@ -49,7 +49,7 @@ def run(target: str, **kwargs: Any) -> dict:
                         method="GET"
                     )
                     t0 = time.time()
-                    resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+                    resp = safe_urlopen(req, timeout=5, context=ctx)
                     elapsed = time.time() - t0
                     body = resp.read(65536).decode("utf-8", errors="replace")
                     

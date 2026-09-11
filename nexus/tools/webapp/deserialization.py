@@ -5,12 +5,14 @@ Domain: webapp
 Real deserialization detection: sends Java/PHP/Python serialized objects, detects gadget chain errors.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 import urllib.request
 import ssl
 import base64
 from typing import Any
 from nexus.foundation.schema import Finding, STATUS_COMPLETED, STATUS_NO_FINDINGS, STATUS_FAILED, tool_result
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 # Common deserialization payloads (proof-of-concept, non-destructive)
 DESERIAL_PAYLOADS = {
@@ -26,9 +28,7 @@ def run(target: str, **kwargs: Any) -> dict:
     
     try:
         url = target if "://" in target else f"http://{target}"
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(target, allow_insecure=True)
         
         for lang, payload in DESERIAL_PAYLOADS.items():
             try:
@@ -41,7 +41,7 @@ def run(target: str, **kwargs: Any) -> dict:
                     },
                     method="POST"
                 )
-                resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+                resp = safe_urlopen(req, timeout=10, context=ctx)
                 body = resp.read(65536).decode("utf-8", errors="replace")
                 
                 # Check for common deserialization error patterns

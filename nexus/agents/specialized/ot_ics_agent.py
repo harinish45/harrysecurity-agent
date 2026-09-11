@@ -15,8 +15,7 @@ class OtIcsAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("ot_ics.modbus_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("ot_ics.modbus_analysis", target=target)
             tools_used.append("ot_ics.modbus_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class OtIcsAgent(BaseAgent):
             findings.append({"title": f"Modbus analysis error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("ot_ics.dnp3_testing")
-            result = tool(target=target)
+            result = tool_registry.run("ot_ics.dnp3_testing", target=target)
             tools_used.append("ot_ics.dnp3_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class OtIcsAgent(BaseAgent):
             findings.append({"title": f"DNP3 testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("ot_ics.plc_testing")
-            result = tool(target=target)
+            result = tool_registry.run("ot_ics.plc_testing", target=target)
             tools_used.append("ot_ics.plc_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class OtIcsAgent(BaseAgent):
             findings.append({"title": f"PLC testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("ot_ics.scada_security")
-            result = tool(target=target)
+            result = tool_registry.run("ot_ics.scada_security", target=target)
             tools_used.append("ot_ics.scada_security")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class OtIcsAgent(BaseAgent):
             findings.append({"title": f"SCADA security error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("ot_ics.industrial_protocol_reviews")
-            result = tool(target=target)
+            result = tool_registry.run("ot_ics.industrial_protocol_reviews", target=target)
             tools_used.append("ot_ics.industrial_protocol_reviews")
             if result.get("findings"):
                 findings.extend(result["findings"])

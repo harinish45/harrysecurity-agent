@@ -1,39 +1,63 @@
 #!/usr/bin/env python3
 """
-NEXUS-STRIKE — compliance tool: Gdpr Audit
+NEXUS-STRIKE — compliance tool: GDPR Audit
 Domain: compliance
+
+GDPR Art. 7 (consent) / Art. 13 (transparency): real check for cookies set
+before any consent interaction, and real presence/absence check for a
+privacy-policy page. Previously identical to all 8 other compliance.*
+tools — caught during this session's audit.
 """
+import urllib.error
+import urllib.request
+
+from nexus.foundation.net import safe_urlopen
 from nexus.tools.registry import tool_registry
+
+_PRIVACY_PATHS = ("/privacy-policy", "/privacy", "/legal/privacy")
 
 
 def run(target: str, **kwargs) -> dict:
-    """compliance tool: Gdpr Audit"""
+    """compliance tool: GDPR Audit"""
     findings = []
+
     try:
-        import socket
-        import urllib.request
-        # Basic security checks
-        try:
-            ip = socket.gethostbyname(target)
-            findings.append(f"Target {target} -> {ip}")
-        except:
-            findings.append(f"DNS resolution failed for {target}")
-        # Check for security headers
         url = f"http://{target}/"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = urllib.request.urlopen(req, timeout=5)
-            headers = dict(resp.headers)
-            security_headers = ["X-Frame-Options", "X-Content-Type-Options", "Strict-Transport-Security", "Content-Security-Policy"]
-            for h in security_headers:
-                if h in headers:
-                    findings.append(f"{h}: {headers[h]}")
-                else:
-                    findings.append(f"{h}: MISSING (recommend adding)")
-        except Exception as e:
-            findings.append(f"HTTP check: {str(e)[:60]}")
+        req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
+        resp = safe_urlopen(req, timeout=5)
+        set_cookie = resp.headers.get_all("Set-Cookie") or []
+        if set_cookie:
+            findings.append(
+                f"GDPR Art. 7 concern: {len(set_cookie)} cookie(s) set on first page load, before any "
+                f"consent interaction is possible: {[c.split(';')[0] for c in set_cookie][:5]}"
+            )
+        else:
+            findings.append("No cookies set on first page load (no pre-consent cookie concern observed)")
     except Exception as e:
-        findings.append(f"Error: {e}")
+        findings.append(f"Cookie-on-load check: {str(e)[:60]}")
+
+    found_privacy_page = False
+    for path in _PRIVACY_PATHS:
+        try:
+            url = f"http://{target}{path}"
+            req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "NexusStrike/1.0"})
+            resp = safe_urlopen(req, timeout=5)
+            if resp.status < 400:
+                findings.append(f"Privacy policy page found: {url} (HTTP {resp.status})")
+                found_privacy_page = True
+                break
+        except urllib.error.HTTPError as e:
+            if e.code < 400:
+                found_privacy_page = True
+                break
+        except Exception:
+            continue
+    if not found_privacy_page:
+        findings.append(
+            f"GDPR Art. 13 concern: no privacy-policy page found at any of {_PRIVACY_PATHS} — "
+            f"transparency obligations may not be met (or the page lives at a non-standard path)"
+        )
+
     return {"tool": "compliance.gdpr_audit", "domain": "compliance", "target": target, "status": "completed", "findings": findings}
 
 
@@ -42,7 +66,7 @@ tool_registry.register("compliance.gdpr_audit", run, metadata={
     "name": "compliance.gdpr_audit",
     "domain": "compliance",
     "status": "completed",
-    "description": "compliance tool: Gdpr Audit",
+    "description": "GDPR Art. 7/13-relevant checks: pre-consent cookie detection, privacy-policy page presence",
     "parameters": {
         "target": "Target domain, IP, or URL",
     },

@@ -4,6 +4,7 @@ NEXUS-STRIKE — Complete Tier Setup Script
 Run once: python scripts/setup_tiers.py
 Handles: Ollama check, optional deps, Docker/DVWA, .env patching, env vars
 """
+from nexus.foundation.net import safe_urlopen
 import os
 import sys
 import subprocess
@@ -30,7 +31,7 @@ banner("TIER 1 — Ollama")
 
 ollama_running = False
 try:
-    urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+    safe_urlopen("http://localhost:11434/api/tags", timeout=2)
     ok("Ollama server is already running")
     ollama_running = True
 except Exception:
@@ -41,7 +42,7 @@ except Exception:
                          creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
         time.sleep(4)
         try:
-            urllib.request.urlopen("http://localhost:11434/api/tags", timeout=3)
+            safe_urlopen("http://localhost:11434/api/tags", timeout=3)
             ok("Ollama server started successfully")
             ollama_running = True
         except Exception:

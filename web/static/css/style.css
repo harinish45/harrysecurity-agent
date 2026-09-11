@@ -465,6 +465,198 @@ tr:hover td { background: var(--bg-tertiary); }
     white-space: pre-wrap;
 }
 
+.agent-stream {
+    white-space: normal;
+}
+
+.agent-stream-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.agent-stream-row:last-child {
+    border-bottom: none;
+}
+
+.agent-stream-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.agent-stream-detail {
+    color: var(--text-secondary);
+}
+
+/* ── Budget meter ─────────────────────────────────────────────── */
+.budget-meter {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    font-size: 0.8rem;
+}
+
+.budget-meter-label {
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.budget-meter-bar {
+    flex: 1;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.budget-meter-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #eab308, #ef4444);
+    transition: width 0.4s ease;
+}
+
+.budget-meter-text {
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* ── Mission Analysis tabs ────────────────────────────────────── */
+.tab-bar {
+    display: flex;
+    gap: 6px;
+    margin: 12px 0;
+}
+
+.tab-btn {
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.tab-btn.active {
+    background: var(--accent, #3b82f6);
+    color: #fff;
+    border-color: transparent;
+}
+
+.analysis-panel {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    min-height: 100px;
+    max-height: 340px;
+    overflow-y: auto;
+}
+
+.mitre-heatmap {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 8px;
+}
+
+.mitre-cell {
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+    background: var(--bg-secondary, #1a1f2e);
+}
+
+.mitre-cell-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.mitre-cell-count {
+    font-size: 0.7rem;
+    opacity: 0.8;
+}
+
+.mitre-cell.sev-critical { background: #3b0d0f; color: #ff6369; }
+.mitre-cell.sev-high { background: #3a2308; color: #f0883e; }
+.mitre-cell.sev-medium { background: #3a2a08; color: #dc6803; }
+.mitre-cell.sev-low { background: #0c2340; color: #5b9dff; }
+.mitre-cell.sev-info { background: var(--bg-primary); color: var(--text-secondary); }
+
+/* ── Triage board (Kanban) ────────────────────────────────────── */
+.triage-board {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+}
+
+.triage-column {
+    background: var(--bg-secondary, #1a1f2e);
+    border-radius: 8px;
+    padding: 8px;
+    min-height: 60px;
+}
+
+.triage-column-header {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.triage-count {
+    background: var(--bg-primary);
+    border-radius: 8px;
+    padding: 0 6px;
+}
+
+.triage-card {
+    background: var(--bg-primary);
+    border-left: 3px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-bottom: 6px;
+    font-size: 0.75rem;
+}
+
+.triage-card.sev-critical, .triage-card.sev-high { border-left-color: #ff6369; }
+.triage-card.sev-medium { border-left-color: #dc6803; }
+.triage-card.sev-low { border-left-color: #5b9dff; }
+.triage-card.sev-info { border-left-color: var(--border); }
+
+.triage-card-title {
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.triage-card-meta {
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+}
+
+.triage-empty {
+    display: block;
+    text-align: center;
+    padding: 8px 0;
+}
+
+.report-tone-body {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    margin-top: 10px;
+    color: var(--text-secondary);
+}
+
 .tier-cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
 
 .tier-card {

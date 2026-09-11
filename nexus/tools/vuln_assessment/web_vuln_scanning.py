@@ -2,56 +2,92 @@
 """
 NEXUS-STRIKE — vuln_assessment tool: Web Vuln Scanning
 Domain: vuln_assessment
+
+Real composite web vulnerability scan: runs webapp.sqli, webapp.xss, and
+cryptography.tls_testing (all real, already-implemented domain tools) via
+tool_registry — the same guardrailed entrypoint any agent/dashboard call
+goes through — and merges their real findings into one consolidated
+vuln-scan report. This tool does no testing of its own; its value is
+genuine aggregation of three real scans, not a fourth redundant fake one.
+
+This was previously one of 8 vuln_assessment tools sharing byte-for-byte
+identical fake logic (a hardcoded-port TCP scan + bare HTTP GET,
+duplicated across all 8 files rather than actually calling the codebase's
+real webapp/crypto tools) — caught during this session's audit.
 """
+from __future__ import annotations
+
+from collections import Counter
+from typing import Any
+
+from nexus.foundation.schema import (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_NO_FINDINGS,
+    tool_result,
+)
 from nexus.tools.registry import tool_registry
 
-
-def run(target: str, **kwargs) -> dict:
-    """vuln_assessment tool: Web Vuln Scanning"""
-    findings = []
-    try:
-        import socket
-        import urllib.request
-        import ssl
-        # Port scan
-        ports = kwargs.get("ports", [80, 443, 8080, 8443, 3000, 4000, 5000, 8000, 9000, 9090])
-        open_ports = []
-        for port in ports:
-            try:
-                with socket.create_connection((target, port), timeout=1):
-                    open_ports.append(port)
-            except:
-                pass
-        if open_ports:
-            findings.append(f"Open ports: {open_ports}")
-            # HTTP fingerprint
-            for port in open_ports:
-                scheme = "https" if port in (443, 8443) else "http"
-                url = f"{scheme}://{target}:{port}/"
-                try:
-                    ctx = ssl.create_default_context()
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
-                    req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-                    resp = urllib.request.urlopen(req, timeout=5, context=ctx)
-                    server = resp.headers.get("Server", "unknown")
-                    findings.append(f"Port {port}: Server={server}")
-                except:
-                    pass
-        else:
-            findings.append("No common web ports open")
-    except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "vuln_assessment.web_vuln_scanning", "domain": "vuln_assessment", "target": target, "status": "completed", "findings": findings}
+_TOOL_NAME = "vuln_assessment.web_vuln_scanning"
+_COMPONENT_TOOLS = ("webapp.sqli", "webapp.xss", "cryptography.tls_testing")
+_FORWARDABLE_KWARGS = ("timeout", "max_params", "max_payloads", "max_injection_points", "ports")
 
 
-# Register with tool registry
-tool_registry.register("vuln_assessment.web_vuln_scanning", run, metadata={
-    "name": "vuln_assessment.web_vuln_scanning",
+def run(target: str, **kwargs: Any) -> dict:
+    """Real aggregator: runs the real webapp.sqli, webapp.xss, and
+    cryptography.tls_testing tools and merges their findings."""
+    forwarded = {k: v for k, v in kwargs.items() if k in _FORWARDABLE_KWARGS}
+
+    component_results: dict[str, dict] = {}
+    for name in _COMPONENT_TOOLS:
+        try:
+            component_results[name] = tool_registry.run(name, target=target, **forwarded)
+        except Exception as exc:  # noqa: BLE001 - a component tool crashing must not take the aggregator down
+            component_results[name] = {"status": STATUS_FAILED, "error": str(exc), "findings": [], "summary": ""}
+
+    all_findings = []
+    for r in component_results.values():
+        all_findings.extend(r.get("findings", []) or [])
+
+    statuses = [r.get("status") for r in component_results.values()]
+    if all_findings:
+        status = STATUS_COMPLETED
+    elif statuses and all(s == STATUS_FAILED for s in statuses):
+        status = STATUS_FAILED
+    else:
+        status = STATUS_NO_FINDINGS
+
+    severity_counts = Counter(f.get("severity", "info") for f in all_findings)
+    severity_summary = ", ".join(f"{sev}:{count}" for sev, count in severity_counts.items())
+
+    summary = (
+        f"Consolidated web vulnerability scan for {target}: {len(all_findings)} finding(s) from "
+        f"{', '.join(_COMPONENT_TOOLS)}" + (f" ({severity_summary})" if severity_summary else "")
+    )
+
+    return tool_result(
+        _TOOL_NAME, target, status=status, findings=all_findings, summary=summary,
+        metadata={
+            "component_tools": {
+                name: {"status": r.get("status"), "summary": r.get("summary"), "error": r.get("error")}
+                for name, r in component_results.items()
+            },
+            "severity_counts": dict(severity_counts),
+        },
+    )
+
+
+tool_registry.register(_TOOL_NAME, run, metadata={
+    "name": _TOOL_NAME,
     "domain": "vuln_assessment",
     "status": "completed",
-    "description": "vuln_assessment tool: Web Vuln Scanning",
+    "description": "Real composite web vulnerability scan — aggregates webapp.sqli + webapp.xss + "
+                    "cryptography.tls_testing via tool_registry into one consolidated report",
     "parameters": {
-        "target": "Target domain, IP, or URL",
+        "target": "Target URL or hostname",
+        "timeout": "Optional per-request timeout forwarded to component tools",
+        "max_params": "Optional max SQLi params forwarded to webapp.sqli",
+        "max_payloads": "Optional max payloads forwarded to component tools",
+        "max_injection_points": "Optional max XSS injection points forwarded to webapp.xss",
     },
 })

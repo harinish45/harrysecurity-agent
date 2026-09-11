@@ -5,7 +5,7 @@ import csv
 from pathlib import Path
 from typing import Any
 
-from nexus.foundation.schema import normalize_findings
+from nexus.foundation.schema import normalize_findings, redact_findings
 
 
 FINDING_FIELDS = [
@@ -17,10 +17,12 @@ FINDING_FIELDS = [
 class CsvExport:
     """Export findings for spreadsheet and ticketing workflows."""
 
-    def export(self, data: list[Any], output: str | Path) -> Path:
+    def export(self, data: list[Any], output: str | Path, redact: bool = True) -> Path:
         path = Path(output)
         path.parent.mkdir(parents=True, exist_ok=True)
         normalised = normalize_findings(data)
+        if redact:
+            normalised = redact_findings(normalised)
         with path.open("w", newline="", encoding="utf-8") as file:
             writer = csv.DictWriter(
                 file,

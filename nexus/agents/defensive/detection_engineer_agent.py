@@ -16,8 +16,7 @@ class DetectionEngineerAgent(BaseAgent):
 
         # Detection engineering (blue team)
         try:
-            det_blue = tool_registry.get("blue_team.detection_engineering_blue")
-            result = det_blue(target=target)
+            result = tool_registry.run("blue_team.detection_engineering_blue", target=target)
             tools_used.append("blue_team.detection_engineering_blue")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class DetectionEngineerAgent(BaseAgent):
 
         # Rule tuning
         try:
-            tune = tool_registry.get("soc.rule_tuning")
-            result = tune(target=target)
+            result = tool_registry.run("soc.rule_tuning", target=target)
             tools_used.append("soc.rule_tuning")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class DetectionEngineerAgent(BaseAgent):
 
         # Detection engineering (SOC)
         try:
-            det_soc = tool_registry.get("soc.detection_engineering_soc")
-            result = det_soc(target=target)
+            result = tool_registry.run("soc.detection_engineering_soc", target=target)
             tools_used.append("soc.detection_engineering_soc")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class DetectionEngineerAgent(BaseAgent):
 
         # Detection testing
         try:
-            det_test = tool_registry.get("purple_team.detection_testing")
-            result = det_test(target=target)
+            result = tool_registry.run("purple_team.detection_testing", target=target)
             tools_used.append("purple_team.detection_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])

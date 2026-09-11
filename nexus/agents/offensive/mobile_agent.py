@@ -15,8 +15,7 @@ class MobileAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("mobile.android_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("mobile.android_analysis", target=target)
             tools_used.append("mobile.android_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class MobileAgent(BaseAgent):
             findings.append({"title": f"Android analysis error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("mobile.ios_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("mobile.ios_analysis", target=target)
             tools_used.append("mobile.ios_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class MobileAgent(BaseAgent):
             findings.append({"title": f"iOS analysis error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("mobile.apk_decompilation")
-            result = tool(target=target)
+            result = tool_registry.run("mobile.apk_decompilation", target=target)
             tools_used.append("mobile.apk_decompilation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class MobileAgent(BaseAgent):
             findings.append({"title": f"APK decompilation error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("mobile.ipa_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("mobile.ipa_analysis", target=target)
             tools_used.append("mobile.ipa_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class MobileAgent(BaseAgent):
             findings.append({"title": f"IPA analysis error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("mobile.mobile_malware_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("mobile.mobile_malware_analysis", target=target)
             tools_used.append("mobile.mobile_malware_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class MobileAgent(BaseAgent):
             findings.append({"title": f"Mobile malware analysis error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("mobile.cert_pinning_bypass")
-            result = tool(target=target)
+            result = tool_registry.run("mobile.cert_pinning_bypass", target=target)
             tools_used.append("mobile.cert_pinning_bypass")
             if result.get("findings"):
                 findings.extend(result["findings"])

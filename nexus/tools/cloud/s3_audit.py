@@ -5,6 +5,7 @@ Domain: cloud
 S3 bucket misconfiguration scanner: public listing, public read, weak ACLs, missing buckets.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import ssl
@@ -21,6 +22,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 # Common S3 bucket naming patterns for company-name variations
 DEFAULT_PATTERNS = [
@@ -57,12 +59,10 @@ def _s3_request(bucket: str, object_path: str = "", timeout: int = 10) -> dict:
     """Perform an anonymous HTTP request against an S3 bucket."""
     # Try HTTPS first (default for S3), then HTTP as fallback
     url = f"https://{bucket}.s3.amazonaws.com/{object_path}"
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(url, allow_insecure=True)
     req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/1.0.0 (S3 Auditor)"})
     try:
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {"status": resp.status, "body": body, "headers": dict(resp.headers), "url": url}
     except urllib.error.HTTPError as e:
@@ -73,7 +73,7 @@ def _s3_request(bucket: str, object_path: str = "", timeout: int = 10) -> dict:
         try:
             url_http = f"http://{bucket}.s3.amazonaws.com/{object_path}"
             req_http = urllib.request.Request(url_http, headers={"User-Agent": "NEXUS-STRIKE/1.0.0 (S3 Auditor)"})
-            resp = urllib.request.urlopen(req_http, timeout=timeout, context=ctx)
+            resp = safe_urlopen(req_http, timeout=timeout, context=ctx)
             body = resp.read(65536).decode("utf-8", errors="replace")
             return {"status": resp.status, "body": body, "headers": dict(resp.headers), "url": url_http}
         except urllib.error.HTTPError as e2:

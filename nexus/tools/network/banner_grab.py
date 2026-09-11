@@ -18,6 +18,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 BANNER_PROBES: dict[int, bytes] = {
     21: b"SYST\r\n",
@@ -65,9 +66,7 @@ def _check_tls(host: str, port: int, timeout: float) -> Optional[dict]:
     if port not in TLS_PORTS:
         return None
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(host, allow_insecure=True)
         with socket.create_connection((host, port), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as tls_sock:
                 cert = tls_sock.getpeercert(binary_form=True)

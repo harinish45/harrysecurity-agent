@@ -15,8 +15,7 @@ class PhishingAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("webapp.auth_test")
-            result = tool(target=target)
+            result = tool_registry.run("webapp.auth_test", target=target)
             tools_used.append("webapp.auth_test")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class PhishingAgent(BaseAgent):
             findings.append({"title": f"Auth test error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("webapp.session_mgmt")
-            result = tool(target=target)
+            result = tool_registry.run("webapp.session_mgmt", target=target)
             tools_used.append("webapp.session_mgmt")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class PhishingAgent(BaseAgent):
             findings.append({"title": f"Session management error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("reconnaissance.email_harvest")
-            result = tool(target=target)
+            result = tool_registry.run("reconnaissance.email_harvest", target=target)
             tools_used.append("reconnaissance.email_harvest")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class PhishingAgent(BaseAgent):
             findings.append({"title": f"Email harvesting error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("reconnaissance.social_osint")
-            result = tool(target=target)
+            result = tool_registry.run("reconnaissance.social_osint", target=target)
             tools_used.append("reconnaissance.social_osint")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class PhishingAgent(BaseAgent):
             findings.append({"title": f"Social OSINT error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("webapp.business_logic")
-            result = tool(target=target)
+            result = tool_registry.run("webapp.business_logic", target=target)
             tools_used.append("webapp.business_logic")
             if result.get("findings"):
                 findings.extend(result["findings"])

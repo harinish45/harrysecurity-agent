@@ -3,6 +3,7 @@
 NEXUS-STRIKE Command Line Interface
 Rich CLI with commands for running missions, managing tools/agents, and configuring providers.
 """
+from nexus.foundation.net import safe_urlopen
 import asyncio
 import importlib
 import inspect
@@ -21,10 +22,8 @@ if sys.platform == "win32":
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.tree import Tree
 from rich import box
 from nexus.foundation.config import config
-from nexus.foundation.logging import logger
 from nexus.tools.registry import tool_registry
 from nexus.agents.agent_registry import list_agents, get_agent_count
 from nexus.intelligence.llm.router import LLMRouter
@@ -53,34 +52,61 @@ def run(
                                   help="Mission objective: full_assessment, quick_scan, vuln_scan, osint"),
     provider: str = typer.Option(None, "--provider", "-p",
                                  help="LLM provider: openai, anthropic, openrouter, ollama, groq, deepseek, omniroute, custom"),
+    resume: bool = typer.Option(False, "--resume", help="Resume mission <mission> from its last checkpoint instead of re-planning from scratch"),
     hat_mode: str = typer.Option("white", "--hat-mode", "-h",
                                  help="Engagement mode: [bold]white[/] (authorized), [bold]grey[/] (ambiguous), [bold]black[/] (unauthorized simulation)"),
     workflow: str = typer.Option("full_assessment", "--workflow", "-w",
                                  help="Assessment workflow: web_pentest, network_audit, cloud_assessment, red_team, blue_team, compliance_audit"),
 ):
     """🚀 Launch a security assessment mission."""
-    engagement_record = None
-    if engagement is not None:
-        try:
-            engagement_record = json.loads(engagement.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise typer.BadParameter(f"Invalid engagement JSON: {exc}") from exc
-        scope = engagement_record.get("scope")
-        authorization = engagement_record.get("authorization_reference")
-        if not isinstance(scope, list) or not all(isinstance(item, str) and item.strip() for item in scope):
-            raise typer.BadParameter("Engagement record requires a non-empty string scope list")
-        if not isinstance(authorization, str) or not authorization.strip():
-            raise typer.BadParameter("Engagement record requires an authorization reference")
-        config.nexus_allowed_targets = ",".join(scope)
-        from nexus.foundation.guardrails.scope_guard import ScopeGuard
-        ScopeGuard.validate(target)
+    result = _launch_mission(target, engagement, mode, mission, objective, provider,
+                              resume=resume, hat_mode=hat_mode, workflow=workflow)
+    _display_mission_result(result, target, mode, objective, mission)
 
+
+def _resolve_engagement(engagement: Path | None, target: str) -> dict | None:
+    if engagement is None:
+        return None
+    try:
+        engagement_record = json.loads(engagement.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"Invalid engagement JSON: {exc}") from exc
+    scope = engagement_record.get("scope")
+    authorization = engagement_record.get("authorization_reference")
+    if not isinstance(scope, list) or not all(isinstance(item, str) and item.strip() for item in scope):
+        raise typer.BadParameter("Engagement record requires a non-empty string scope list")
+    if not isinstance(authorization, str) or not authorization.strip():
+        raise typer.BadParameter("Engagement record requires an authorization reference")
+    config.nexus_allowed_targets = ",".join(scope)
+    from nexus.foundation.guardrails.scope_guard import ScopeGuard
+    ScopeGuard.validate(target)
+    return engagement_record
+
+
+def _launch_mission(
+    target: str,
+    engagement: Path | None,
+    mode: str,
+    mission: str,
+    objective: str,
+    provider: str | None,
+    allowed_domains: list[str] | None = None,
+    resume: bool = False,
+    hat_mode: str = "white",
+    workflow: str = "full_assessment",
+) -> dict:
+    """Shared mission-launch path for `nexus run` and every mode command
+    (`nexus pentest`/`bounty`/`ctf`/`redteam`/`blueteam`/`compliance assess`)
+    — same guardrails, same OrchestrationEngine, only `mode`/`objective`/
+    `allowed_domains` differ per mode."""
+    engagement_record = _resolve_engagement(engagement, target)
+
+    from nexus import __version__ as _nexus_version
     console.print(Panel.fit(
-        "🏴‍☠️ [bold green]NEXUS-STRIKE[/] v1.0.0 — Ultimate AI-Powered Cybersecurity Platform",
+        f"🏴‍☠️ [bold green]NEXUS-STRIKE[/] v{_nexus_version} — Ultimate AI-Powered Cybersecurity Platform",
         style="bold green",
     ))
 
-    # Show provider info
     router = LLMRouter(provider=provider)
     provider_info = router.get_provider_info()
     console.print(f"[dim]LLM Provider: [cyan]{provider_info['active_provider']}[/] | "
@@ -88,25 +114,27 @@ def run(
                   f"Available: [cyan]{', '.join(provider_info['available_providers'])}[/][/]")
     console.print(f"[dim]Hat Mode: [cyan]{hat_mode}[/] | Workflow: [cyan]{workflow}[/][/]")
 
-    # Run the orchestration engine
     from nexus.orchestration.engine import OrchestrationEngine
-    engine = OrchestrationEngine(llm_provider=provider)
+    import os as _os
+    engine = OrchestrationEngine(llm_provider=provider, emit_events=bool(_os.environ.get("NEXUS_EMIT_EVENTS")))
 
     async def _run():
-        result = await engine.run_mission(
+        return await engine.run_mission(
             target=target,
             mission_id=mission,
             mode=mode,
             objective=objective,
             engagement=engagement_record,
+            allowed_domains=allowed_domains,
+            resume=resume,
             hat_mode=hat_mode,
             workflow=workflow,
         )
-        return result
 
-    result = asyncio.run(_run())
+    return asyncio.run(_run())
 
-    # Display results
+
+def _display_mission_result(result: dict, target: str, mode: str, objective: str, mission: str) -> None:
     if result.get("status") == "blocked":
         console.print(f"[red]❌ Mission blocked: {result.get('error', 'Unknown error')}[/]")
         raise typer.Exit(1)
@@ -116,35 +144,258 @@ def run(
     console.print(f"[bold]Mode:[/] {mode}")
     console.print(f"[bold]Objective:[/] {objective}")
     console.print(f"[bold]Phases planned:[/] {len(result.get('plan', []))}")
+    console.print(f"[bold]Execution strategy:[/] {result.get('execution_strategy', 'sequential')}")
     console.print(f"[bold]Findings:[/] {len(result.get('findings', []))}")
+    console.print(f"[bold]Attack chains found:[/] {len(result.get('attack_chains', []))}")
+    quality = result.get("quality_assessment") or {}
+    if quality.get("overall_risk_score") is not None:
+        console.print(f"[bold]Overall risk score:[/] {quality['overall_risk_score']}/10")
+    verification = result.get("verification_summary") or {}
+    if verification:
+        console.print("[bold]Verification:[/] " + ", ".join(f"{k}={v}" for k, v in verification.items()))
+    hitl = result.get("hitl_summary") or {}
+    if hitl.get("review_items"):
+        console.print(f"[bold]Human review queued:[/] {hitl['review_items']} finding(s) -> {hitl.get('path')}")
+    next_steps = result.get("next_step_recommendation") or []
+    if next_steps:
+        console.print(f"[bold]Recommended next domains:[/] {', '.join(next_steps)}")
+    budget = result.get("budget_report") or {}
+    if budget.get("estimated_tokens"):
+        console.print(f"[bold]Estimated LLM spend:[/] ~{budget['estimated_tokens']} tokens "
+                      f"(~${budget.get('estimated_usd', 0):.4f}) across {budget.get('calls', 0)} call(s)")
     console.print(f"[bold]LLM Provider:[/] {result.get('llm_provider', {}).get('active_provider', 'unknown')}")
     if result.get("report_path"):
         console.print(f"[bold]Report:[/] {result['report_path']}")
 
-    # Show plan
+    # Show the plan and which agent actually ran, and how it went, for each phase.
     if result.get("plan"):
-        plan_table = Table(title="Mission Plan", box=box.ROUNDED)
+        plan_table = Table(title="Mission Plan & Execution", box=box.ROUNDED)
         plan_table.add_column("Phase", style="cyan")
         plan_table.add_column("Agent", style="green")
         plan_table.add_column("Task", style="white")
+        plan_table.add_column("Status", style="yellow")
+        results_by_agent = {r.get("agent"): r for r in result.get("results", [])}
         for i, phase in enumerate(result["plan"], 1):
-            plan_table.add_row(str(i), phase.get("agent", "?"), phase.get("task", "?")[:60])
+            agent_name = phase.get("agent", "?")
+            phase_result = results_by_agent.get(agent_name, {})
+            plan_table.add_row(str(i), agent_name, phase.get("task", "?")[:60], phase_result.get("status", "?"))
         console.print(plan_table)
 
-    console.print("[yellow]💡 Full agent execution with real tools coming in Phase 2+[/]")
     console.print("[dim]Run [bold]nexus tools[/] to see all registered tools[/]")
     console.print("[dim]Run [bold]nexus agents[/] to see all registered agents[/]")
+    console.print("[dim]Run [bold]nexus agent run <name> --target <target>[/] to invoke one directly[/]")
     console.print("[dim]Run [bold]nexus providers[/] to see LLM provider status[/]")
+
+
+def _mode_command(
+    profile_key: str,
+    target: str,
+    engagement: Path | None,
+    mission: str,
+    provider: str | None,
+    objective: str | None = None,
+) -> None:
+    from nexus.foundation.agent_profiles import get_profile
+
+    profile = get_profile(profile_key)
+    result = _launch_mission(
+        target, engagement, profile.mode, mission,
+        objective or profile.objective_hint, provider,
+        allowed_domains=list(profile.allowed_domains),
+    )
+    _display_mission_result(result, target, profile.mode, objective or profile.objective_hint, mission)
+    tone_report = result.get("tone_report")
+    if tone_report:
+        console.print(Panel(tone_report[:4000], title=f"{profile.mode}-format report preview", border_style="cyan"))
+
+
+@app.command()
+def pentest(
+    target: str = typer.Option(..., "--target", "-t", help="Authorized target scope"),
+    engagement: Path = typer.Option(None, "--engagement", "-e", exists=True, readable=True,
+                                     help="Engagement JSON created by `nexus engage`"),
+    mission: str = typer.Option("pentest-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """🔒 Authorized penetration-test engagement — full guardrails, formal audit report."""
+    _mode_command("pentest", target, engagement, mission, provider)
+
+
+@app.command()
+def bounty(
+    target: str = typer.Option(..., "--target", "-t", help="In-scope bounty target"),
+    program: str = typer.Option(None, "--program", help="Bounty platform program identifier (H1/Bugcrowd) — "
+                                                          "scope-pull adapter not wired to a live API in this build"),
+    engagement: Path = typer.Option(None, "--engagement", "-e", exists=True, readable=True),
+    mission: str = typer.Option("bounty-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """💰 Bug-bounty engagement — web/API/cloud/mobile-focused, platform-style submission report."""
+    if program:
+        console.print(f"[yellow]--program {program}: no bounty-platform API key configured; "
+                       f"scope must come from --target/--engagement in this build.[/]")
+    _mode_command("bounty", target, engagement, mission, provider)
+
+
+@app.command()
+def ctf(
+    target: str = typer.Option(..., "--target", "-t", help="Challenge host/URL"),
+    category: str = typer.Option("web", "--category", help="pwn|web|crypto|rev|forensics|misc"),
+    mission: str = typer.Option("ctf-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """🚩 CTF challenge solving — category-scoped tools, writeup-style report."""
+    _mode_command("ctf", target, None, mission, provider, objective=f"ctf_{category}")
+
+
+@app.command()
+def redteam(
+    target: str = typer.Option(..., "--target", "-t", help="Authorized target scope"),
+    objective_ttp: str = typer.Option("full_chain", "--objective", "-o", help="TTP chain / objective to emulate"),
+    engagement: Path = typer.Option(None, "--engagement", "-e", exists=True, readable=True),
+    mission: str = typer.Option("redteam-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """🎯 Adversary emulation — MITRE ATT&CK-mapped TTP chain, redteam-format report."""
+    _mode_command("redteam", target, engagement, mission, provider, objective=objective_ttp)
+
+
+@app.command()
+def blueteam(
+    target: str = typer.Option(..., "--target", "-t", help="Environment/host under defensive review"),
+    mission: str = typer.Option("blueteam-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """🛡️ Defensive assessment — detection engineering and incident triage, incident-format report."""
+    _mode_command("blueteam", target, None, mission, provider)
+
+
+@app.command()
+def benchmark(
+    suite: str = typer.Option("intercode_ctf", "--suite", help="intercode_ctf|cybench|nyu_ctf|debate_consensus_eval"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+    latency: bool = typer.Option(False, "--latency", help="Time every registered agent's run() once instead of scoring a suite"),
+    agent: list[str] = typer.Option(None, "--agent", help="With --latency, only time these agent names (repeatable)"),
+):
+    """📊 Score the agent stack against Cybench/NYU-CTF/InterCode-CTF-style
+    suites, evaluate debate_consensus_agent's precision/recall, or benchmark
+    per-agent execution latency."""
+    if latency:
+        from nexus.benchmarks.agent_eval import benchmark_agent_latency
+
+        console.print(f"[cyan]Timing {'selected' if agent else 'all registered'} agents...[/]")
+        summary = asyncio.run(benchmark_agent_latency(agent or None))
+        table = Table(title=f"Agent Latency Benchmark ({summary['agent_count']} agents)", box=box.ROUNDED)
+        table.add_column("Agent", style="cyan")
+        table.add_column("Latency (ms)", style="green")
+        table.add_column("Status", style="yellow")
+        for row in summary["results"]:
+            table.add_row(row["agent"], f"{row['latency_ms']}" if row["latency_ms"] is not None else "—", row["status"])
+        console.print(table)
+        console.print("[dim]Appended to benchmarks/latency_history.jsonl.[/]")
+        return
+
+    if suite == "debate_consensus_eval":
+        from nexus.benchmarks.agent_eval import evaluate_debate_consensus
+        from nexus.intelligence.llm.router import LLMRouter as _Router
+
+        console.print("[cyan]Evaluating debate_consensus_agent precision/recall against labeled cases...[/]")
+        summary = asyncio.run(evaluate_debate_consensus(_Router(provider=provider)))
+        table = Table(title=f"debate_consensus_agent — precision {summary['precision']:.2f}, "
+                            f"recall {summary['recall']:.2f}, F1 {summary['f1']:.2f}", box=box.ROUNDED)
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        for key in ("total_cases", "tp", "fp", "fn", "tn", "abstained"):
+            table.add_row(key, str(summary[key]))
+        console.print(table)
+        console.print("[dim]Appended to benchmarks/debate_eval_history.jsonl.[/]")
+        return
+
+    from nexus.benchmarks.runner import BenchmarkRunner
+    from nexus.benchmarks.suites import SUITES
+
+    suite_cls = SUITES.get(suite)
+    if not suite_cls:
+        console.print(f"[red]Unknown suite '{suite}'. Available: {', '.join(sorted(SUITES))}, debate_consensus_eval[/]")
+        raise typer.Exit(1)
+
+    router = LLMRouter(provider=provider)
+    runner = BenchmarkRunner(llm=router)
+    console.print(f"[cyan]Running benchmark suite: {suite_cls.name}...[/]")
+    summary = runner.run(suite_cls())
+
+    if summary.get("note"):
+        console.print(f"[yellow]{summary['note']}[/]")
+        return
+
+    table = Table(title=f"{summary['name']} — {summary['correct']}/{summary['total']} ({summary['score'] * 100:.1f}%)",
+                  box=box.ROUNDED)
+    table.add_column("Category", style="cyan")
+    table.add_column("Score", style="green")
+    for category, bucket in summary.get("by_category", {}).items():
+        table.add_row(category, f"{bucket['correct']}/{bucket['total']} ({bucket['score'] * 100:.1f}%)")
+    console.print(table)
+    console.print("[dim]Appended to benchmarks/history.jsonl for score-over-time tracking.[/]")
 
 
 @app.command()
 def mcp(
-    port: int = typer.Option(8888, "--port", "-p", help="MCP server port"),
+    http: bool = typer.Option(
+        False, "--http", help="Serve over streamable-HTTP instead of stdio (needed for a remote/network MCP client)."
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind host, --http mode only."),
+    port: int = typer.Option(8888, "--port", "-p", help="Bind port, --http mode only."),
 ):
-    """🔌 Start the Model Context Protocol (MCP) server for IDE integration."""
-    console.print(f"[cyan]Starting NEXUS-STRIKE MCP Server on port {port}...[/]")
-    console.print("[dim]Connect your MCP client (Claude Desktop, Cursor, etc.) to this port.[/]")
-    console.print("[yellow]MCP Server implementation coming in Phase 2.[/]")
+    """🔌 Start the real NEXUS-STRIKE MCP server.
+
+    Default transport is stdio — the standard way local MCP clients
+    (Claude Desktop, Cursor, Claude Code) launch an MCP server themselves
+    as a subprocess; you normally won't run this by hand for that case,
+    you point the client at `nexus mcp` as its server command. Pass
+    --http to serve over streamable-HTTP for a client that connects over
+    the network instead of spawning a subprocess.
+
+    Exposes: list_domains, list_tools, list_agents, run_tool, run_mission,
+    get_mission_status, get_report — every one routed through the same
+    guardrail chain (Scope/Legal/Escalation/Rate/Audit/Output) a CLI-
+    invoked scan or mission uses; an MCP client gets no bypass.
+    """
+    import sys
+
+    from nexus.mcp.server import LOOPBACK_HOSTS, MCP_TOKEN, build_http_app, create_server
+
+    server = create_server()
+    if http:
+        # run_tool/run_mission can trigger real scans and LLM spend; an
+        # unauthenticated network listener exposing them is the same class
+        # of risk web/server.py's launch_dashboard() already refuses for
+        # the dashboard — mirror that fail-closed check here rather than
+        # let an operator accidentally expose this with --host 0.0.0.0.
+        if host not in LOOPBACK_HOSTS and not MCP_TOKEN:
+            console.print(
+                f"[red]Refusing to bind the MCP server to non-loopback host {host!r} "
+                "without NEXUS_MCP_TOKEN set — this would expose run_tool/run_mission "
+                "unauthenticated to anything that can reach this host. Set "
+                "NEXUS_MCP_TOKEN, or bind to 127.0.0.1/localhost instead.[/]"
+            )
+            raise typer.Exit(1)
+        # stdout is free to use here — streamable-HTTP doesn't speak
+        # JSON-RPC over stdio, so a normal startup banner is safe.
+        console.print(f"[cyan]Starting NEXUS-STRIKE MCP server (streamable-HTTP) on {host}:{port}...[/]")
+        if not MCP_TOKEN:
+            console.print("[yellow]NEXUS_MCP_TOKEN is not set — accepting unauthenticated requests "
+                          "(fine on loopback, not fine if this host is reachable from elsewhere).[/]")
+        import uvicorn
+
+        uvicorn.run(build_http_app(server), host=host, port=port, log_level="info")
+    else:
+        # stdio mode reserves stdout entirely for the JSON-RPC protocol
+        # stream a client reads from — any banner printed to `console`
+        # (which is stdout-bound) would corrupt the handshake the moment
+        # the client starts reading. stderr is the only safe place for a
+        # human-readable startup line here.
+        print("Starting NEXUS-STRIKE MCP server (stdio)...", file=sys.stderr)
+        server.run(transport="stdio")
 
 
 @app.command("engage")
@@ -222,7 +473,6 @@ def preflight(
     """Check whether this host is ready for an authorised assessment."""
     import importlib.util
     from urllib.parse import urlparse
-    import urllib.request
 
     checks = []
     for dependency in ("httpx", "fastapi", "pydantic", "yaml"):
@@ -244,7 +494,7 @@ def preflight(
         parsed = urlparse(config.ollama_base_url)
         if parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
             try:
-                with urllib.request.urlopen(f"{config.ollama_base_url.rstrip('/')}/models", timeout=2):
+                with safe_urlopen(f"{config.ollama_base_url.rstrip('/')}/models", timeout=2):
                     reachable = True
             except OSError:
                 reachable = False
@@ -277,12 +527,15 @@ def export_report(
     findings = payload.get("findings", payload) if isinstance(payload, dict) else payload
     if not isinstance(findings, list):
         raise typer.BadParameter("Input must be a JSON findings array or an object with a findings array")
+    from nexus.reporting.exporters.base import ReportExporter
     from nexus.reporting.exporters.csv_export import CsvExport
     from nexus.reporting.exporters.html_export import HtmlExport
     from nexus.reporting.exporters.json_export import JsonExport
     from nexus.reporting.exporters.sarif_export import SarifExport
 
-    exporters = {"json": JsonExport(), "csv": CsvExport(), "html": HtmlExport(), "sarif": SarifExport()}
+    exporters: dict[str, ReportExporter] = {
+        "json": JsonExport(), "csv": CsvExport(), "html": HtmlExport(), "sarif": SarifExport(),
+    }
     selected = exporters.get(format.lower())
     if selected is None:
         raise typer.BadParameter("format must be one of: json, csv, html, sarif")
@@ -319,27 +572,36 @@ def tools(
 
 @app.command()
 def agents(
-    tier: str = typer.Option(None, "--tier", "-t", help="Filter by tier (orchestrator, offensive, defensive, etc.)"),
+    tier: str = typer.Option(None, "--tier", "-t", help="Filter by tier (orchestrator, offensive, defensive, analysis, specialized, support)"),
 ):
     """🤖 List all registered agents in the Agent Mesh."""
+    from nexus.agents.agent_registry import get_agent_tiers, get_agents_by_tier
+
     all_agents = list_agents()
 
     if tier:
-        filtered = [a for a in all_agents if a.endswith(f"_{tier}") or a.startswith(tier)]
-        table = Table(title=f"Agent Mesh — {tier} ({len(filtered)} agents)", box=box.ROUNDED)
+        tier = tier.lower().strip()
+        valid_tiers = get_agent_tiers()
+        if tier not in valid_tiers:
+            console.print(f"[red]Unknown tier '{tier}'. Valid tiers: {', '.join(valid_tiers)}[/]")
+            raise typer.Exit(1)
+        names_in_tier = set(get_agents_by_tier()[tier])
+        agents_to_show = [(name, cls) for name, cls in all_agents if name in names_in_tier]
+        table = Table(title=f"Agent Mesh — {tier} ({len(agents_to_show)} agents)", box=box.ROUNDED)
     else:
-        table = Table(title=f"Agent Mesh ({get_agent_count()} agents across 6 tiers)", box=box.ROUNDED)
+        agents_to_show = all_agents
+        table = Table(title=f"Agent Mesh ({get_agent_count()} agents across {len(get_agent_tiers())} tiers)", box=box.ROUNDED)
 
     table.add_column("Agent Name", style="cyan")
     table.add_column("Status", style="green")
 
-    agents_to_show = filtered if tier else all_agents
     for name, cls in agents_to_show:
         table.add_row(name, "✅ Registered")
 
     console.print(table)
     console.print(f"\n[dim]Total: {len(agents_to_show)} agents | "
-                  f"Run [bold]nexus agents --tier <name>[/] to filter[/]")
+                  f"Run [bold]nexus agents --tier <name>[/] to filter | "
+                  f"Run [bold]nexus agent run <name> --target <target>[/] to invoke one directly[/]")
 
 
 @app.command()
@@ -353,6 +615,25 @@ def providers():
     table.add_column("Status", style="green")
     table.add_column("Model", style="yellow")
     table.add_column("Configured", style="white")
+    table.add_column("Cost", style="magenta")
+
+    # Real cost classification, not marketing copy — verified against each provider's
+    # published pricing (checked 2026-09): "free" = genuinely $0 with no usage cap that
+    # forces payment (Ollama runs locally; you're paying your own electricity, not them).
+    # "free tier" = $0 up to a real rate/quota limit, then requires payment to go further.
+    # "paid" = no usable free tier for this platform's workload.
+    _PROVIDER_COST = {
+        "openai": "🔴 Paid only",
+        "anthropic": "🔴 Paid only",
+        "openrouter": "🟢 Free tier (:free models, 20 req/min)",
+        "ollama": "🟢 Free (local, no key, unlimited)",
+        "nvidia": "🟢 Free tier (NIM free credits)",
+        "azure": "🔴 Paid only",
+        "groq": "🟢 Free tier (30 req/min, no card needed)",
+        "deepseek": "🟡 Very low cost (not free)",
+        "omniroute": "🟢 Free tier (per dashboard quota)",
+        "custom": "❓ Depends on your endpoint",
+    }
 
     all_providers = [
         ("openai", "OpenAI", config.openai_api_key is not None),
@@ -370,12 +651,20 @@ def providers():
     for key, name, configured in all_providers:
         status = "🟢 Active" if key == info["active_provider"] else ("🔵 Available" if configured else "⚪ Not configured")
         model = getattr(config, f"{key}_model", "N/A")
-        table.add_row(name, status, model, "✅" if configured else "❌")
+        table.add_row(name, status, model, "✅" if configured else "❌", _PROVIDER_COST.get(key, "❓"))
 
     console.print(table)
     console.print(f"\n[bold]Active Provider:[/] [cyan]{info['active_provider']}[/]")
+    active_cost = _PROVIDER_COST.get(info["active_provider"], "❓")
+    if "Paid" in active_cost:
+        console.print(
+            f"[yellow]⚠ Your active provider ({info['active_provider']}) has no free tier.[/] "
+            "Run [cyan]nexus providers[/] to compare, or set LLM_PROVIDER=ollama / groq / "
+            "openrouter / nvidia in .env for $0 operation. See README.md → "
+            "'Running nexus-strike for free'."
+        )
     console.print(f"[bold]Active Model:[/] [cyan]{info['model']}[/]")
-    console.print(f"\n[dim]Set [bold]LLM_PROVIDER=<name>[/] in .env to change the active provider[/]")
+    console.print("\n[dim]Set [bold]LLM_PROVIDER=<name>[/] in .env to change the active provider[/]")
 
 
 @app.command()
@@ -437,7 +726,9 @@ def verify():
                 qual_name = f"{module_name.rsplit('.', 1)[0].split('.')[-1]}.{short_name}"
                 current_registered = set(tool_registry.list_tools().keys())
                 if qual_name not in current_registered:
-                    failures.append(f"{module_name}: not registered in tool_registry")
+                    skip_reason = tool_registry.skipped_tools().get(qual_name)
+                    detail = f": {skip_reason}" if skip_reason else " (reason unknown -- not in skipped_tools())"
+                    failures.append(f"{module_name}: not registered in tool_registry{detail}")
         except Exception as exc:
             failures.append(f"{module_name}: {type(exc).__name__}: {exc}")
 
@@ -458,10 +749,13 @@ def verify():
 @app.command()
 def version():
     """📦 Show version information."""
+    from nexus import __version__ as _nexus_version
+
     console.print(Panel.fit(
-        "[bold green]NEXUS-STRIKE[/] v1.0.0\n"
+        f"[bold green]NEXUS-STRIKE[/] v{_nexus_version}\n"
         "[dim]The Ultimate AI-Powered Cybersecurity Platform[/]\n\n"
-        "29 security domains | 270+ tools | 50 agents | 6 patterns | 10 LLM providers",
+        f"29 security domains | {tool_registry.count}+ tools | {get_agent_count()} agents | "
+        "6 patterns | 10 LLM providers",
         style="bold",
     ))
 
@@ -532,8 +826,8 @@ def skills(
             if skill.name not in seen:
                 table.add_row(skill.name, skill.category, skill.description[:70])
         console.print(table)
-        console.print(f"\n[dim]Run [bold]nexus skills show <name>[/] for details | "
-                      f"[bold]nexus skills run <name> --target <host>[/] to invoke[/]")
+        console.print("\n[dim]Run [bold]nexus skills show <name>[/] for details | "
+                      "[bold]nexus skills run <name> --target <host>[/] to invoke[/]")
 
     elif action_lower == "show":
         if not name:
@@ -615,6 +909,454 @@ def view(
         console.print(f"[red]Dashboard dependencies missing: {exc}[/]")
         console.print("[dim]Install with: pip install fastapi uvicorn[standard] websockets jinja2[/]")
         raise typer.Exit(1)
+
+
+agent_app = typer.Typer(help="Invoke a single agent directly (nexus/agents/agent_registry.py).")
+app.add_typer(agent_app, name="agent")
+
+
+@agent_app.command("run")
+def agent_run(
+    agent_name: str = typer.Argument(..., help="Registered agent name, e.g. recon_agent — see `nexus agents`"),
+    target: str = typer.Option(..., "--target", "-t", help="Target domain, IP, or URL"),
+    task: str = typer.Option(None, "--task", help="Task description passed to the agent"),
+    engagement: Path = typer.Option(None, "--engagement", "-e", exists=True, readable=True, help="Engagement JSON created by `nexus engage`"),
+):
+    """🎯 Run one agent's real run() against a target, outside a full mission.
+
+    Every nexus.agents.* class has a real, working run() — this is the direct
+    entrypoint to it, useful for testing a single agent or for orchestrator-
+    tier agents (mission_commander_agent, task_planner_agent,
+    agent_router_agent) whose own specialty is planning/routing rather than
+    being one phase of a mission themselves.
+    """
+    from nexus.agents.agent_registry import get_agent
+    from nexus.foundation.guardrails import EscalationGuard, LegalGuard, ScopeGuard
+
+    try:
+        agent_cls = get_agent(agent_name)
+    except KeyError:
+        console.print(f"[red]Unknown agent '{agent_name}'. Run [bold]nexus agents[/] to list valid names.[/]")
+        raise typer.Exit(1)
+
+    if engagement is not None:
+        try:
+            engagement_record = json.loads(engagement.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise typer.BadParameter(f"Invalid engagement JSON: {exc}") from exc
+        scope = engagement_record.get("scope")
+        if isinstance(scope, list) and all(isinstance(s, str) for s in scope):
+            config.nexus_allowed_targets = ",".join(scope)
+
+    try:
+        ScopeGuard.validate(target)
+        LegalGuard.validate(target=target)
+        EscalationGuard.validate(f"agent_{agent_name}", "execute")
+    except Exception as exc:
+        console.print(f"[red]❌ Guardrail blocked: {exc}[/]")
+        raise typer.Exit(1)
+
+    task_description = task or f"Run {agent_name} against {target}"
+    console.print(f"[cyan]Running {agent_name} -> {task_description}[/]")
+
+    async def _run():
+        agent = agent_cls()
+        return await agent.run(task_description, target=target)
+
+    result = asyncio.run(_run())
+
+    console.print(f"\n[bold]Status:[/] {result.get('status', 'unknown')}")
+    findings = result.get("findings") or []
+    console.print(f"[bold]Findings:[/] {len(findings)}")
+    if result.get("summary"):
+        console.print(f"[bold]Summary:[/] {result['summary']}")
+    if result.get("error"):
+        console.print(f"[red]Error:[/] {result['error']}")
+
+    for f in findings[:20]:
+        title = f.get("title") if isinstance(f, dict) else str(f)
+        severity = f.get("severity", "info") if isinstance(f, dict) else "info"
+        console.print(f"  • [{severity}] {title}")
+    if len(findings) > 20:
+        console.print(f"  ... and {len(findings) - 20} more")
+
+    if result.get("status") == "failed":
+        raise typer.Exit(1)
+
+
+advanced_app = typer.Typer(help="Run the advanced/experimental capability modules (nexus/advanced/*.py) directly — these had no CLI or dashboard path before.")
+app.add_typer(advanced_app, name="advanced")
+
+
+def _load_findings(path: Path) -> list:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"Invalid findings JSON: {exc}") from exc
+    if isinstance(data, dict) and "findings" in data:
+        data = data["findings"]
+    if not isinstance(data, list):
+        raise typer.BadParameter("Findings file must contain a JSON list of finding objects (or {\"findings\": [...]})")
+    return data
+
+
+def _print_json(obj) -> None:
+    # Plain print, not console.print() — the module-level `console` forces
+    # ANSI styling (force_terminal=True) even when piped, which would
+    # otherwise mangle this into invalid JSON for anyone scripting against
+    # `nexus advanced <cmd> | jq ...`.
+    print(json.dumps(obj, indent=2, default=str))
+
+
+_ADVANCED_MODULES = [
+    ("threat_modeling", "ThreatModeler", "real"),
+    ("triage", "Triage", "real"),
+    ("asm_monitor", "AttackSurfaceMonitor", "real"),
+    ("supply_chain", "SupplyChainScanner", "real"),
+    ("patch_validation", "PatchValidator", "real"),
+    ("notarization", "EvidenceNotary", "real"),
+    ("pq_signing", "PQSigner", "real"),
+    ("honeypot", "CanaryListener", "real"),
+    ("ga_fuzzer", "GeneticFuzzer", "real"),
+    ("neurosymbolic", "NeuroSymbolicExplainer", "real"),
+    ("threat_radar", "ThreatRadar", "real"),
+    ("adversarial_ml", "AdversarialMLDefense", "not implemented — see module docstring"),
+    ("rl_simulation", "AdversarialSimulation", "not implemented — see module docstring"),
+    ("federated_learning", "FederatedThreatLearning", "not implemented — see module docstring"),
+    ("deepfake_detection", "DeepfakeDetector", "not implemented — see module docstring"),
+]
+
+
+@advanced_app.command("list")
+def advanced_list():
+    """List all advanced/experimental modules and whether each is real or an honest stub."""
+    table = Table(title="Advanced Capability Modules", box=box.ROUNDED)
+    table.add_column("Module", style="cyan")
+    table.add_column("Class", style="green")
+    table.add_column("Status")
+    for mod, cls, status in _ADVANCED_MODULES:
+        table.add_row(mod, cls, status)
+    console.print(table)
+    console.print(
+        "\n[dim]11 real, working commands below (`nexus advanced --help`); 4 modules "
+        "intentionally raise NotImplementedError with a stated reason rather than "
+        "fake a capability — see nexus/advanced/<name>.py docstrings.[/]"
+    )
+
+
+@advanced_app.command("attack-paths")
+def advanced_attack_paths(
+    findings: Path = typer.Option(..., "--findings", exists=True, readable=True, help='JSON file: a list of finding dicts, or {"findings": [...]}'),
+    critical_asset: list[str] = typer.Option(None, "--critical-asset", help="Repeatable: an asset name to weight as critical"),
+):
+    """Predict likely next attack-chain steps from a set of findings."""
+    from nexus.advanced.threat_modeling import ThreatModeler
+
+    _print_json(ThreatModeler().predict_attack_paths(_load_findings(findings), critical_assets=critical_asset or None))
+
+
+@advanced_app.command("triage")
+def advanced_triage(
+    findings: Path = typer.Option(..., "--findings", exists=True, readable=True),
+    dedupe: bool = typer.Option(False, "--dedupe", help="Deduplicate near-identical findings instead of prioritizing"),
+    critical_asset: list[str] = typer.Option(None, "--critical-asset"),
+):
+    """Prioritize or (with --dedupe) deduplicate a set of findings."""
+    from nexus.advanced.triage import Triage
+
+    data = _load_findings(findings)
+    triage = Triage()
+    result = triage.deduplicate(data) if dedupe else triage.prioritize(data, critical_assets=critical_asset or None)
+    _print_json(result)
+
+
+@advanced_app.command("supply-chain")
+def advanced_supply_chain(
+    requirements: Path = typer.Option(Path("requirements.txt"), "--requirements", help="requirements.txt to audit via pip-audit"),
+):
+    """Scan a requirements file for known-vulnerable dependencies via pip-audit."""
+    from nexus.advanced.supply_chain import SupplyChainScanner
+
+    _print_json(SupplyChainScanner().scan(str(requirements)))
+
+
+@advanced_app.command("verify-patch")
+def advanced_verify_patch(
+    finding: Path = typer.Option(..., "--finding", exists=True, readable=True, help="JSON file: a single finding object with tool/affected_asset/title"),
+):
+    """Re-run the original (tool, target) for one finding and check whether it still reproduces — a regression check, not auto-patching."""
+    from nexus.advanced.patch_validation import PatchValidator
+
+    data = json.loads(finding.read_text(encoding="utf-8"))
+    _print_json(PatchValidator().verify_fix(data))
+
+
+@advanced_app.command("notarize")
+def advanced_notarize(file: Path = typer.Argument(..., exists=True, readable=True)):
+    """Create a Bitcoin-anchored OpenTimestamps (.ots) receipt for a file."""
+    from nexus.advanced.notarization import EvidenceNotary
+
+    receipt = EvidenceNotary().notarize(str(file))
+    console.print(f"[green]Notarized:[/] {receipt}")
+
+
+@advanced_app.command("verify-notarization")
+def advanced_verify_notarization(file: Path = typer.Argument(..., exists=True, readable=True)):
+    """Check the OpenTimestamps notarization status of a file."""
+    from nexus.advanced.notarization import EvidenceNotary
+
+    _print_json(EvidenceNotary().verify(str(file)))
+
+
+@advanced_app.command("pq-sign")
+def advanced_pq_sign(file: Path = typer.Argument(..., exists=True, readable=True)):
+    """Sign a file's bytes with ML-DSA-65 (post-quantum, FIPS 204)."""
+    from nexus.advanced.pq_signing import PQSigner
+
+    signature = PQSigner().sign_evidence(str(file))
+    sig_path = file.with_name(file.name + ".sig")
+    sig_path.write_bytes(signature)
+    console.print(f"[green]Signed:[/] {sig_path}")
+
+
+@advanced_app.command("pq-verify")
+def advanced_pq_verify(
+    file: Path = typer.Argument(..., exists=True, readable=True),
+    signature: Path = typer.Argument(..., exists=True, readable=True),
+):
+    """Verify an ML-DSA-65 signature (from `nexus advanced pq-sign`) against a file."""
+    from nexus.advanced.pq_signing import PQSigner
+
+    if PQSigner().verify_evidence(str(file), signature.read_bytes()):
+        console.print("[green]Signature valid.[/]")
+    else:
+        console.print("[red]Signature INVALID.[/]")
+        raise typer.Exit(1)
+
+
+@advanced_app.command("explain")
+def advanced_explain(
+    findings: Path = typer.Option(..., "--findings", exists=True, readable=True),
+):
+    """Explain a set of findings in plain English, fact-checked against a symbolic graph built from those same findings (catches an LLM claiming something the findings don't support)."""
+    from nexus.advanced.neurosymbolic import NeuroSymbolicExplainer
+
+    _print_json(NeuroSymbolicExplainer().explain(_load_findings(findings)))
+
+
+@advanced_app.command("threat-radar")
+def advanced_threat_radar(
+    software: str = typer.Argument(..., help="Software name to query, e.g. 'openssl'"),
+    version: str = typer.Option(None, "--version"),
+):
+    """Query the public NVD CVE API for CVEs matching a software name/version."""
+    from nexus.advanced.threat_radar import ThreatRadar
+
+    _print_json(ThreatRadar().check_software(software, version))
+
+
+@advanced_app.command("kev-check")
+def advanced_kev_check(cve: list[str] = typer.Argument(..., help="One or more CVE IDs")):
+    """Check which of the given CVE IDs are in CISA's Known Exploited Vulnerabilities catalog."""
+    from nexus.advanced.threat_radar import ThreatRadar
+
+    _print_json(ThreatRadar().check_kev(list(cve)))
+
+
+@advanced_app.command("fuzz")
+def advanced_fuzz(
+    seed: list[str] = typer.Option(..., "--seed", help="Repeatable: a seed input string"),
+    generations: int = typer.Option(20, "--generations"),
+    population_size: int = typer.Option(30, "--population-size"),
+):
+    """Run the genetic-algorithm fuzzer offline against a demo fitness function.
+
+    The module never talks to a target itself (see nexus/advanced/ga_fuzzer.py's
+    docstring) — a real run supplies its own fitness_fn that actually probes a
+    target from Python. This command's fitness function is a harmless offline
+    demo (rewards fuzzing-metacharacter diversity) so `nexus advanced fuzz` is
+    runnable without wiring a live target through the CLI.
+    """
+    from nexus.advanced.ga_fuzzer import GeneticFuzzer
+
+    def _demo_fitness(candidate: str) -> float:
+        interesting = set("'\"`;|&$(){}[]<>\\/%#")
+        return float(len(set(candidate) & interesting))
+
+    fuzzer = GeneticFuzzer(seed_inputs=list(seed), fitness_fn=_demo_fitness)
+    _print_json(fuzzer.evolve(generations=generations, population_size=population_size))
+
+
+@advanced_app.command("honeypot")
+def advanced_honeypot(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(0, "--port", help="0 = pick a free port"),
+    duration: float = typer.Option(30.0, "--duration", help="Seconds to listen before stopping"),
+):
+    """Run a canary TCP listener for a fixed duration, logging any connection attempts."""
+    import time as _time
+
+    from nexus.advanced.honeypot import CanaryListener
+
+    listener = CanaryListener(host=host, port=port)
+    bound = listener.start()
+    console.print(f"[cyan]Canary listening on {host}:{bound} for {duration}s...[/]")
+    try:
+        _time.sleep(duration)
+    finally:
+        listener.stop()
+    console.print("[green]Canary stopped.[/]")
+
+
+@advanced_app.command("asm-baseline")
+def advanced_asm_baseline(
+    target: list[str] = typer.Option(..., "--target", "-t", help="Repeatable: a target to baseline"),
+    tool: list[str] = typer.Option(..., "--tool", help="Repeatable: a fully-qualified tool name, e.g. reconnaissance.dns_recon"),
+):
+    """Run a fixed set of tools against a fixed set of targets and record it as a baseline.
+
+    Continuous re-checking (check_for_changes/run_forever) needs a long-running
+    process by design (see nexus/advanced/asm_monitor.py's docstring) — invoke
+    the module directly from Python for that, this command covers the one-shot
+    baseline half.
+    """
+    import os
+
+    from nexus.foundation.guardrails import EscalationGuard, LegalGuard, ScopeGuard
+
+    if not os.environ.get("NEXUS_LEGAL_ACK"):
+        console.print("[red]NEXUS_LEGAL_ACK is not set — set it to confirm you have written authorization to scan these targets.[/]")
+        raise typer.Exit(1)
+    try:
+        for t in target:
+            ScopeGuard.validate(t)
+            LegalGuard.validate(target=t)
+        EscalationGuard.validate("asm_baseline", "execute")
+    except Exception as exc:
+        console.print(f"[red]Guardrail blocked: {exc}[/]")
+        raise typer.Exit(1)
+
+    from nexus.advanced.asm_monitor import AttackSurfaceMonitor
+
+    monitor = AttackSurfaceMonitor(targets=list(target))
+    baseline = monitor.run_baseline(list(tool))
+    _print_json({f"{k[0]}::{k[1]}": v for k, v in baseline.items()})
+
+
+compliance_app = typer.Typer(help="Compliance control mappings and gap-analysis reports (nexus/compliance/*.py) — an illustrative evidence-mapping tool, not a certification claim.")
+app.add_typer(compliance_app, name="compliance")
+
+_COMPLIANCE_FRAMEWORKS = ["SOC2", "ISO27001", "NIST_CSF", "GDPR", "HIPAA", "PCI_DSS"]
+
+
+@compliance_app.command("frameworks")
+def compliance_frameworks():
+    """List the supported compliance frameworks and each one's control count."""
+    from nexus.compliance.frameworks import get_mappings
+
+    table = Table(title="Compliance Frameworks", box=box.ROUNDED)
+    table.add_column("Framework", style="cyan")
+    table.add_column("Controls mapped", style="green")
+    for fw in _COMPLIANCE_FRAMEWORKS:
+        table.add_row(fw, str(len(get_mappings(fw))))
+    console.print(table)
+
+
+@compliance_app.command("report")
+def compliance_report(
+    framework: str = typer.Argument(..., help=f"One of: {', '.join(_COMPLIANCE_FRAMEWORKS)}"),
+    output: Path = typer.Option(None, "--output", "-o", help="Write the report to this path instead of printing it"),
+):
+    """Generate a gap-analysis report for a framework from real, currently-collectible evidence (audit-log chain verification, RBAC config, TLS config, redaction status) — not a certification."""
+    from nexus.compliance.reports import generate_compliance_report
+
+    if framework.upper() not in _COMPLIANCE_FRAMEWORKS:
+        console.print(f"[red]Unknown framework '{framework}'. Choose one of: {', '.join(_COMPLIANCE_FRAMEWORKS)}[/]")
+        raise typer.Exit(1)
+
+    report = generate_compliance_report(framework.upper())
+    if output:
+        output.write_text(report, encoding="utf-8")
+        console.print(f"[green]Written:[/] {output}")
+    else:
+        console.print(report)
+
+
+@compliance_app.command("assess")
+def compliance_assess(
+    target: str = typer.Option(..., "--target", "-t", help="Environment/asset under compliance review"),
+    framework: str = typer.Option("SOC2", "--framework", help="soc2|pci|iso27001|nist_csf|gdpr|hipaa"),
+    mission: str = typer.Option("compliance-001", "--mission", "--id", help="Mission identifier"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider override"),
+):
+    """📋 Agent-driven control-mapping and gap-analysis mission (complements
+    `nexus compliance report`, which reports from static evidence only)."""
+    _mode_command("compliance", target, None, mission, provider, objective=f"gap_analysis_{framework.lower()}")
+
+
+auth_app = typer.Typer(help="Manage dashboard/API user accounts (nexus/foundation/auth.py).")
+app.add_typer(auth_app, name="auth")
+
+
+@auth_app.command("create-admin")
+def auth_create_admin(
+    username: str = typer.Option(..., "--username", "-u", help="Admin username"),
+    password: str = typer.Option(
+        ..., "--password", "-p", prompt=True, hide_input=True, confirmation_prompt=True,
+        help="Admin password (min 12 characters). Omit to be prompted securely instead of passing it on the command line.",
+    ),
+):
+    """👤 Bootstrap the first admin account. There is no default account — this replaces it."""
+    from nexus.foundation.auth import AuthError, AuthManager, Role
+
+    try:
+        user = AuthManager().register_user(username, password, Role.ADMIN)
+    except AuthError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1)
+    console.print(f"[green]Created admin user '{user.username}' (id={user.user_id}).[/]")
+
+
+@auth_app.command("create-user")
+def auth_create_user(
+    username: str = typer.Option(..., "--username", "-u"),
+    role: str = typer.Option("viewer", "--role", "-r", help="One of: admin, operator, analyst, viewer"),
+    password: str = typer.Option(..., "--password", "-p", prompt=True, hide_input=True, confirmation_prompt=True),
+):
+    """👤 Create a user account with a given role."""
+    from nexus.foundation.auth import AuthError, AuthManager, Role
+
+    try:
+        role_enum = Role(role.lower())
+    except ValueError:
+        console.print(f"[red]Unknown role '{role}'. Choose one of: {', '.join(r.value for r in Role)}[/]")
+        raise typer.Exit(1)
+    try:
+        user = AuthManager().register_user(username, password, role_enum)
+    except AuthError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1)
+    console.print(f"[green]Created user '{user.username}' with role '{role_enum.value}'.[/]")
+
+
+@auth_app.command("list-users")
+def auth_list_users():
+    """👥 List configured user accounts (no secrets shown)."""
+    from nexus.foundation.auth import AuthManager
+
+    users = AuthManager()._load_users()
+    if not users:
+        console.print("[dim]No users configured yet. Run `nexus auth create-admin` first.[/]")
+        return
+    table = Table(title="NEXUS-STRIKE Users", box=box.ROUNDED)
+    table.add_column("Username")
+    table.add_column("Role")
+    table.add_column("Active")
+    table.add_column("Created")
+    for raw in users.values():
+        table.add_row(raw["username"], raw["role"], str(raw.get("is_active", True)), raw.get("created_at", ""))
+    console.print(table)
+
 
 def main():
     app()

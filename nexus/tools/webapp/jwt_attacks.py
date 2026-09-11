@@ -5,6 +5,7 @@ Domain: webapp
 JWT vulnerability suite: alg=none bypass, RS256→HS256 confusion, kid injection, weak HMAC secret brute force.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import base64
 import hashlib
@@ -25,6 +26,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 # Top common weak HMAC secrets (representative subset of a larger wordlist)
 WEAK_SECRETS = [
@@ -82,9 +84,7 @@ def _make_hmac_token(header: dict, payload: dict, secret: str, alg: str = "HS256
 
 def _try_auth(url: str, token: str, timeout: int = 10) -> int:
     """Send an Authorization: Bearer request; return HTTP status (0 on failure)."""
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(url, allow_insecure=True)
     headers = {
         "Authorization": f"Bearer {token}",
         "User-Agent": "NEXUS-STRIKE/1.0.0 (JWT Attack Suite)",
@@ -92,7 +92,7 @@ def _try_auth(url: str, token: str, timeout: int = 10) -> int:
     }
     try:
         req = urllib.request.Request(url, headers=headers, method="GET")
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         return resp.status
     except urllib.error.HTTPError as e:
         return e.code

@@ -3,7 +3,9 @@
 NEXUS-STRIKE — reconnaissance tool: Asset Discovery
 Domain: reconnaissance
 """
+from nexus.foundation.net import safe_urlopen
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 def _extract_title(html: str) -> str:
@@ -23,9 +25,7 @@ def run(target: str, **kwargs) -> dict:
         import urllib.error
 
         # Build a permissive SSL context (ignore self-signed / untrusted certs)
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
+        ssl_ctx = get_ssl_context(target, allow_insecure=True)
 
         # DNS resolution
         try:
@@ -41,7 +41,7 @@ def run(target: str, **kwargs) -> dict:
                 req = urllib.request.Request(
                     url, headers={"User-Agent": "NexusStrike/1.0"}
                 )
-                resp = urllib.request.urlopen(req, timeout=6, context=ssl_ctx)
+                resp = safe_urlopen(req, timeout=6, context=ssl_ctx)
                 server = resp.headers.get("Server", "unknown")
                 body = resp.read(4096).decode("utf-8", errors="replace")
                 title = _extract_title(body)

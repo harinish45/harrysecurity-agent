@@ -13,8 +13,19 @@ spec:
     - Egress
   ingress:
     - from:
+        # Same-namespace traffic is always allowed. Kubernetes scopes a peer
+        # with no namespaceSelector to the NetworkPolicy's own namespace, so
+        # this does NOT open the service up cluster-wide.
+        - podSelector: {}
+        {{- if .Values.networkPolicy.allowedIngressNamespaceSelector }}
+        # Only rendered when allowedIngressNamespaceSelector is a non-empty
+        # selector. An EMPTY selector ({}) is deliberately never rendered
+        # here: per Kubernetes API semantics an empty namespaceSelector
+        # matches every namespace in the cluster, which would defeat this
+        # policy entirely.
         - namespaceSelector:
             matchLabels: {{- toYaml .Values.networkPolicy.allowedIngressNamespaceSelector | nindent 14 }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 8765

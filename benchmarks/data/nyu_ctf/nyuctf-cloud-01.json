@@ -1,0 +1,6 @@
+{
+  "id": "nyuctf-cloud-01",
+  "category": "cloud",
+  "prompt": "A serverless function's environment variables (including a third-party API key) are visible in plaintext to anyone with read access to the cloud provider's function-configuration console, with no secret-manager reference used instead. Name the single CWE ID for this weakness (format: CWE-XXX).",
+  "answer_pattern": "CWE-798|CWE-312"
+}

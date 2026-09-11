@@ -16,8 +16,7 @@ class ReverseEngAgent(BaseAgent):
 
         # Assembly analysis
         try:
-            asm = tool_registry.get("reverse_engineering.assembly_analysis")
-            result = asm(target=target)
+            result = tool_registry.run("reverse_engineering.assembly_analysis", target=target)
             tools_used.append("reverse_engineering.assembly_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class ReverseEngAgent(BaseAgent):
 
         # Binary patching
         try:
-            binary = tool_registry.get("reverse_engineering.binary_patching")
-            result = binary(target=target)
+            result = tool_registry.run("reverse_engineering.binary_patching", target=target)
             tools_used.append("reverse_engineering.binary_patching")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class ReverseEngAgent(BaseAgent):
 
         # Firmware reverse engineering
         try:
-            firmware = tool_registry.get("reverse_engineering.firmware_reverse_engineering")
-            result = firmware(target=target)
+            result = tool_registry.run("reverse_engineering.firmware_reverse_engineering", target=target)
             tools_used.append("reverse_engineering.firmware_reverse_engineering")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class ReverseEngAgent(BaseAgent):
 
         # Ghidra analysis
         try:
-            ghidra = tool_registry.get("reverse_engineering.ghidra_analysis")
-            result = ghidra(target=target)
+            result = tool_registry.run("reverse_engineering.ghidra_analysis", target=target)
             tools_used.append("reverse_engineering.ghidra_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -56,8 +52,7 @@ class ReverseEngAgent(BaseAgent):
 
         # IDA analysis
         try:
-            ida = tool_registry.get("reverse_engineering.ida_analysis")
-            result = ida(target=target)
+            result = tool_registry.run("reverse_engineering.ida_analysis", target=target)
             tools_used.append("reverse_engineering.ida_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])

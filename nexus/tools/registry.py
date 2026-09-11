@@ -1,12 +1,15 @@
 """
 NEXUS-STRIKE Tool Registry
 Central registry for all security tools across domains.
-Supports registration, lookup, domain filtering, metadata, typed execution profiles,
-and contract assurance.
+Supports registration, lookup, domain filtering, metadata, typed execution
+profiles, and contract assurance.
 """
-from typing import Callable, Dict, List, Optional, Tuple
+import logging
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from nexus.tools.profile import ToolProfile, profile_from_metadata
+from nexus.tools.profile import ToolProfile, ToolProfileError, profile_from_metadata
+
+logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -16,21 +19,61 @@ class ToolRegistry:
         self._tools: Dict[str, Callable] = {}
         self._metadata: Dict[str, dict] = {}
         self._profiles: Dict[str, ToolProfile] = {}
+        self._skipped: Dict[str, str] = {}
 
     def register(self, name: str, fn: Callable, metadata: Optional[dict] = None):
-        """Register a tool by domain-qualified name."""
-        self._tools[name] = fn
+        """Register a tool by domain-qualified name (e.g., 'reconnaissance.subdomain_enum').
+
+        Profile construction is isolated per tool: a single malformed
+        metadata dict (e.g. an unparseable risk_level from a bad plugin
+        config) raises ToolProfileError and this tool is skipped entirely
+        rather than propagating out and aborting registration of every
+        other tool in what is typically a 260+-tool bulk-registration pass.
+        The skip is recorded in `_skipped` (see `skipped_tools()`), not just
+        logged — a log line alone gives nothing at runtime that `nexus
+        verify` or a startup health check can query to notice registration
+        coverage shrank.
+        """
         effective = metadata or {
             "name": name,
             "domain": name.split(".")[0] if "." in name else "unknown",
             "status": "stub",
         }
-        profile = profile_from_metadata(name, effective)
+        try:
+            profile = profile_from_metadata(name, effective)
+        except ToolProfileError as exc:
+            logger.error("Skipping tool '%s': invalid profile metadata", name, exc_info=True)
+            self._skipped[name] = str(exc)
+            return
+        self._tools[name] = fn
         self._profiles[name] = profile
         self._metadata[name] = {**effective, "profile": profile}
 
+    def skipped_tools(self) -> Dict[str, str]:
+        """Tools whose registration was skipped due to invalid profile
+        metadata, mapping name -> reason. Queryable alternative to grepping
+        logs — `nexus verify` and dashboard health checks can surface this
+        directly instead of the failure only ever showing up as a log line."""
+        return dict(self._skipped)
+
+    def has(self, name: str) -> bool:
+        """True if `name` is a registered tool. Cheap existence check for
+        callers (e.g. ToolExecutor.run()) that need to validate a name
+        before doing guardrail/audit work for a call that's doomed to fail
+        anyway, without triggering get()'s KeyError or its message-building
+        cost."""
+        return name in self._tools
+
     def get(self, name: str) -> Callable:
-        """Get a tool function by name."""
+        """Get the raw tool function by name (bypasses guardrails).
+
+        Internal use only — nexus.tools.executor.ToolExecutor.run() calls this
+        to fetch the function it then runs behind the full guardrail chain,
+        and tests use it to smoke-test tools directly. Agent and mission code
+        must call `run()` below instead, so every tool invocation gets
+        guardrail enforcement (scope/legal/rate/audit) — calling this
+        directly from agent code skips all of that.
+        """
         if name not in self._tools:
             raise KeyError(
                 f"Tool '{name}' not found. "
@@ -43,6 +86,37 @@ class ToolRegistry:
         if name not in self._profiles:
             raise KeyError(f"Tool '{name}' has no execution profile")
         return self._profiles[name]
+
+    def run(self, name: str, target: str, **kwargs: Any) -> dict:
+        """Execute a tool through the guardrailed ToolExecutor.
+
+        This is the safe entrypoint for agents and orchestration code: unlike
+        `get()`, it enforces InputGuard/ScopeGuard/LegalGuard/EscalationGuard/
+        RateGuard/AuditGuard and normalizes the result to the canonical
+        schema, exactly like a dashboard-triggered scan does.
+        """
+        from nexus.foundation.schema import STATUS_FAILED, tool_result
+        from nexus.tools.executor import ToolExecutor
+
+        try:
+            return ToolExecutor().run(name, target=target, **kwargs)
+        except TypeError as exc:
+            # A kwarg colliding with a keyword this call already supplies
+            # (most reachable case: `engagement`/`timeout`, or some future
+            # ToolExecutor.run() parameter) raises here rather than at the
+            # `tool_registry.run(...)` call site itself — Python only
+            # detects a `target`-vs-`target` collision at THAT outer call
+            # (see the fix in `nexus/mcp/server.py`'s `run_tool`, the one
+            # reachable place external, caller-controlled kwargs — an MCP
+            # client's `params` dict — flow into this signature); this
+            # try/except is the fallback for every other kwarg mismatch,
+            # so a less-trusted caller gets a normal failed tool_result
+            # instead of an unhandled Python exception either way.
+            return tool_result(
+                name, target,
+                status=STATUS_FAILED,
+                error=f"Invalid arguments for tool '{name}': {exc}",
+            )
 
     def list_tools(self) -> Dict[str, dict]:
         """List all registered tools with metadata."""
@@ -112,7 +186,7 @@ def get_tool_domains() -> list:
 
 
 def get_tools_by_domain() -> dict:
-    """Return tools grouped by domain."""
+    """Return tools grouped by domain (dict[domain, list[tool_name]])."""
     groups: dict = {}
     for name in sorted(tool_registry._tools):
         domain = name.split(".")[0] if "." in name else "unknown"

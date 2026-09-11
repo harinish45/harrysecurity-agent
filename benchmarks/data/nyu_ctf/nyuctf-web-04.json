@@ -1,0 +1,6 @@
+{
+  "id": "nyuctf-web-04",
+  "category": "web",
+  "prompt": "An internal admin dashboard has no authentication check at all on its `/admin/export` route \u2014 it relies entirely on the URL not being publicly linked. Name the single CWE ID for this weakness (format: CWE-XXX).",
+  "answer_pattern": "CWE-306"
+}

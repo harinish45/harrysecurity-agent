@@ -15,8 +15,7 @@ class RfSdrAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("rf_sdr.rtl_sdr_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("rf_sdr.rtl_sdr_analysis", target=target)
             tools_used.append("rf_sdr.rtl_sdr_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class RfSdrAgent(BaseAgent):
             findings.append({"title": f"RTL-SDR analysis error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("rf_sdr.hackrf_experimentation")
-            result = tool(target=target)
+            result = tool_registry.run("rf_sdr.hackrf_experimentation", target=target)
             tools_used.append("rf_sdr.hackrf_experimentation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class RfSdrAgent(BaseAgent):
             findings.append({"title": f"HackRF experimentation error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("rf_sdr.radio_protocol_analysis")
-            result = tool(target=target)
+            result = tool_registry.run("rf_sdr.radio_protocol_analysis", target=target)
             tools_used.append("rf_sdr.radio_protocol_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class RfSdrAgent(BaseAgent):
             findings.append({"title": f"Radio protocol analysis error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("rf_sdr.signal_decoding")
-            result = tool(target=target)
+            result = tool_registry.run("rf_sdr.signal_decoding", target=target)
             tools_used.append("rf_sdr.signal_decoding")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class RfSdrAgent(BaseAgent):
             findings.append({"title": f"Signal decoding error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("rf_sdr.jammer_detection")
-            result = tool(target=target)
+            result = tool_registry.run("rf_sdr.jammer_detection", target=target)
             tools_used.append("rf_sdr.jammer_detection")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class RfSdrAgent(BaseAgent):
             findings.append({"title": f"Jammer detection error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("rf_sdr.replay_testing")
-            result = tool(target=target)
+            result = tool_registry.run("rf_sdr.replay_testing", target=target)
             tools_used.append("rf_sdr.replay_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])

@@ -6,6 +6,7 @@ V2X (Vehicle-to-Everything) protocol security testing — evaluates DSRC/C-V2X
 message authenticity, certificate chains, and misbehavior detection.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import socket
 import struct
@@ -20,6 +21,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 # DSRC / 802.11p port commonly used by V2X infrastructure
@@ -68,14 +70,12 @@ def _check_certificate_validation(target: str, timeout: int = 5) -> list[Finding
         import urllib.request
 
         # Try connecting without verifying cert (should be rejected by a hardened endpoint)
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(target, allow_insecure=True)
 
         url = f"https://{target}/"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike-V2X/1.0"})
-            with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
+            with safe_urlopen(req, context=ctx, timeout=timeout) as resp:
                 if resp.status == 200:
                     findings.append(Finding(
                         title="V2X endpoint accepts unverified TLS connections",

@@ -5,7 +5,7 @@ from nexus.foundation.schema import STATUS_COMPLETED, STATUS_NO_FINDINGS, STATUS
 
 class DeceptionAgent(BaseAgent):
     name = "deception_agent"
-    description = "defensive agent for deception — hardening, firewall management, and policy reviews"
+    description = "defensive agent for deception — canary tokens/decoy credentials, endpoint deception, and policy context"
 
     async def run(self, task: str, target: str = "", **kwargs) -> dict:
         if not target:
@@ -14,40 +14,32 @@ class DeceptionAgent(BaseAgent):
         findings = []
         tools_used = []
 
-        # Hardening
+        # Canary tokens / decoy credentials — the actual deception-specific
+        # capability this agent previously lacked entirely (it used to call
+        # the exact same 4 tools as hardening_agent, doing zero
+        # deception-specific work despite the name).
         try:
-            harden = tool_registry.get("blue_team.hardening")
-            result = harden(target=target)
-            tools_used.append("blue_team.hardening")
+            result = tool_registry.run("blue_team.canary_token_deployment", target=target)
+            tools_used.append("blue_team.canary_token_deployment")
             if result.get("findings"):
                 findings.extend(result["findings"])
         except Exception as e:
-            findings.append({"title": f"Hardening error: {e}", "severity": "low", "confidence": "medium"})
+            findings.append({"title": f"Canary token deployment error: {e}", "severity": "low", "confidence": "medium"})
 
-        # Firewall management
+        # Endpoint protection — legitimate deception-adjacent context (what
+        # real controls a decoy needs to blend in against).
         try:
-            fw = tool_registry.get("blue_team.firewall_management")
-            result = fw(target=target)
-            tools_used.append("blue_team.firewall_management")
-            if result.get("findings"):
-                findings.extend(result["findings"])
-        except Exception as e:
-            findings.append({"title": f"Firewall management error: {e}", "severity": "low", "confidence": "medium"})
-
-        # Endpoint protection
-        try:
-            ep = tool_registry.get("blue_team.endpoint_protection")
-            result = ep(target=target)
+            result = tool_registry.run("blue_team.endpoint_protection", target=target)
             tools_used.append("blue_team.endpoint_protection")
             if result.get("findings"):
                 findings.extend(result["findings"])
         except Exception as e:
             findings.append({"title": f"Endpoint protection error: {e}", "severity": "low", "confidence": "medium"})
 
-        # Policy reviews
+        # Policy reviews — whether deception/canary use is even permitted
+        # under the target's existing security policy.
         try:
-            policy = tool_registry.get("compliance.policy_reviews")
-            result = policy(target=target)
+            result = tool_registry.run("compliance.policy_reviews", target=target)
             tools_used.append("compliance.policy_reviews")
             if result.get("findings"):
                 findings.extend(result["findings"])

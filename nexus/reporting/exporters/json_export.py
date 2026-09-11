@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nexus.foundation.schema import normalize_findings
+from nexus.foundation.schema import normalize_findings, redact_findings
 
 
 FINDING_FIELDS = [
@@ -17,10 +17,12 @@ FINDING_FIELDS = [
 class JsonExport:
     """Export normalized findings as portable JSON evidence."""
 
-    def export(self, data: list[Any], output: str | Path) -> Path:
+    def export(self, data: list[Any], output: str | Path, redact: bool = True) -> Path:
         path = Path(output)
         path.parent.mkdir(parents=True, exist_ok=True)
         normalised = normalize_findings(data)
+        if redact:
+            normalised = redact_findings(normalised)
         payload = {
             "schema_version": "2.0",
             "exported_at": __import__("datetime").datetime.now(

@@ -31,6 +31,9 @@
             <a href="#reports" class="nav-item" data-page="reports" id="nav-reports">
                 <span class="nav-icon">📄</span> Reports
             </a>
+            <a href="#benchmarks" class="nav-item" data-page="benchmarks" id="nav-benchmarks">
+                <span class="nav-icon">📊</span> Benchmarks
+            </a>
         </nav>
         <div class="sidebar-label">INTELLIGENCE</div>
         <nav>
@@ -169,16 +172,64 @@
                     <p class="subtitle">Start and monitor real-time security assessments</p>
                     <div class="scan-form">
                         <input type="text" id="scan-target" placeholder="Target IP or domain (e.g. 192.168.1.1)" class="form-input">
-                        <select id="scan-mode" class="form-select">
-                            <option value="guided">Guided (Recommended)</option>
-                            <option value="autonomous">Autonomous</option>
-                            <option value="tool">Tool-only</option>
+                        <select id="scan-mission-mode" class="form-select" title="Mission Control mode">
+                            <option value="live">Live scanner (legacy)</option>
+                            <option value="pentest">Pentest</option>
+                            <option value="bounty">Bounty</option>
+                            <option value="ctf">CTF</option>
+                            <option value="redteam">Redteam</option>
+                            <option value="blueteam">Blueteam</option>
                         </select>
                         <button class="btn btn-scan-lg" onclick="startScanFromPanel()">▶ Launch Assessment</button>
                         <button class="btn btn-danger" onclick="stopScan()">⏹ Stop</button>
                     </div>
                     <div id="scan-output" class="scan-output">
                         <span class="muted">No scan running. Configure target and press Launch.</span>
+                    </div>
+                    <div id="agent-stream" class="scan-output agent-stream">
+                        <span class="muted">Live Agent Stream — populated when a pentest/bounty/ctf/redteam/blueteam mission is running.</span>
+                    </div>
+                    <div class="budget-meter">
+                        <span class="budget-meter-label">Estimated LLM spend</span>
+                        <div class="budget-meter-bar"><div id="budget-meter-fill" class="budget-meter-fill" style="width:0%"></div></div>
+                        <span id="budget-meter-text" class="budget-meter-text">—</span>
+                    </div>
+                </div>
+                <div class="scan-control-panel">
+                    <h2>Mission Analysis</h2>
+                    <p class="subtitle">MITRE coverage, attack graph, and mode-tone report preview from the most recent mission report</p>
+                    <div class="tab-bar" id="analysis-tabs">
+                        <button class="tab-btn active" data-tab="mitre">MITRE Coverage</button>
+                        <button class="tab-btn" data-tab="graph">Attack Graph</button>
+                        <button class="tab-btn" data-tab="triage">Triage Board</button>
+                        <button class="tab-btn" data-tab="report">Report Preview</button>
+                    </div>
+                    <div id="analysis-mitre" class="analysis-panel"><span class="muted">Loading…</span></div>
+                    <div id="analysis-graph" class="analysis-panel" hidden></div>
+                    <div id="analysis-triage" class="analysis-panel" hidden></div>
+                    <div id="analysis-report" class="analysis-panel" hidden>
+                        <select id="report-tone-mode" class="form-select">
+                            <option value="pentest">Pentest</option>
+                            <option value="bounty">Bounty</option>
+                            <option value="ctf">CTF</option>
+                            <option value="redteam">Redteam</option>
+                            <option value="blueteam">Blueteam</option>
+                            <option value="compliance">Compliance</option>
+                        </select>
+                        <pre id="report-tone-body" class="report-tone-body">Select a mode to load a preview.</pre>
+                    </div>
+                </div>
+                <div class="scan-control-panel">
+                    <h2>Run a Single Agent</h2>
+                    <p class="subtitle">Invoke any registered agent directly (recon_agent, task_planner_agent, mission_commander_agent, …) outside a full mission</p>
+                    <div class="scan-form">
+                        <input type="text" id="agent-name" placeholder="Agent name (e.g. recon_agent)" class="form-input" list="agent-name-list" autocomplete="off">
+                        <datalist id="agent-name-list"></datalist>
+                        <input type="text" id="agent-target" placeholder="Target IP or domain" class="form-input">
+                        <button class="btn btn-scan-lg" onclick="runAgent()">▶ Run Agent</button>
+                    </div>
+                    <div id="agent-run-output" class="scan-output">
+                        <span class="muted">No agent run yet. Pick a name from the Agent Mesh below and a target.</span>
                     </div>
                 </div>
                 <div class="agents-grid" id="agents-grid">
@@ -216,6 +267,55 @@
             </div>
             <div class="reports-grid" id="reports-grid">
                 <div class="loading-cell">Loading reports…</div>
+            </div>
+        </main>
+
+        <!-- ── BENCHMARKS PAGE ── -->
+        <main id="page-benchmarks" class="page">
+            <div class="section-header">
+                <h2>Benchmark Dashboard</h2>
+                <button class="btn" onclick="loadBenchmarksPage()">↻ Refresh</button>
+            </div>
+            <p class="subtitle">Score-over-time for Cybench/NYU-CTF/InterCode-CTF-style suites, debate_consensus_agent precision/recall, and per-agent execution latency (see <code>nexus benchmark</code>)</p>
+
+            <div class="charts-container">
+                <div class="chart-box">
+                    <h3>Suite Score Over Time</h3>
+                    <canvas id="benchmarkScoreChart"></canvas>
+                    <div id="benchmark-score-empty" class="loading-cell" hidden>No benchmark runs yet — run <code>nexus benchmark --suite intercode_ctf</code>.</div>
+                </div>
+            </div>
+
+            <div class="reports-section">
+                <div class="section-header">
+                    <h3>debate_consensus_agent — Precision/Recall History</h3>
+                </div>
+                <table id="debate-eval-table">
+                    <thead>
+                        <tr>
+                            <th>Run</th><th>Precision</th><th>Recall</th><th>F1</th><th>TP</th><th>FP</th><th>FN</th><th>TN</th><th>Abstained</th>
+                        </tr>
+                    </thead>
+                    <tbody id="debate-eval-tbody">
+                        <tr><td colspan="9" class="loading-cell">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="reports-section">
+                <div class="section-header">
+                    <h3>Latest Agent Latency Run</h3>
+                </div>
+                <table id="latency-table">
+                    <thead>
+                        <tr>
+                            <th>Agent</th><th>Latency (ms)</th><th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="latency-tbody">
+                        <tr><td colspan="3" class="loading-cell">Loading…</td></tr>
+                    </tbody>
+                </table>
             </div>
         </main>
 

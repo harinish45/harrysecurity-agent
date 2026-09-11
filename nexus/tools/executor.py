@@ -1,10 +1,12 @@
 """The single, guarded entrypoint for tool execution."""
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import time
 from typing import Any
 
+from nexus.foundation.config import config
 from nexus.foundation.guardrails import (
     AuditGuard,
     EscalationGuard,
@@ -14,6 +16,7 @@ from nexus.foundation.guardrails import (
     RateGuard,
     ScopeGuard,
 )
+from nexus.foundation.guardrails.output_guard import OutputGuardError
 from nexus.foundation.schema import (
     ALL_STATUSES,
     STATUS_COMPLETED,
@@ -24,6 +27,7 @@ from nexus.foundation.schema import (
     STATUS_REQUIRES_HARDWARE,
     STATUS_UNAVAILABLE,
     Finding,
+    redact_findings,
     tool_result,
 )
 from nexus.tools.registry import tool_registry
@@ -31,6 +35,15 @@ from nexus.tools.registry import tool_registry
 
 class ToolExecutionError(RuntimeError):
     """Raised when a tool does not honour the framework result contract."""
+
+
+# Shared across ToolExecutor instances so nexus_max_concurrent_tools is a
+# real global cap, not per-instance (a fresh unbounded pool per executor
+# would defeat the point of the setting).
+_EXECUTOR_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(1, int(getattr(config, "nexus_max_concurrent_tools", 5))),
+    thread_name_prefix="nexus-tool",
+)
 
 
 class ToolExecutor:
@@ -52,10 +65,31 @@ class ToolExecutor:
         target: str,
         *,
         engagement: dict[str, Any] | None = None,
+        timeout: float | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         if not isinstance(target, str) or not target.strip():
             raise ToolExecutionError("A non-empty string target is required")
+
+        # ── Tool name must resolve before anything else runs ─────────────
+        # `tool_registry.get()` raises a bare KeyError for an unregistered
+        # name. That used to happen AFTER every guardrail below had already
+        # run (Input/Scope/Legal/Escalation/Rate/Audit) and wasn't caught by
+        # their try/except, so a bad tool_name crashed ToolExecutor.run()
+        # with a raw, uncaught KeyError instead of degrading to a clean
+        # tool_result — every caller (CLI, dashboard, and now the MCP
+        # server, which is a new, less-trusted caller that can't be assumed
+        # to only ever pass real names) needs a truthful failure here, not
+        # a crash. Checking membership directly (not calling get()) avoids
+        # constructing get()'s own truncated-tool-list error message, which
+        # is a minor internal-registry disclosure not needed for a normal
+        # "not found" response.
+        if not tool_registry.has(tool_name):
+            return tool_result(
+                tool_name, target,
+                status=STATUS_FAILED,
+                error=f"Unknown tool: {tool_name!r} is not registered",
+            )
 
         # ── Engagement check for non-local targets ──────────────────────
         is_local = target in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
@@ -81,11 +115,32 @@ class ToolExecutor:
                 error=f"Guardrail blocked: {exc}",
             )
 
-        # ── Execute the tool ────────────────────────────────────────────
+        # ── Execute the tool, with a real timeout ────────────────────────
+        # nexus_tool_timeout used to be measured (time.monotonic()) but never
+        # enforced — a hung tool call would block the caller indefinitely.
+        # A thread-pool future gives the caller a bounded wait; note this
+        # can't force-kill a stuck native/C-extension call inside the
+        # worker thread (Python has no safe thread-kill), so a genuinely
+        # wedged tool still leaks a background thread — the fix for that
+        # class of tool is to shell out via run_subprocess() (nexus/tools/
+        # sandbox.py), which *can* be killed on timeout. This still turns
+        # "the dashboard hangs forever" into "the caller gets a prompt,
+        # truthful failure," which is the actual problem being solved here.
         tool = tool_registry.get(tool_name)
         started = time.monotonic()
+        timeout_s = timeout if timeout is not None else getattr(config, "nexus_tool_timeout", 300)
+        future = _EXECUTOR_POOL.submit(tool, target=target, **kwargs)
         try:
-            result = tool(target=target, **kwargs)
+            result = future.result(timeout=timeout_s)
+        except concurrent.futures.TimeoutError:
+            elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+            AuditGuard.validate(action=f"{tool_name}.timeout", target=target, timeout_s=timeout_s)
+            return tool_result(
+                tool_name, target,
+                status=STATUS_FAILED,
+                error=f"Tool exceeded timeout of {timeout_s}s",
+                metadata={"execution_ms": elapsed_ms, "timed_out": True},
+            )
         except Exception as exc:
             elapsed_ms = round((time.monotonic() - started) * 1000, 2)
             return tool_result(
@@ -127,6 +182,17 @@ class ToolExecutor:
                     ).to_dict()
                 )
 
+        # Redact secret-shaped text out of finding evidence/raw fields BEFORE
+        # building the canonical result. This is deliberately different from
+        # rejecting the whole result: a secret-detection tool's entire job is
+        # to discover and report exactly this kind of thing (an exposed AWS
+        # key, a leaked bearer token) on the TARGET — that's a legitimate,
+        # valuable finding, not a leak of NEXUS-STRIKE's own state, and it
+        # must not be silently thrown away. Redacting here means the finding
+        # (title/severity/existence) survives into the report while the raw
+        # secret material never reaches a checkpoint, report, or audit log.
+        normalised = redact_findings(normalised)
+
         # Build the canonical result
         canonical = tool_result(
             tool_name,
@@ -141,9 +207,28 @@ class ToolExecutor:
             },
         )
 
-        # Validate output for secret leakage
-        OutputGuard.validate(
-            json.dumps(canonical, default=str),
-            context={"tool": tool_name},
-        )
+        # Validate output for secret leakage. This is a second, independent
+        # layer behind the redaction above — it catches secret-shaped text
+        # that redact_findings() doesn't touch (summary/error/metadata, or a
+        # redaction-pattern gap), not a first line of defense against every
+        # legitimate discovered-secret finding (those are already redacted
+        # by this point). Every guardrail before this point (Input/Scope/
+        # Legal/Escalation/Rate/Audit) is wrapped in the try/except above and
+        # degrades to a clean STATUS_FAILED tool_result on a violation —
+        # OutputGuard sat outside that pattern and let OutputGuardError
+        # propagate raw out of ToolExecutor.run() instead, which is exactly
+        # what surfaced as unhandled `OutputGuardError` tracebacks in the
+        # automotive-tools tests rather than a clean failure result.
+        try:
+            OutputGuard.validate(
+                json.dumps(canonical, default=str),
+                context={"tool": tool_name},
+            )
+        except OutputGuardError as exc:
+            return tool_result(
+                tool_name, target,
+                status=STATUS_FAILED,
+                error=f"Output blocked: {exc}",
+                metadata={"execution_ms": elapsed_ms},
+            )
         return canonical

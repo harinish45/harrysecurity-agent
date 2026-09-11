@@ -5,6 +5,7 @@ Domain: reconnaissance
 Technology fingerprinting via HTTP headers, HTML analysis, and response patterns.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import urllib.request
@@ -19,6 +20,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 TECH_PATTERNS = {
     "WordPress": [r"wp-content", r"wp-includes", r"wordpress", r"xmlrpc\.php"],
@@ -103,13 +105,11 @@ def run(
     headers_info: dict = {}
 
     import ssl
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(target, allow_insecure=True)
 
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/0.2.0"})
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+        with safe_urlopen(req, timeout=timeout, context=ctx) as resp:
             headers = dict(resp.headers)
             html = resp.read().decode("utf-8", errors="replace")
             status = resp.status

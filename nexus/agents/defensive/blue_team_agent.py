@@ -16,8 +16,7 @@ class BlueTeamAgent(BaseAgent):
 
         # Endpoint protection
         try:
-            ep = tool_registry.get("blue_team.endpoint_protection")
-            result = ep(target=target)
+            result = tool_registry.run("blue_team.endpoint_protection", target=target)
             tools_used.append("blue_team.endpoint_protection")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class BlueTeamAgent(BaseAgent):
 
         # EDR analysis
         try:
-            edr = tool_registry.get("blue_team.edr_analysis")
-            result = edr(target=target)
+            result = tool_registry.run("blue_team.edr_analysis", target=target)
             tools_used.append("blue_team.edr_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class BlueTeamAgent(BaseAgent):
 
         # Log review
         try:
-            log = tool_registry.get("blue_team.log_review")
-            result = log(target=target)
+            result = tool_registry.run("blue_team.log_review", target=target)
             tools_used.append("blue_team.log_review")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class BlueTeamAgent(BaseAgent):
 
         # Threat hunting (blue team)
         try:
-            hunt = tool_registry.get("blue_team.threat_hunting_blue")
-            result = hunt(target=target)
+            result = tool_registry.run("blue_team.threat_hunting_blue", target=target)
             tools_used.append("blue_team.threat_hunting_blue")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -56,8 +52,7 @@ class BlueTeamAgent(BaseAgent):
 
         # SIEM monitoring
         try:
-            siem = tool_registry.get("soc.siem_monitoring")
-            result = siem(target=target)
+            result = tool_registry.run("soc.siem_monitoring", target=target)
             tools_used.append("soc.siem_monitoring")
             if result.get("findings"):
                 findings.extend(result["findings"])

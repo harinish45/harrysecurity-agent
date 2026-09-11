@@ -16,8 +16,7 @@ class SupplyChainAgent(BaseAgent):
 
         # SCA
         try:
-            sca = tool_registry.get("appsec.sca")
-            result = sca(target=target)
+            result = tool_registry.run("appsec.sca", target=target)
             tools_used.append("appsec.sca")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class SupplyChainAgent(BaseAgent):
 
         # Dependency analysis
         try:
-            dep = tool_registry.get("appsec.dependency_analysis")
-            result = dep(target=target)
+            result = tool_registry.run("appsec.dependency_analysis", target=target)
             tools_used.append("appsec.dependency_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class SupplyChainAgent(BaseAgent):
 
         # CI/CD security
         try:
-            cicd = tool_registry.get("appsec.cicd_security")
-            result = cicd(target=target)
+            result = tool_registry.run("appsec.cicd_security", target=target)
             tools_used.append("appsec.cicd_security")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class SupplyChainAgent(BaseAgent):
 
         # Patch verification
         try:
-            patch = tool_registry.get("vuln_assessment.patch_verification")
-            result = patch(target=target)
+            result = tool_registry.run("vuln_assessment.patch_verification", target=target)
             tools_used.append("vuln_assessment.patch_verification")
             if result.get("findings"):
                 findings.extend(result["findings"])

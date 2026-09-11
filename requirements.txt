@@ -1,3 +1,6 @@
 # Canonical development installation.
-# Runtime dependencies live in pyproject.toml; CI installs the dev extra.
+# Runtime dependencies live in pyproject.toml (single source of truth,
+# including everything this branch's security-hardening work added —
+# ldap3/mcp/psutil are in [project.dependencies], hypothesis is in the
+# `dev` extra); CI installs the dev extra.
 -e .[dev]

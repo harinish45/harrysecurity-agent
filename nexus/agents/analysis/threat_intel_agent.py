@@ -16,8 +16,7 @@ class ThreatIntelAgent(BaseAgent):
 
         # Threat feeds
         try:
-            feeds = tool_registry.get("threat_intel.threat_feeds")
-            result = feeds(target=target)
+            result = tool_registry.run("threat_intel.threat_feeds", target=target)
             tools_used.append("threat_intel.threat_feeds")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class ThreatIntelAgent(BaseAgent):
 
         # IOC enrichment
         try:
-            ioc = tool_registry.get("threat_intel.ioc_enrichment")
-            result = ioc(target=target)
+            result = tool_registry.run("threat_intel.ioc_enrichment", target=target)
             tools_used.append("threat_intel.ioc_enrichment")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class ThreatIntelAgent(BaseAgent):
 
         # Threat actor profiling
         try:
-            actor = tool_registry.get("threat_intel.threat_actor_profiling")
-            result = actor(target=target)
+            result = tool_registry.run("threat_intel.threat_actor_profiling", target=target)
             tools_used.append("threat_intel.threat_actor_profiling")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class ThreatIntelAgent(BaseAgent):
 
         # ATT&CK mapping
         try:
-            attck = tool_registry.get("threat_intel.attck_mapping")
-            result = attck(target=target)
+            result = tool_registry.run("threat_intel.attck_mapping", target=target)
             tools_used.append("threat_intel.attck_mapping")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -56,8 +52,7 @@ class ThreatIntelAgent(BaseAgent):
 
         # Malware family tracking
         try:
-            mft = tool_registry.get("threat_intel.malware_family_tracking")
-            result = mft(target=target)
+            result = tool_registry.run("threat_intel.malware_family_tracking", target=target)
             tools_used.append("threat_intel.malware_family_tracking")
             if result.get("findings"):
                 findings.extend(result["findings"])

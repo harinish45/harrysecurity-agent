@@ -16,8 +16,7 @@ class ForensicsAgent(BaseAgent):
 
         # Disk forensics
         try:
-            disk = tool_registry.get("forensics.disk_forensics")
-            result = disk(target=target)
+            result = tool_registry.run("forensics.disk_forensics", target=target)
             tools_used.append("forensics.disk_forensics")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class ForensicsAgent(BaseAgent):
 
         # Memory forensics
         try:
-            mem = tool_registry.get("forensics.memory_forensics")
-            result = mem(target=target)
+            result = tool_registry.run("forensics.memory_forensics", target=target)
             tools_used.append("forensics.memory_forensics")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class ForensicsAgent(BaseAgent):
 
         # Browser forensics
         try:
-            browser = tool_registry.get("forensics.browser_forensics")
-            result = browser(target=target)
+            result = tool_registry.run("forensics.browser_forensics", target=target)
             tools_used.append("forensics.browser_forensics")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class ForensicsAgent(BaseAgent):
 
         # Log analysis
         try:
-            log = tool_registry.get("forensics.log_analysis")
-            result = log(target=target)
+            result = tool_registry.run("forensics.log_analysis", target=target)
             tools_used.append("forensics.log_analysis")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -56,8 +52,7 @@ class ForensicsAgent(BaseAgent):
 
         # Network forensics
         try:
-            net = tool_registry.get("forensics.network_forensics")
-            result = net(target=target)
+            result = tool_registry.run("forensics.network_forensics", target=target)
             tools_used.append("forensics.network_forensics")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -66,8 +61,7 @@ class ForensicsAgent(BaseAgent):
 
         # Email forensics
         try:
-            email = tool_registry.get("forensics.email_forensics")
-            result = email(target=target)
+            result = tool_registry.run("forensics.email_forensics", target=target)
             tools_used.append("forensics.email_forensics")
             if result.get("findings"):
                 findings.extend(result["findings"])

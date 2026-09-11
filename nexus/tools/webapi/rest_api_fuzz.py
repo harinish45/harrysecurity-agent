@@ -5,11 +5,13 @@ Domain: webapi
 Real REST API fuzzer (wordlist of HTTP methods, content-types, auth headers).
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 import urllib.request
 import ssl
 from typing import Any
 from nexus.foundation.schema import Finding, STATUS_COMPLETED, STATUS_NO_FINDINGS, STATUS_FAILED, tool_result
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE"]
 CONTENT_TYPES = ["application/json", "application/xml", "application/x-www-form-urlencoded", "multipart/form-data"]
@@ -26,15 +28,13 @@ def run(target: str, **kwargs: Any) -> dict:
     
     try:
         url = target if "://" in target else f"http://{target}"
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(target, allow_insecure=True)
         
         # Fuzz HTTP methods
         for method in HTTP_METHODS:
             try:
                 req = urllib.request.Request(url, method=method, headers={"User-Agent": "NEXUS-STRIKE/0.2.0"})
-                resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+                resp = safe_urlopen(req, timeout=5, context=ctx)
                 if method not in ["GET", "POST", "OPTIONS"] and resp.status not in [401, 403, 405]:
                     findings.append(Finding(
                         title=f"Unrestricted HTTP Method: {method}",
@@ -58,7 +58,7 @@ def run(target: str, **kwargs: Any) -> dict:
             try:
                 headers = {"User-Agent": "NEXUS-STRIKE/0.2.0", **auth_header}
                 req = urllib.request.Request(url, headers=headers, method="GET")
-                resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+                resp = safe_urlopen(req, timeout=5, context=ctx)
                 if resp.status == 200:
                     findings.append(Finding(
                         title="Weak or Default Credentials Accepted",

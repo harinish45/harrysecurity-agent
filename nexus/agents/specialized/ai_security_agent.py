@@ -15,8 +15,7 @@ class AiSecurityAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("ai_security.adversarial_ml")
-            result = tool(target=target)
+            result = tool_registry.run("ai_security.adversarial_ml", target=target)
             tools_used.append("ai_security.adversarial_ml")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class AiSecurityAgent(BaseAgent):
             findings.append({"title": f"Adversarial ML error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("ai_security.llm_prompt_injection_testing")
-            result = tool(target=target)
+            result = tool_registry.run("ai_security.llm_prompt_injection_testing", target=target)
             tools_used.append("ai_security.llm_prompt_injection_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class AiSecurityAgent(BaseAgent):
             findings.append({"title": f"LLM prompt injection testing error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("ai_security.ai_red_teaming")
-            result = tool(target=target)
+            result = tool_registry.run("ai_security.ai_red_teaming", target=target)
             tools_used.append("ai_security.ai_red_teaming")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class AiSecurityAgent(BaseAgent):
             findings.append({"title": f"AI red teaming error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("ai_security.model_evaluation")
-            result = tool(target=target)
+            result = tool_registry.run("ai_security.model_evaluation", target=target)
             tools_used.append("ai_security.model_evaluation")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class AiSecurityAgent(BaseAgent):
             findings.append({"title": f"Model evaluation error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("ai_security.data_poisoning_research")
-            result = tool(target=target)
+            result = tool_registry.run("ai_security.data_poisoning_research", target=target)
             tools_used.append("ai_security.data_poisoning_research")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class AiSecurityAgent(BaseAgent):
             findings.append({"title": f"Data poisoning research error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("ai_security.model_extraction_testing")
-            result = tool(target=target)
+            result = tool_registry.run("ai_security.model_extraction_testing", target=target)
             tools_used.append("ai_security.model_extraction_testing")
             if result.get("findings"):
                 findings.extend(result["findings"])

@@ -32,10 +32,11 @@ Thank you for your interest in contributing to NEXUS-STRIKE! This document provi
 
 ## 🧪 Testing Requirements
 
-- **Unit Tests**: Add a smoke test for your tool in `tests/unit/test_tools_smoke.py` if it requires special handling.
+- **Behavioral tests, not just smoke tests**: `tests/unit/test_tools_smoke.py` only asserts your tool returns the right shape (status enum, required keys) — it's a floor, not sufficient on its own. Add a real test (see `tests/unit/test_*_real.py` for the house pattern) that mocks the tool's actual dependency (an HTTP response, a subprocess call, a file) and asserts on real finding *content*, not just "didn't crash".
 - **Integration Tests**: If your tool interacts with external systems, add mock-based integration tests in `tests/integration/`.
 - **Verification**: Run `python -m nexus verify` to ensure your tool is importable and registered correctly.
-- **Linting**: Ensure your code passes `ruff check` before submitting a PR.
+- **Full suite**: `pytest tests -q -k "not slow" --ignore=tests/unit/test_automotive_tools.py` should pass before you open a PR (the `automotive` suite is owned separately; `slow` excludes the live-network smoke tests).
+- **Linting**: `ruff check <your files>` should be clean — a repo-wide `[tool.ruff]` baseline is configured in `pyproject.toml`.
 
 ## 📝 Code Style
 
@@ -47,11 +48,11 @@ Thank you for your interest in contributing to NEXUS-STRIKE! This document provi
 ## 🚀 Pull Request Process
 
 1. Create a feature branch: `git checkout -b feat/your-feature-name`
-2. Make your changes and ensure all tests pass: `pytest tests/ -v`
+2. Make your changes and ensure all tests pass: `pytest tests -q -k "not slow" --ignore=tests/unit/test_automotive_tools.py`
 3. Run verification: `python -m nexus verify`
 4. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/).
-5. Open a Pull Request against the `main` branch.
+5. Open a Pull Request against the `master` branch — fill in [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)'s checklist.
 
 ## 📜 Code of Conduct
 
-By participating in this project, you agree to maintain a respectful and professional environment. Harassment, discrimination, or malicious contributions will not be tolerated.
+By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).

@@ -27,6 +27,9 @@ async def test_full_mission_execution(mock_llm_router, tmp_path, monkeypatch):
 
     # Acknowledge written authorization so the legal guard allows the mission.
     monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+    # FlowController checkpoints mission progress under ~/.nexus/checkpoints
+    # by default — keep this test hermetic by redirecting that to tmp_path.
+    monkeypatch.setenv("NEXUS_CHECKPOINT_DIR", str(tmp_path / "checkpoints"))
 
     target = "127.0.0.1"
     mission_id = "test-mission-001"

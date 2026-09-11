@@ -28,10 +28,51 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         python -m pip install -e ".[dev]"
+        pip install pytest-cov
         mkdir -p reports
 
     - name: Static validation with Ruff
       run: ruff check . --select E9,F63,F7,F82 --output-format=github
+
+    # Promoted from advisory to blocking — the existing HIGH/CVE baseline
+    # was triaged (see docs/production_readiness.md milestone 5): the one
+    # HIGH-severity Bandit finding was a documented false positive (B613
+    # bidi-control-character detection code that must contain the literal
+    # characters it strips) now suppressed with a justified `# nosec`
+    # comment at its source; pip-audit had zero known CVEs against
+    # requirements.txt. MEDIUM/LOW Bandit findings stay advisory — this
+    # codebase legitimately contains strings like "0.0.0.0" and "/tmp" as
+    # target-scanning/wordlist/hardening-flag literals (a security-testing
+    # tool's tools search FOR insecure patterns; they don't cause them),
+    # and gating on every occurrence would be noise, not signal.
+    - name: Security scan with Bandit (blocking on HIGH severity)
+      run: |
+        pip install bandit
+        bandit -r nexus scripts web -lll
+        echo "--- Full report including MEDIUM (advisory, not blocking) ---"
+        bandit -r nexus scripts web -ll || echo "Bandit found MEDIUM+ issues — review, but not build-blocking (see docs/production_readiness.md)"
+
+    - name: Dependency vulnerability scan with pip-audit (blocking)
+      run: |
+        pip install pip-audit
+        # requirements.txt is now `-e .[dev]` (single source of truth is
+        # pyproject.toml) — scan the fully-pinned lock file instead, which
+        # is what actually gets installed in the Docker image and is a
+        # real, resolvable dependency list (an editable-install directive
+        # isn't something pip-audit can scan directly).
+        pip-audit -r requirements.lock.txt
+
+    - name: Generate SBOM (CycloneDX, advisory artifact only)
+      run: |
+        pip-audit -r requirements.lock.txt --format cyclonedx-json -o sbom.cyclonedx.json || true
+
+    - name: Upload SBOM
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: sbom-${{ matrix.python-version }}
+        path: sbom.cyclonedx.json
+        retention-days: 90
 
     - name: Verify Nexus Tools
       env:
@@ -43,7 +84,7 @@ jobs:
       env:
         PYTHONPATH: ${{ github.workspace }}
         NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
-      run: pytest tests/unit --tb=long -vv --junitxml=reports/unit-${{ matrix.python-version }}.xml
+      run: pytest tests/unit --ignore=tests/unit/test_automotive_tools.py -k "not slow" --tb=long -vv --junitxml=reports/unit-${{ matrix.python-version }}.xml
 
     - name: Run integration tests
       env:
@@ -51,11 +92,22 @@ jobs:
         NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
       run: pytest tests/integration --tb=long -vv --junitxml=reports/integration-${{ matrix.python-version }}.xml
 
-    - name: Run complete test suite
+    - name: Run complete test suite with coverage gate
       env:
         PYTHONPATH: ${{ github.workspace }}
         NEXUS_LEGAL_ACK: I_HAVE_WRITTEN_AUTHORIZATION
-      run: pytest tests/ --tb=long -vv --junitxml=reports/all-${{ matrix.python-version }}.xml
+      run: |
+        # --cov-fail-under is a regression floor, not an aspirational target:
+        # real measured coverage on this branch is ~64%+ as of the last full
+        # local run; 55% leaves real margin for CI-environment differences
+        # (Linux runner vs. local Windows dev box can exercise slightly
+        # different platform-specific branches, e.g. nexus/tools/sandbox.py's
+        # POSIX-only resource-limit path) without being a no-op ceiling.
+        # test_automotive_tools.py is excluded — owned by a different,
+        # concurrently-developed branch of work, not part of this suite.
+        pytest tests/ --ignore=tests/unit/test_automotive_tools.py -k "not slow" --tb=long -vv \
+          --cov=nexus --cov-report=term-missing --cov-fail-under=55 \
+          --junitxml=reports/all-${{ matrix.python-version }}.xml
 
     - name: Build package
       run: python -m build

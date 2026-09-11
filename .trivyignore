@@ -1,0 +1,24 @@
+# Trivy vulnerability suppressions for the nexus-strike Docker image.
+#
+# Every entry here must be a specific, currently-unfixable finding with a
+# clear justification below it -- never a blanket suppression. If a fix
+# ever becomes available (a newer pip release vendoring a patched
+# msgpack), remove the entry and let Trivy catch the regression if it's
+# somehow reintroduced.
+
+# GHSA-6v7p-g79w-8964 -- MessagePack for Python: out-of-bounds read/crash
+# on Unpacker reuse. This is NOT the top-level `msgpack` package this
+# project installs (that's pinned to >=1.2.1 in the Dockerfile's runtime
+# stage and is clean) -- it's pip's OWN internal vendored copy at
+# pip/_vendor/msgpack, used only by pip's CacheControl HTTP response
+# caching when pip itself talks to a package index. pip 26.2.1 (the
+# latest available release as of this writing) still vendors msgpack
+# 1.1.2 internally; there is no newer pip release that fixes this, and it
+# cannot be patched via `pip install --upgrade msgpack` since it's baked
+# into pip's own distribution, not a separate installable dependency.
+# Not exploitable in this project's context: the vulnerable code path is
+# reached only by pip's own internal HTTP response cache deserialization
+# during `pip install` against PyPI (a trusted index this project's
+# InstallerAgent uses), not by any attacker-controlled input this
+# application processes directly.
+GHSA-6v7p-g79w-8964

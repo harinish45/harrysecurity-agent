@@ -15,8 +15,7 @@ class ComplianceAuditorAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("compliance.iso27001_audit")
-            result = tool(target=target)
+            result = tool_registry.run("compliance.iso27001_audit", target=target)
             tools_used.append("compliance.iso27001_audit")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class ComplianceAuditorAgent(BaseAgent):
             findings.append({"title": f"ISO 27001 audit error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("compliance.pci_dss_audit")
-            result = tool(target=target)
+            result = tool_registry.run("compliance.pci_dss_audit", target=target)
             tools_used.append("compliance.pci_dss_audit")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class ComplianceAuditorAgent(BaseAgent):
             findings.append({"title": f"PCI DSS audit error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("compliance.gdpr_audit")
-            result = tool(target=target)
+            result = tool_registry.run("compliance.gdpr_audit", target=target)
             tools_used.append("compliance.gdpr_audit")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class ComplianceAuditorAgent(BaseAgent):
             findings.append({"title": f"GDPR audit error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("compliance.hipaa_audit")
-            result = tool(target=target)
+            result = tool_registry.run("compliance.hipaa_audit", target=target)
             tools_used.append("compliance.hipaa_audit")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class ComplianceAuditorAgent(BaseAgent):
             findings.append({"title": f"HIPAA audit error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("compliance.nist_800_53_audit")
-            result = tool(target=target)
+            result = tool_registry.run("compliance.nist_800_53_audit", target=target)
             tools_used.append("compliance.nist_800_53_audit")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class ComplianceAuditorAgent(BaseAgent):
             findings.append({"title": f"NIST 800-53 audit error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("compliance.nist_csf_audit")
-            result = tool(target=target)
+            result = tool_registry.run("compliance.nist_csf_audit", target=target)
             tools_used.append("compliance.nist_csf_audit")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -69,8 +63,7 @@ class ComplianceAuditorAgent(BaseAgent):
             findings.append({"title": f"NIST CSF audit error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("compliance.policy_reviews")
-            result = tool(target=target)
+            result = tool_registry.run("compliance.policy_reviews", target=target)
             tools_used.append("compliance.policy_reviews")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -78,8 +71,7 @@ class ComplianceAuditorAgent(BaseAgent):
             findings.append({"title": f"Policy review error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("compliance.risk_assessments")
-            result = tool(target=target)
+            result = tool_registry.run("compliance.risk_assessments", target=target)
             tools_used.append("compliance.risk_assessments")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -87,8 +79,7 @@ class ComplianceAuditorAgent(BaseAgent):
             findings.append({"title": f"Risk assessment error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("compliance.security_audits")
-            result = tool(target=target)
+            result = tool_registry.run("compliance.security_audits", target=target)
             tools_used.append("compliance.security_audits")
             if result.get("findings"):
                 findings.extend(result["findings"])

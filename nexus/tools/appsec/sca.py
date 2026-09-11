@@ -1,53 +1,50 @@
 #!/usr/bin/env python3
 """
-NEXUS-STRIKE — appsec tool: Sca
+NEXUS-STRIKE — appsec.sca
 Domain: appsec
+Software Composition Analysis: real dependency-manifest parsing plus a real
+OSV.dev lookup per declared package+version. This is the same operation as
+appsec.dependency_analysis under its more common industry name (SCA); the
+real parsing/lookup logic lives once in nexus/tools/appsec/_manifest_scan.py
+and both tools call it.
+
+Previously this ignored `target` as a manifest/path entirely and did a bare
+DNS resolve + HTTP GET on "/" (byte-for-byte identical to 19 other stub
+tools) — caught during this session's audit. `target` is now honestly
+reinterpreted as a local path (a manifest file or a source tree containing
+one). A non-local-path target degrades to STATUS_OUT_OF_SCOPE instead of
+fabricating results.
 """
+from __future__ import annotations
+
+from typing import Any
+
+from nexus.tools.appsec._manifest_scan import scan_dependencies
 from nexus.tools.registry import tool_registry
 
 
-def run(target: str, **kwargs) -> dict:
-    """appsec tool: Sca"""
-    findings = []
-    try:
-        import urllib.request
-        import urllib.parse
-        import ssl
-        url = target if "://" in target else f"http://{target}/"
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "NexusStrike/1.0"})
-            resp = urllib.request.urlopen(req, timeout=5, context=ctx)
-            body = resp.read(8192).decode('utf-8', errors='replace')
-            findings.append(f"HTTP {resp.status}: Server={resp.headers.get('Server', 'unknown')}")
-            # Check for security headers
-            headers = dict(resp.headers)
-            for h in ["X-Frame-Options", "X-Content-Type-Options", "Strict-Transport-Security", "Content-Security-Policy"]:
-                if h not in headers:
-                    findings.append(f"Missing security header: {h}")
-            # Check for common vulnerabilities in body
-            if "<form" in body.lower():
-                findings.append("Form found - potential for input-based attacks")
-            if "admin" in body.lower():
-                findings.append("Admin reference found in page")
-        except urllib.error.HTTPError as e:
-            findings.append(f"HTTP {e.code}: {url}")
-        except Exception as e:
-            findings.append(f"HTTP error: {str(e)[:80]}")
-    except Exception as e:
-        findings.append(f"Error: {e}")
-    return {"tool": "appsec.sca", "domain": "appsec", "target": target, "status": "completed", "findings": findings}
+def run(target: str, max_packages: int = 200, **kwargs: Any) -> dict:
+    """Software Composition Analysis: parse declared dependencies and check OSV.dev for known vulns.
+
+    Parameters
+    ----------
+    target : str
+        Path to a manifest file (requirements.txt, package.json,
+        package-lock.json, Pipfile.lock) or a directory containing one.
+    max_packages : int
+        Maximum number of declared packages to check against OSV.dev.
+    """
+    return scan_dependencies("appsec.sca", target, max_packages=max_packages)
 
 
-# Register with tool registry
 tool_registry.register("appsec.sca", run, metadata={
     "name": "appsec.sca",
     "domain": "appsec",
     "status": "completed",
-    "description": "appsec tool: Sca",
+    "description": "Software Composition Analysis: real dependency manifest parsing with OSV.dev "
+                    "known-vulnerability lookup per package+version",
     "parameters": {
-        "target": "Target domain, IP, or URL",
+        "target": "Local path to a manifest file or a directory containing one",
+        "max_packages": "Maximum declared packages to check against OSV.dev (default: 200)",
     },
 })

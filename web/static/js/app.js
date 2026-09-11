@@ -7,9 +7,59 @@
 
 // ── State ──────────────────────────────────────────────────────
 let severityChart = null;
+let benchmarkScoreChart = null;
 let scanPolling = null;
 let allFindings = [];
 let scanSocket = null;
+
+// ── Authenticated fetch ──────────────────────────────────────────
+// The server has always supported an optional NEXUS_DASHBOARD_TOKEN
+// (Authorization: Bearer <token>), but nothing in this file ever sent
+// that header — meaning a configured token silently broke the whole UI.
+// apiFetch() fixes that: it attaches a stored token (if any) and the
+// same-origin signal header the server now requires on state-changing
+// requests, and prompts once for a token on a 401 rather than failing
+// silently forever.
+const _rawFetch = window.fetch.bind(window);
+const TOKEN_STORAGE_KEY = 'nexus-dashboard-token';
+
+function getStoredToken() {
+    try {
+        return localStorage.getItem(TOKEN_STORAGE_KEY) || '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function setStoredToken(token) {
+    try {
+        if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        else localStorage.removeItem(TOKEN_STORAGE_KEY);
+    } catch (e) { /* private browsing / storage blocked — token just won't persist */ }
+}
+
+async function apiFetch(url, options = {}, _retried = false) {
+    const headers = new Headers(options.headers || {});
+    const token = getStoredToken();
+    if (token && !headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+    const method = (options.method || 'GET').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+        headers.set('X-Requested-With', 'NEXUS-Dashboard');
+    }
+
+    const response = await _rawFetch(url, { ...options, headers });
+
+    if (response.status === 401 && !_retried) {
+        const entered = window.prompt('Dashboard token required. Enter NEXUS_DASHBOARD_TOKEN:');
+        if (entered) {
+            setStoredToken(entered.trim());
+            return apiFetch(url, options, true);
+        }
+    }
+    return response;
+}
 
 // ── Bootstrap ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -104,6 +154,8 @@ function handleScanEvent(data) {
     } else if (data.type === 'output') {
         output.textContent += `\n${data.line || ''}`;
         output.scrollTop = output.scrollHeight;
+    } else if (data.type === 'agent_event') {
+        renderAgentEvent(data.event || {});
     }
 }
 
@@ -144,6 +196,7 @@ function navigate(pageName) {
         'pentests':     ['Pentests',                'Live Assessment Control'],
         'issues':       ['Security Issues',         'Findings & Vulnerabilities'],
         'reports':      ['Reports',                 'Generated Security Reports'],
+        'benchmarks':   ['Benchmark Dashboard',      'Suite scores, debate precision/recall, agent latency'],
         'supply-chain': ['Supply Chain',            'Third-party & Vendor Risk'],
         'repositories': ['Repositories',            'Code Security & Secrets'],
         'domains':      ['Tool Domains',            '277 tools across 29 domains'],
@@ -167,9 +220,10 @@ function navigate(pageName) {
 /** Lazy page data loaders */
 async function onPageLoad(page) {
     switch (page) {
-        case 'pentests':    await loadAgentTiers(); break;
+        case 'pentests':    await loadAgentTiers(); initAnalysisTabs(); await loadMitreCoverage(); startBudgetMeterPolling(); break;
         case 'issues':      await loadIssues(); break;
         case 'reports':     await loadReportsGrid(); break;
+        case 'benchmarks':  await loadBenchmarksPage(); break;
         case 'supply-chain': await loadSkills(); break;
         case 'repositories': await loadToolDomains(); break;
         case 'domains':     await loadDomains(); break;
@@ -183,9 +237,9 @@ async function onPageLoad(page) {
 async function loadStats() {
     try {
         const [statsRes, agentsRes, toolsRes] = await Promise.all([
-            fetch('/api/stats'),
-            fetch('/api/agents'),
-            fetch('/api/tools'),
+            apiFetch('/api/stats'),
+            apiFetch('/api/agents'),
+            apiFetch('/api/tools'),
         ]);
         const stats  = await statsRes.json();
         const agents = await agentsRes.json();
@@ -251,7 +305,7 @@ function initSeverityChart(counts) {
 // ── Reports ────────────────────────────────────────────────────
 async function loadReports() {
     try {
-        const res  = await fetch('/api/reports');
+        const res  = await apiFetch('/api/reports');
         const data = await res.json();
         const tbody = document.getElementById('reports-tbody');
         if (!tbody) return;
@@ -283,7 +337,7 @@ async function loadReportsGrid() {
     grid.innerHTML = '<div class="loading-cell">Loading reports…</div>';
 
     try {
-        const res  = await fetch('/api/reports');
+        const res  = await apiFetch('/api/reports');
         const data = await res.json();
 
         if (!data.reports || data.reports.length === 0) {
@@ -375,7 +429,7 @@ async function loadAgentTiers() {
     const container = document.getElementById('tier-cards');
     if (!container) return;
     try {
-        const res  = await fetch('/api/agents');
+        const res  = await apiFetch('/api/agents');
         const data = await res.json();
         if (!data.by_tier) return;
         container.innerHTML = Object.entries(data.by_tier).map(([tier, agents]) => `
@@ -383,7 +437,48 @@ async function loadAgentTiers() {
                 <div class="tier-name">${tier}</div>
                 <div class="tier-count">${agents.length}</div>
             </div>`).join('');
+
+        const datalist = document.getElementById('agent-name-list');
+        if (datalist) {
+            const allNames = Object.values(data.by_tier).flat();
+            datalist.innerHTML = allNames.map(name => `<option value="${escHtml(name)}"></option>`).join('');
+        }
     } catch {}
+}
+
+// ── Run a single agent (Pentests page) ─────────────────────────
+async function runAgent() {
+    const agent = document.getElementById('agent-name')?.value?.trim();
+    const target = document.getElementById('agent-target')?.value?.trim();
+    const output = document.getElementById('agent-run-output');
+    if (!agent || !target) {
+        if (output) output.textContent = '⚠ Enter both an agent name and a target.';
+        return;
+    }
+    if (output) output.textContent = `🎯 Running ${agent} against ${target}…\n`;
+    try {
+        const res = await apiFetch('/api/agent/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent, target }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            if (output) output.textContent = `❌ ${data.detail || 'Request failed'}`;
+            return;
+        }
+        const findings = data.findings || [];
+        let text = `✅ Status: ${data.status || 'unknown'}\nFindings: ${findings.length}\n\n`;
+        for (const f of findings.slice(0, 20)) {
+            const title = (f && typeof f === 'object') ? (f.title || JSON.stringify(f)) : String(f);
+            const sev = (f && typeof f === 'object') ? (f.severity || 'info') : 'info';
+            text += `[${sev}] ${title}\n`;
+        }
+        if (findings.length > 20) text += `… and ${findings.length - 20} more\n`;
+        if (output) output.textContent = text;
+    } catch (e) {
+        if (output) output.textContent = `❌ Request failed: ${e}`;
+    }
 }
 
 // ── Issues ─────────────────────────────────────────────────────
@@ -391,7 +486,7 @@ async function loadIssues() {
     const list = document.getElementById('issues-list');
     if (!list) return;
     try {
-        const res  = await fetch('/api/findings');
+        const res  = await apiFetch('/api/findings');
         const data = await res.json();
         renderIssues(data.findings || [], 'all');
     } catch {
@@ -428,7 +523,7 @@ async function loadSkills() {
     const grid = document.getElementById('skills-list');
     if (!grid) return;
     try {
-        const res  = await fetch('/api/skills');
+        const res  = await apiFetch('/api/skills');
         const data = await res.json();
         const skills = data.functional || data.class_based || [];
         if (skills.length === 0) {
@@ -449,46 +544,37 @@ async function loadSkills() {
     }
 }
 
-// ── Tool Domains (Repositories page) ──────────────────────────
-async function loadToolDomains() {
-    const grid = document.getElementById('tool-domains-grid');
+// ── Tool Domains (shared by the Repositories page and the Domains page —
+// same data, same rendering, just a different target grid element) ────
+async function renderToolDomainsInto(gridId, emptyLabel, errorLabel) {
+    const grid = document.getElementById(gridId);
     if (!grid) return;
     try {
-        const res  = await fetch('/api/tools');
+        const res  = await apiFetch('/api/tools');
         const data = await res.json();
         const counts = data.counts || {};
         grid.innerHTML = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(([domain, count]) => `
             <div class="domain-card">
                 <span class="domain-name">${escHtml(domain.replace(/_/g,' '))}</span>
                 <span class="domain-count">${count}</span>
-            </div>`).join('') || '<div class="loading-cell">No tool data.</div>';
+            </div>`).join('') || `<div class="loading-cell">${emptyLabel}</div>`;
     } catch {
-        grid.innerHTML = '<div class="loading-cell">Failed to load tool data.</div>';
+        grid.innerHTML = `<div class="loading-cell">${errorLabel}</div>`;
     }
 }
 
-// ── Domains page ───────────────────────────────────────────────
+async function loadToolDomains() {
+    return renderToolDomainsInto('tool-domains-grid', 'No tool data.', 'Failed to load tool data.');
+}
+
 async function loadDomains() {
-    const grid = document.getElementById('domains-grid');
-    if (!grid) return;
-    try {
-        const res  = await fetch('/api/tools');
-        const data = await res.json();
-        const counts = data.counts || {};
-        grid.innerHTML = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(([domain, count]) => `
-            <div class="domain-card">
-                <span class="domain-name">${escHtml(domain.replace(/_/g,' '))}</span>
-                <span class="domain-count">${count}</span>
-            </div>`).join('') || '<div class="loading-cell">No domain data.</div>';
-    } catch {
-        grid.innerHTML = '<div class="loading-cell">Failed to load domains.</div>';
-    }
+    return renderToolDomainsInto('domains-grid', 'No domain data.', 'Failed to load domains.');
 }
 
 // ── Networks page ──────────────────────────────────────────────
 async function loadNetworkInfo() {
     try {
-        const res  = await fetch('/api/tools');
+        const res  = await apiFetch('/api/tools');
         const data = await res.json();
         const counts = data.counts || {};
         const networkDomains = ['network','reconnaissance','osint','wireless','iot'];
@@ -510,7 +596,7 @@ async function loadNetworkInfo() {
 // ── Knowledge page ─────────────────────────────────────────────
 async function loadKnowledge() {
     try {
-        const res  = await fetch('/api/agents');
+        const res  = await apiFetch('/api/agents');
         const data = await res.json();
         const tierSummary = document.getElementById('tier-summary');
         if (tierSummary && data.by_tier) {
@@ -528,7 +614,7 @@ async function loadSkillChips() {
     const container = document.getElementById('skill-chips');
     if (!container || container.children.length > 0) return;
     try {
-        const res  = await fetch('/api/skills');
+        const res  = await apiFetch('/api/skills');
         const data = await res.json();
         const skills = data.functional || [];
         container.innerHTML = skills.map(name => `
@@ -583,11 +669,13 @@ async function startScan() {
     btn.disabled = true;
 
     try {
-        const res  = await fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target:'127.0.0.1'}) });
+        const res  = await apiFetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target:'127.0.0.1'}) });
         const data = await res.json();
         console.log('Scan started:', data);
     } catch {
-        // nexus live handles scans via CLI — API is stub
+        // A rejected request here (guardrail block, missing NEXUS_LEGAL_ACK,
+        // scope violation) is surfaced by the scan-output log via the /ws/scan
+        // WebSocket, not by this catch — /api/scan/start is a real endpoint.
     } finally {
         setTimeout(() => { text.textContent = '▶ Start Scan'; btn.disabled = false; }, 3000);
     }
@@ -595,15 +683,344 @@ async function startScan() {
 
 async function startScanFromPanel() {
     const target = document.getElementById('scan-target')?.value?.trim() || '127.0.0.1';
+    const mode = document.getElementById('scan-mission-mode')?.value || 'live';
     const output = document.getElementById('scan-output');
-    if (output) output.textContent = `🚀 Launching assessment against ${target}…\n`;
-    await fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target}) }).catch(() => {});
+    const stream = document.getElementById('agent-stream');
+    if (output) output.textContent = `🚀 Launching ${mode} assessment against ${target}…\n`;
+    if (stream) { stream.innerHTML = ''; agentStreamGroups = {}; }
+    await apiFetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target, mode}) }).catch(() => {});
+}
+
+// Per-agent event groups for the Live Agent Stream panel — keyed by agent
+// name so repeated batches for the same agent collapse into one block
+// instead of scrolling text.
+let agentStreamGroups = {};
+
+function renderAgentEvent(evt) {
+    const stream = document.getElementById('agent-stream');
+    if (!stream) return;
+
+    if (evt.type === 'batch_start') {
+        (evt.agents || []).forEach(name => {
+            agentStreamGroups[name] = agentStreamGroups[name] || { status: 'running', batch: evt.batch };
+        });
+    } else if (evt.type === 'agent_done') {
+        const name = evt.agent || 'unknown';
+        agentStreamGroups[name] = {
+            status: evt.status || 'completed',
+            batch: evt.batch,
+            findings: evt.findings_count,
+            error: evt.error,
+        };
+    } else if (evt.type === 'debate_round') {
+        const name = `debate_consensus_agent (${evt.finding_id})`;
+        const verdict = evt.verdict?.verdict || evt.verdict?.consensus || '?';
+        agentStreamGroups[name] = {
+            status: evt.role === 'consensus' ? (verdict === 'disagreement' ? 'failed' : 'completed') : 'running',
+            batch: '—',
+            findings: undefined,
+            error: undefined,
+            debateRole: evt.role,
+            debateVerdict: verdict,
+        };
+    }
+
+    const rows = Object.entries(agentStreamGroups).map(([name, info]) => {
+        const icon = info.status === 'failed' ? '❌' : (info.status === 'running' ? '⏳' : '✅');
+        let detail;
+        if (info.debateRole) {
+            detail = `${info.debateRole}: ${escHtml(info.debateVerdict)}`;
+        } else {
+            detail = info.error
+                ? `error: ${escHtml(info.error)}`
+                : (info.findings !== undefined ? `${info.findings} finding(s)` : 'running…');
+        }
+        return `<div class="agent-stream-row"><span class="agent-stream-name">${icon} ${escHtml(name)}</span>`
+             + `<span class="agent-stream-detail">batch ${info.batch ?? '?'} — ${detail}</span></div>`;
+    });
+    stream.innerHTML = rows.join('') || '<span class="muted">Waiting for agents…</span>';
 }
 
 async function stopScan() {
     const output = document.getElementById('scan-output');
-    await fetch('/api/scan/stop', { method:'POST' }).catch(() => {});
+    await apiFetch('/api/scan/stop', { method:'POST' }).catch(() => {});
     if (output) output.textContent += '\n⏹ Stop requested.';
+}
+
+// ── Mission Analysis panel (MITRE coverage / attack graph / report preview) ──
+function initAnalysisTabs() {
+    const bar = document.getElementById('analysis-tabs');
+    if (!bar || bar.dataset.wired) return;
+    bar.dataset.wired = '1';
+
+    bar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.tab-btn');
+        if (!btn) return;
+        bar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.tab;
+        ['mitre', 'graph', 'triage', 'report'].forEach(name => {
+            const panel = document.getElementById(`analysis-${name}`);
+            if (panel) panel.hidden = name !== tab;
+        });
+        if (tab === 'graph') loadAttackGraph();
+        if (tab === 'triage') loadTriageBoard();
+        if (tab === 'report') loadReportTonePreview();
+    });
+
+    const modeSelect = document.getElementById('report-tone-mode');
+    if (modeSelect) modeSelect.addEventListener('change', loadReportTonePreview);
+}
+
+async function loadMitreCoverage() {
+    const el = document.getElementById('analysis-mitre');
+    if (!el) return;
+    try {
+        const res = await apiFetch('/api/mitre-coverage');
+        const data = await res.json();
+        if (!data.techniques || !data.techniques.length) {
+            el.innerHTML = '<span class="muted">No MITRE ATT&CK-tagged findings in the latest report yet.</span>';
+            return;
+        }
+        const sevClass = { critical: 'sev-critical', high: 'sev-high', medium: 'sev-medium', low: 'sev-low', info: 'sev-info' };
+        el.innerHTML = `<div class="mitre-heatmap">${data.techniques.map(t => `
+            <div class="mitre-cell ${sevClass[t.max_severity] || 'sev-info'}" title="${escHtml(t.name)} — ${t.count} finding(s)">
+                <div class="mitre-cell-id">${escHtml(t.id)}</div>
+                <div class="mitre-cell-count">${t.count}</div>
+            </div>`).join('')}</div>`;
+    } catch (e) {
+        el.innerHTML = '<span class="muted">Could not load MITRE coverage.</span>';
+    }
+}
+
+async function loadAttackGraph() {
+    const el = document.getElementById('analysis-graph');
+    if (!el || el.dataset.loaded) return;
+    try {
+        const res = await apiFetch('/api/attack-graph');
+        const data = await res.json();
+        el.innerHTML = data.svg || '<span class="muted">No graph data.</span>';
+        el.dataset.loaded = '1';
+    } catch (e) {
+        el.innerHTML = '<span class="muted">Could not load attack graph.</span>';
+    }
+}
+
+// Triage board columns, in the order XBOW-style verification moves a
+// finding through: unverified/non_replayable -> failed -> verified, with
+// any finding debate_consensus_agent flagged "disagreement" surfaced too.
+const _TRIAGE_COLUMNS = [
+    { key: 'non_replayable', label: 'Unverified (no replay evidence)' },
+    { key: 'unverified', label: 'Verification Failed' },
+    { key: 'failed', label: 'Replay Errored' },
+    { key: 'verified', label: 'Verified' },
+];
+
+async function loadTriageBoard() {
+    const el = document.getElementById('analysis-triage');
+    if (!el) return;
+    el.innerHTML = '<span class="muted">Loading…</span>';
+    try {
+        const res = await apiFetch('/api/findings?limit=200');
+        const data = await res.json();
+        const findings = data.findings || [];
+        const buckets = {};
+        _TRIAGE_COLUMNS.forEach(c => { buckets[c.key] = []; });
+        buckets.unclassified = [];
+        findings.forEach(f => {
+            const status = f.verification_status;
+            (buckets[status] ? buckets[status] : buckets.unclassified).push(f);
+        });
+        const columns = [..._TRIAGE_COLUMNS, { key: 'unclassified', label: 'Not Yet Verified' }];
+        el.innerHTML = `<div class="triage-board">${columns.map(col => `
+            <div class="triage-column">
+                <div class="triage-column-header">${escHtml(col.label)} <span class="triage-count">${buckets[col.key].length}</span></div>
+                ${buckets[col.key].slice(0, 20).map(f => `
+                    <div class="triage-card sev-${f.severity || 'info'}">
+                        <div class="triage-card-title">${escHtml(f.title || 'Untitled')}</div>
+                        <div class="triage-card-meta">${escHtml(f.id || '')} · ${escHtml(f.severity || 'info')}</div>
+                    </div>`).join('') || '<span class="muted triage-empty">—</span>'}
+            </div>`).join('')}</div>`;
+    } catch (e) {
+        el.innerHTML = '<span class="muted">Could not load triage board.</span>';
+    }
+}
+
+async function loadReportTonePreview() {
+    const body = document.getElementById('report-tone-body');
+    const mode = document.getElementById('report-tone-mode')?.value || 'pentest';
+    if (!body) return;
+    body.textContent = 'Loading…';
+    try {
+        const res = await apiFetch(`/api/report-tone?mode=${encodeURIComponent(mode)}`);
+        const data = await res.json();
+        body.textContent = data.report || 'No report data yet — run a mission first.';
+    } catch (e) {
+        body.textContent = 'Could not load report preview.';
+    }
+}
+
+// ── Budget meter ───────────────────────────────────────────────
+let budgetMeterInterval = null;
+
+function startBudgetMeterPolling() {
+    if (budgetMeterInterval) return;
+    loadBudgetMeter();
+    budgetMeterInterval = setInterval(loadBudgetMeter, 5000);
+}
+
+async function loadBudgetMeter() {
+    const fill = document.getElementById('budget-meter-fill');
+    const text = document.getElementById('budget-meter-text');
+    if (!fill || !text) return;
+    try {
+        const res = await apiFetch('/api/budget');
+        const data = await res.json();
+        if (!data.mission_id) {
+            text.textContent = 'No active mission';
+            fill.style.width = '0%';
+            return;
+        }
+        // NEXUS_BUDGET_MAX_TOKENS/_MAX_USD are optional — only render the bar
+        // as a fraction of an actual configured cap; otherwise just show the
+        // running total without implying a limit that isn't set.
+        if (data.max_tokens) {
+            fill.style.width = `${Math.min(100, (data.estimated_tokens / data.max_tokens) * 100)}%`;
+        } else {
+            fill.style.width = '0%';
+        }
+        const capNote = data.max_tokens ? ` / ${data.max_tokens} cap` : ' (no cap set)';
+        text.textContent = `${data.estimated_tokens}${capNote} tokens (~$${(data.estimated_usd || 0).toFixed(4)}) — ${data.calls} call(s)`;
+    } catch (e) {
+        // Silent — budget endpoint may not be reachable yet.
+    }
+}
+
+// ── Benchmark Dashboard page ─────────────────────────────────────
+const _BENCHMARK_SUITE_COLORS = {
+    intercode_ctf: '#3fb950',
+    cybench: '#d29922',
+    nyu_ctf: '#a371f7',
+    debate_consensus_eval: '#58a6ff',
+};
+
+async function loadBenchmarksPage() {
+    await Promise.all([
+        loadBenchmarkScoreChart(),
+        loadDebateEvalTable(),
+        loadLatencyTable(),
+    ]);
+}
+
+async function loadBenchmarkScoreChart() {
+    const canvas = document.getElementById('benchmarkScoreChart');
+    const empty = document.getElementById('benchmark-score-empty');
+    if (!canvas) return;
+    try {
+        const res = await apiFetch('/api/benchmarks?limit=200');
+        const data = await res.json();
+        const runs = (data.runs || []).filter(r => r.run_at && typeof r.score === 'number');
+
+        if (!runs.length) {
+            canvas.hidden = true;
+            if (empty) empty.hidden = false;
+            return;
+        }
+        canvas.hidden = false;
+        if (empty) empty.hidden = true;
+
+        // Group by suite, oldest -> newest per suite, so each suite draws
+        // its own score-over-time line.
+        const bySuite = {};
+        runs.forEach(r => { (bySuite[r.suite] = bySuite[r.suite] || []).push(r); });
+        Object.values(bySuite).forEach(list => list.sort((a, b) => a.run_at.localeCompare(b.run_at)));
+
+        // Shared x-axis: every distinct run_at across all suites, sorted.
+        const allTimestamps = [...new Set(runs.map(r => r.run_at))].sort();
+
+        const datasets = Object.entries(bySuite).map(([suite, list]) => {
+            const bySuiteTime = Object.fromEntries(list.map(r => [r.run_at, r.score]));
+            return {
+                label: suite,
+                data: allTimestamps.map(ts => bySuiteTime[ts] ?? null),
+                borderColor: _BENCHMARK_SUITE_COLORS[suite] || '#8b949e',
+                backgroundColor: 'transparent',
+                spanGaps: true,
+                tension: 0.25,
+            };
+        });
+
+        if (benchmarkScoreChart) { benchmarkScoreChart.destroy(); }
+        benchmarkScoreChart = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: { labels: allTimestamps.map(t => t.replace('T', ' ').replace('Z', '')), datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { min: 0, max: 1, ticks: { color: '#8b949e' } },
+                    x: { ticks: { color: '#8b949e', maxRotation: 45, minRotation: 45 } },
+                },
+                plugins: {
+                    legend: { position: 'top', labels: { color: '#8b949e', font: { family: 'Inter', size: 11 } } },
+                },
+            },
+        });
+    } catch (e) {
+        console.warn('Benchmark score chart load failed:', e);
+        if (empty) { empty.hidden = false; empty.textContent = 'Could not load benchmark history.'; }
+    }
+}
+
+async function loadDebateEvalTable() {
+    const tbody = document.getElementById('debate-eval-tbody');
+    if (!tbody) return;
+    try {
+        const res = await apiFetch('/api/benchmarks/debate-eval');
+        const data = await res.json();
+        const runs = data.runs || [];
+        if (!runs.length) {
+            tbody.innerHTML = '<tr><td colspan="9" class="loading-cell">No debate_consensus_eval runs yet — run <code>nexus benchmark --suite debate_consensus_eval</code>.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = runs.map(r => `
+            <tr>
+                <td>${escHtml((r.run_at || '').replace('T', ' ').replace('Z', ''))}</td>
+                <td>${(r.precision ?? 0).toFixed(2)}</td>
+                <td>${(r.recall ?? 0).toFixed(2)}</td>
+                <td>${(r.f1 ?? 0).toFixed(2)}</td>
+                <td>${r.tp ?? 0}</td>
+                <td>${r.fp ?? 0}</td>
+                <td>${r.fn ?? 0}</td>
+                <td>${r.tn ?? 0}</td>
+                <td>${r.abstained ?? 0}</td>
+            </tr>`).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="9" class="loading-cell">Could not load debate-eval history.</td></tr>';
+    }
+}
+
+async function loadLatencyTable() {
+    const tbody = document.getElementById('latency-tbody');
+    if (!tbody) return;
+    try {
+        const res = await apiFetch('/api/benchmarks/latency?limit=1');
+        const data = await res.json();
+        const latest = (data.runs || [])[0];
+        if (!latest || !latest.results || !latest.results.length) {
+            tbody.innerHTML = '<tr><td colspan="3" class="loading-cell">No latency runs yet — run <code>nexus benchmark --latency</code>.</td></tr>';
+            return;
+        }
+        // Already sorted slowest-first by benchmark_agent_latency().
+        tbody.innerHTML = latest.results.map(r => `
+            <tr>
+                <td>${escHtml(r.agent)}</td>
+                <td>${r.latency_ms ?? '—'}</td>
+                <td>${escHtml(r.status)}</td>
+            </tr>`).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="3" class="loading-cell">Could not load latency history.</td></tr>';
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────

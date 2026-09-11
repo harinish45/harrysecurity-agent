@@ -5,6 +5,7 @@ Domain: webapp
 Directory and file enumeration with recursive scanning and status code analysis.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import concurrent.futures
 import re
@@ -20,6 +21,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 USER_AGENT = "NEXUS-STRIKE/0.2.0 (DirEnum)"
 
@@ -48,10 +50,8 @@ def _http_request(url: str, timeout: int = 5) -> dict:
         url = f"http://{url}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        ctx = get_ssl_context(url, allow_insecure=True)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         body = resp.read(8192).decode("utf-8", errors="replace")
         return {"status": resp.status, "body": body, "size": len(body)}
     except urllib.error.HTTPError as e:
@@ -120,7 +120,14 @@ def run(
     discovered: list[dict] = []
 
     def check_path(path: str) -> Optional[dict]:
-        test_url = f"{base}{path}"
+        # COMMON_DIRS mixes leading-slash entries ("/admin") with bare
+        # filename entries (".env", "wp-config.php", ...) — `f"{base}{path}"`
+        # silently produced malformed URLs like "http://127.0.0.1.env" and
+        # "http://127.0.0.1admin.php" for every entry in the second group
+        # (confirmed live: these are exactly the highest-severity checks
+        # this tool exists to run — see the severity list below). Always
+        # join through exactly one "/" regardless of which form `path` is in.
+        test_url = f"{base}/{path.lstrip('/')}"
         resp = _http_request(test_url, timeout)
         if resp["status"] and resp["status"] not in (404,):
             return {"path": path, "status": resp["status"], "size": resp["size"], "url": test_url}

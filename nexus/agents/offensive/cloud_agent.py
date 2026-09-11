@@ -15,8 +15,7 @@ class CloudAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("cloud.aws_review")
-            result = tool(target=target)
+            result = tool_registry.run("cloud.aws_review", target=target)
             tools_used.append("cloud.aws_review")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class CloudAgent(BaseAgent):
             findings.append({"title": f"AWS review error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("cloud.azure_assessment")
-            result = tool(target=target)
+            result = tool_registry.run("cloud.azure_assessment", target=target)
             tools_used.append("cloud.azure_assessment")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class CloudAgent(BaseAgent):
             findings.append({"title": f"Azure assessment error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("cloud.gcp_review")
-            result = tool(target=target)
+            result = tool_registry.run("cloud.gcp_review", target=target)
             tools_used.append("cloud.gcp_review")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class CloudAgent(BaseAgent):
             findings.append({"title": f"GCP review error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("cloud.kubernetes_security")
-            result = tool(target=target)
+            result = tool_registry.run("cloud.kubernetes_security", target=target)
             tools_used.append("cloud.kubernetes_security")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class CloudAgent(BaseAgent):
             findings.append({"title": f"Kubernetes security error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("cloud.iam_audit")
-            result = tool(target=target)
+            result = tool_registry.run("cloud.iam_audit", target=target)
             tools_used.append("cloud.iam_audit")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class CloudAgent(BaseAgent):
             findings.append({"title": f"IAM audit error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("cloud.s3_review")
-            result = tool(target=target)
+            result = tool_registry.run("cloud.s3_review", target=target)
             tools_used.append("cloud.s3_review")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -69,8 +63,7 @@ class CloudAgent(BaseAgent):
             findings.append({"title": f"S3 review error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("cloud.container_scanning")
-            result = tool(target=target)
+            result = tool_registry.run("cloud.container_scanning", target=target)
             tools_used.append("cloud.container_scanning")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -78,8 +71,7 @@ class CloudAgent(BaseAgent):
             findings.append({"title": f"Container scanning error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("cloud.secret_detection")
-            result = tool(target=target)
+            result = tool_registry.run("cloud.secret_detection", target=target)
             tools_used.append("cloud.secret_detection")
             if result.get("findings"):
                 findings.extend(result["findings"])

@@ -15,8 +15,7 @@ class SocialEngAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("reconnaissance.social_osint")
-            result = tool(target=target)
+            result = tool_registry.run("reconnaissance.social_osint", target=target)
             tools_used.append("reconnaissance.social_osint")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class SocialEngAgent(BaseAgent):
             findings.append({"title": f"Social OSINT error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("reconnaissance.email_harvest")
-            result = tool(target=target)
+            result = tool_registry.run("reconnaissance.email_harvest", target=target)
             tools_used.append("reconnaissance.email_harvest")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class SocialEngAgent(BaseAgent):
             findings.append({"title": f"Email harvesting error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("reconnaissance.github_recon")
-            result = tool(target=target)
+            result = tool_registry.run("reconnaissance.github_recon", target=target)
             tools_used.append("reconnaissance.github_recon")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class SocialEngAgent(BaseAgent):
             findings.append({"title": f"GitHub recon error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("reconnaissance.dns_recon")
-            result = tool(target=target)
+            result = tool_registry.run("reconnaissance.dns_recon", target=target)
             tools_used.append("reconnaissance.dns_recon")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class SocialEngAgent(BaseAgent):
             findings.append({"title": f"DNS recon error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("reconnaissance.whois_lookup")
-            result = tool(target=target)
+            result = tool_registry.run("reconnaissance.whois_lookup", target=target)
             tools_used.append("reconnaissance.whois_lookup")
             if result.get("findings"):
                 findings.extend(result["findings"])

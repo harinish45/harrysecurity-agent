@@ -5,6 +5,7 @@ Domain: webapp
 Advanced XSS detection with reflected, stored, and DOM-based techniques.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import socket
@@ -21,6 +22,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 USER_AGENT = "NEXUS-STRIKE/0.2.0 (XSS Detector)"
 
@@ -59,10 +61,8 @@ def _http_request(url: str, timeout: int = 10, method: str = "GET", data: bytes 
             method=method,
             data=data,
         )
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        ctx = get_ssl_context(url, allow_insecure=True)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {"status": resp.status, "headers": dict(resp.headers), "body": body, "error": None}
     except urllib.error.HTTPError as e:

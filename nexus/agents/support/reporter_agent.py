@@ -1,12 +1,16 @@
 from nexus.agents.base_agent import BaseAgent
+from nexus.foundation.schema import STATUS_COMPLETED, tool_result
 
 class ReporterAgent(BaseAgent):
     name = "reporter_agent"
     description = "Report generation agent that produces structured security assessment reports"
 
     async def run(self, task: str, **kwargs) -> dict:
-        target = kwargs.get("target", "")
-        findings = kwargs.get("findings", [])
+        # `kwargs.get("target", "")` only applies the default when the key is
+        # *missing* — a caller explicitly passing target=None still got None
+        # through, and target.replace(...) below crashed with AttributeError.
+        target = kwargs.get("target") or "unknown"
+        findings = kwargs.get("findings", []) or []
         findings_out = []
         
         from datetime import datetime
@@ -56,7 +60,7 @@ class ReporterAgent(BaseAgent):
         import os
         reports_dir = "reports"
         os.makedirs(reports_dir, exist_ok=True)
-        safe_target = target.replace(":", "_").replace("/", "_").replace(".", "_")
+        safe_target = target.replace(":", "_").replace("/", "_").replace("\\", "_").replace(".", "_")
         report_path = os.path.join(reports_dir, f"report_{safe_target}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
         try:
             with open(report_path, "w", encoding="utf-8") as f:
@@ -65,5 +69,10 @@ class ReporterAgent(BaseAgent):
         except Exception as e:
             findings_out.append(f"Could not save report: {e}")
 
-        return {"agent": self.name, "task": task, "tier": "support", 
-                "status": "completed", "findings": findings_out, "report": report}
+        return tool_result(
+            self.name, target,
+            status=STATUS_COMPLETED,
+            findings=[],
+            summary=f"Report generated for {target}: {len(findings)} finding(s) documented",
+            metadata={"notes": findings_out, "report": report},
+        )

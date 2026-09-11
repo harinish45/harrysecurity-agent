@@ -1,5 +1,11 @@
 # 🏴‍☠️ NEXUS-STRIKE
 
+[![CI](https://github.com/harinish45/harrysecurity-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/harinish45/harrysecurity-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Security: Bandit](https://img.shields.io/badge/security-bandit%20%2B%20pip--audit-brightgreen.svg)](.github/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![Tests: 1800+](https://img.shields.io/badge/tests-1800%2B-brightgreen.svg)](tests/)
+
 **Autonomous AI Cybersecurity Agent — Real Pentest, Real Findings, Real CVE Reports**
 
 NEXUS-STRIKE is an open-source multi-agent cybersecurity assessment platform. It performs live port scanning, service fingerprinting, web vulnerability detection (SQLi, XSS, LFI, CMDi, SSRF), and CVE-enriched risk analysis — all orchestrated by a locally-running or cloud LLM.
@@ -44,6 +50,52 @@ nexus run --target example.internal --mode autonomous --objective full_assessmen
 
 ## 🤖 LLM Provider Setup
 
+## 💸 Running NEXUS-STRIKE for $0
+
+Every LLM-dependent feature (mission planning, all orchestrator agents, the benchmark
+harness, report-tone rendering) works end-to-end on providers that cost nothing to run.
+Check what's actually configured and its real cost at any time with:
+
+```bash
+nexus providers
+```
+
+which prints a live table (Provider / Status / Model / Configured / **Cost**) and warns
+you if your active provider has no free tier. Real classification, verified against each
+provider's published pricing (checked 2026-09) — not marketing copy:
+
+| Provider | Cost | Why |
+|---|---|---|
+| **Ollama** | 🟢 Free | Runs 100% locally, no API key, no request limit — the only truly unlimited option |
+| **Groq** | 🟢 Free tier | No credit card required; 30 req/min, 14,400 req/day, all models included |
+| **OpenRouter** | 🟢 Free tier | 28+ models with an `:free` suffix at $0/token; ~20 req/min, no card needed |
+| **NVIDIA NIM** | 🟢 Free tier | build.nvidia.com hosted catalog, free developer credits, 50+ open models |
+| **Omniroute** | 🟢 Free tier | Free token/dashboard quota (OpenAI-compatible relay) |
+| **DeepSeek** | 🟡 Very low cost | Not free, but among the cheapest paid options if you outgrow the free tiers |
+| **OpenAI** | 🔴 Paid only | No free tier |
+| **Anthropic Claude** | 🔴 Paid only | No free tier |
+| **Azure OpenAI** | 🔴 Paid only | No free tier |
+| **Custom** | ❓ Depends | Whatever you point it at (e.g. LM Studio/Antigravity running locally = free) |
+
+**Recommended $0 setup**: `LLM_PROVIDER=ollama` (fully local, zero network dependency) with
+`LLM_PROVIDER=groq` as your cloud fallback when you need faster inference than your local
+hardware gives you — both are pre-wired with sane defaults in `.env.example`.
+
+**Beyond the LLM**: a handful of individual recon tools optionally use paid third-party
+data APIs for deeper results (Shodan's full Search API, Censys). Those are opt-in — the
+platform doesn't require them:
+- `reconnaissance.shodan_search` uses Shodan's free, unauthenticated **InternetDB**
+  endpoint by default (no key needed, real open-port/CVE data) and only calls the paid
+  Search API if you explicitly set `SHODAN_API_KEY`.
+- `reconnaissance.cert_transparency` and `reconnaissance.github_recon` use crt.sh and the
+  GitHub public search API — both free, no key required.
+- `reconnaissance.censys_search` (needs a free-to-create Censys account's `CENSYS_PAT`
+  token — the account itself is free, API usage beyond it may not be) and `ai_security`
+  tools that need a live model endpoint or a licensed dataset honestly report what's
+  missing (`requires_credentials` / `requires_file`) instead of guessing.
+
+---
+
 ### Option A — Local Ollama (Free & Private, Recommended)
 
 ```bash
@@ -57,20 +109,33 @@ OLLAMA_BASE_URL=http://localhost:11434/v1
 OLLAMA_MODEL=qwen2.5-coder:latest
 ```
 
-### Option B — Cloud APIs (OpenAI / Anthropic / Groq / OpenRouter)
+### Option B1 — Free-Tier Cloud APIs (Groq / OpenRouter / NVIDIA NIM / Omniroute)
 
 ```ini
-# .env — pick one
+# .env — pick one, all $0 to start
+LLM_PROVIDER=groq
+GROQ_API_KEY=gsk_...          # https://console.groq.com — no card required
+
+# or
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...  # https://openrouter.ai — use a *:free model
+OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+
+# or
+LLM_PROVIDER=nvidia
+NVIDIA_API_KEY=nvapi-...      # https://build.nvidia.com — free developer credits
+```
+
+### Option B2 — Paid Cloud APIs (OpenAI / Anthropic / Azure)
+
+```ini
+# .env — no free tier on any of these
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 
 # or
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
-
-# or
-LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_...
 ```
 
 ### Option C — Custom OpenAI-Compatible Endpoint
@@ -91,11 +156,24 @@ nexus COMMAND [OPTIONS]
 
 Commands:
   live          Run the live AI agent (port scan + web vuln + AI report)
-  run           Launch a full security assessment mission
+  run           Launch a full security assessment mission (dependency-batched,
+                concurrent FlowController dispatch to real agents)
+  agent         Run a single agent directly — `agent run <name> --target <t>`
+  advanced      Run an advanced/experimental module directly — attack-path
+                prediction, triage, supply-chain scan, patch re-verification,
+                evidence notarization/PQ-signing, threat-radar (NVD/CISA KEV),
+                genetic-algorithm fuzzing, honeypot, ASM baseline, and more
+                (`advanced list` for the full set — 11 real, 4 honest stubs)
+  compliance    Generate a control-mapping gap-analysis report — SOC2,
+                ISO27001, NIST_CSF, GDPR, HIPAA, PCI_DSS (illustrative, not a
+                certification)
+  auth          Manage dashboard/API user accounts
+  view          Launch the web dashboard
+  skills        List/run registered security skills
   engage        Create an authorised-engagement record before scanning
   preflight     Verify host readiness and security controls
-  tools         List all 266 registered security tools across 29 domains
-  agents        List all registered AI agents
+  tools         List all registered security tools across 30 domains
+  agents        List all registered AI agents (`--tier` to filter)
   providers     Show LLM provider configuration status
   export-report Export findings to a portable report file
   config-show   Show current NEXUS-STRIKE configuration
@@ -108,24 +186,61 @@ nexus live --target <ip>                  # Quick scan
 nexus live --target <ip> --ports 80,443,8080  # Custom ports
 nexus run  --target <ip> --mode autonomous --objective vuln_scan
 nexus run  --target <ip> --engagement ./my_engagement.json
+nexus agent run recon_agent --target <ip>
+nexus advanced threat-radar openssl --version 3.0.0
+nexus compliance report SOC2
 nexus preflight --strict
+```
+
+### Mode commands
+
+Thin wrappers over `run()` that restrict which tool domains the LLM planner can choose from and pick a mode-appropriate report template (see `nexus/foundation/agent_profiles.py`):
+
+```
+nexus pentest  --target <scope> [--engagement <path>] [--mission <id>] [--provider <name>]
+               # 🔒 Authorized penetration-test engagement — full guardrails, formal audit report
+
+nexus bounty   --target <scope> [--program <H1/Bugcrowd id>] [--engagement <path>] [--mission <id>] [--provider <name>]
+               # 💰 Bug-bounty engagement — web/API/cloud/mobile-focused, platform-style submission report
+               # --program is not wired to a live bounty-platform API in this build; scope-pull is a stub
+
+nexus ctf      --target <host/URL> [--category pwn|web|crypto|rev|forensics|misc] [--mission <id>] [--provider <name>]
+               # 🚩 CTF challenge solving — category-scoped tools, writeup-style report
+
+nexus redteam  --target <scope> [--objective <TTP chain>] [--engagement <path>] [--mission <id>] [--provider <name>]
+               # 🎯 Adversary emulation — MITRE ATT&CK-mapped TTP chain, redteam-format report
+
+nexus blueteam --target <scope> [--mission <id>] [--provider <name>]
+               # 🛡️ Defensive assessment — detection engineering and incident triage, incident-format report
+
+nexus benchmark [--suite intercode_ctf|cybench|nyu_ctf|debate_consensus_eval] [--latency [--agent <name>]] [--provider <name>]
+               # 📊 Score the agent stack against Cybench/NYU-CTF/InterCode-CTF-style suites (bundled smoke
+               # suite ships out of the box; full licensed datasets are not bundled), evaluate
+               # debate_consensus_agent's precision/recall, or benchmark per-agent execution latency
 ```
 
 ---
 
 ## 🔐 Authorization & Safety
 
-NEXUS-STRIKE enforces **7 built-in guardrails** on every tool execution:
+Every tool call routes through a single guarded entrypoint (`ToolExecutor`) that applies **9 built-in guardrails**, in order, before and after execution:
 
 | Guardrail | What it does |
 |-----------|-------------|
-| `InputGuard` | Blocks prompt injection, command injection, path traversal |
-| `ScopeGuard` | Validates target against `NEXUS_ALLOWED_TARGETS` allow-list |
+| `InputGuard` | Multi-layer: length/entropy, control characters, prompt/command/path-traversal injection regexes, Unicode NFKC normalization + zero-width/bidi-override stripping, homoglyph collapse |
+| `ScopeGuard` | Validates target (hostname, wildcard, CIDR) against `NEXUS_ALLOWED_TARGETS`; resolves hostnames and requires every resolved address to be in scope |
 | `LegalGuard` | Requires `NEXUS_LEGAL_ACK=I_HAVE_WRITTEN_AUTHORIZATION` |
-| `EscalationGuard` | Human approval required for destructive actions (RCE, SQLi) |
-| `RateGuard` | Sliding-window rate limiting prevents accidental DoS |
-| `AuditGuard` | Append-only JSON audit log of every execution |
-| `OutputGuard` | Redacts API keys, passwords, and private keys from output |
+| `EscalationGuard` | Human approval required for destructive actions (RCE, SQLi, credential dumping, wipers, etc.), matched against separator-normalized tool/action names |
+| `RateGuard` | Thread-safe, per-target sliding-window rate limiting |
+| `AuditGuard` | Append-only, SHA-256 hash-chained audit log — any single-entry tamper (edit, delete, reorder) breaks the chain and is detectable via `verify_chain()` |
+| `InjectionGuard` | Scans target-originated content (tool output, evidence) for prompt-injection patterns before it reaches any LLM prompt; supports canary-token integrity checks |
+| `BudgetGuard` | Per-mission LLM spend/token tracking with a configurable hard-stop threshold |
+| `OutputGuard` | Redacts API keys, passwords, and private keys from tool output — findings that legitimately discovered a real secret on the target are redacted (evidence sanitized, `[REDACTED]` marker) rather than dropped entirely, so the finding itself still reaches the report |
+
+Two additional cross-cutting defenses, applied centrally rather than per-tool:
+
+- **SSRF / redirect / DNS-rebinding protection** (`safe_urlopen()`, `nexus/foundation/net.py`) — every one of the ~280 tools that make outbound HTTP requests goes through this single choke point. Every redirect hop is re-validated against the same scope check the original target had to pass (capped at 5 hops), so a target can't SSRF-pivot a tool to an internal address or cloud-metadata endpoint (`169.254.169.254`) via a `Location:` header.
+- **Execution sandboxing** (`nexus/tools/sandbox.py`) — subprocess-spawning tools (binary/firmware analysis, fuzzing) get real wall-clock timeouts plus CPU/memory limits: kernel-enforced `RLIMIT_CPU`/`RLIMIT_AS` on POSIX, a `psutil`-based watchdog on Windows.
 
 ```bash
 # Before scanning any authorised target, create an engagement record:
@@ -149,12 +264,26 @@ NEXUS_LEGAL_ACK=I_HAVE_WRITTEN_AUTHORIZATION
 | `malware` | 17 | PE analysis, YARA, sandbox, behavioural |
 | `wireless` | 12 | WPA, BLE, Zigbee, evil twin, deauth |
 | `active_directory` | 11 | Kerberoast, BloodHound, pass-the-hash |
-| … + 22 more | **266 total** | across 29 domains |
+| … + 22 more | **283 total** | across 30 domains |
 
 ```bash
-nexus tools            # list all 266 tools
+nexus tools            # list all 283 tools
 nexus tools --domain webapp   # filter by domain
 ```
+
+---
+
+## 📊 Benchmark Score
+
+Tool count is a weak credibility signal on its own — here's a real, reproducible number instead. NEXUS-STRIKE bundles a 66-challenge CTF-style benchmark suite (CWE-identification tasks spanning crypto/pwn/rev/web/forensics/network/cloud/misc, in the spirit of InterCode-CTF/Cybench/NYU-CTF Bench) and scores itself against it with a deterministic regex checker — no LLM judge, no self-grading.
+
+| Suite | Score | Notes |
+|-------|-------|-------|
+| `intercode_ctf` (10 tasks, easy tier) | **5/10 (50%)** | reproducible run-over-run (confirmed via 2 independent runs, identical result) |
+| `cybench` (32 tasks) | **21–22/32 (66–69%)** | 2 real runs, small variance from LLM sampling + provider rate-limit misses |
+| `nyu_ctf` (24 tasks, hardest tier) | **10/24 (42%)** | intentionally the hard tier |
+
+Run it yourself: `nexus benchmark --suite cybench` (or `nyu_ctf`/`intercode_ctf`) — every run is a real LLM call against the free-tier provider configured in your `.env`, scored and appended to `benchmarks/history.jsonl`. This is a single-turn "describe a vulnerability, name the CWE" knowledge benchmark (not yet an agentic tool-use benchmark) — an honest first proof point, not a claim of solving full interactive CTF challenges end-to-end.
 
 ---
 
@@ -165,6 +294,44 @@ Reports are written to `engagements/<mission-id>/` and include:
 - **JSON findings** — structured CVE-enriched results
 - **Markdown report** — human-readable pentest narrative
 - **Audit log** — append-only execution record
+
+---
+
+## 🆚 How this compares
+
+Being honest about where this project stands: NEXUS-STRIKE is **pre-1.0 with a
+small community** (this repo, at the time of writing). The closest comparable
+open-source AI-pentest-agent projects are considerably more established:
+
+| | ⭐ Stars | Maturity |
+|---|---|---|
+| [Strix](https://github.com/usestrix/strix) | ~61k | Established, large community |
+| [PentAGI](https://github.com/vxcontrol/pentagi) | ~23k | Established, Docker-sandboxed execution |
+| [CAI](https://github.com/aliasrobotics/cai) | ~10k | Established, broad LLM-provider support |
+| NEXUS-STRIKE | 1 | Pre-1.0, single-maintainer |
+
+If you want a battle-tested tool with a large community today, those three are
+the right choice. What NEXUS-STRIKE does have, as concrete, checkable design
+decisions rather than marketing claims:
+
+- **Findings get replayed, not just trusted.** A dedicated `verification_agent`
+  re-runs the underlying check deterministically (a real HTTP re-request diffed
+  against the claimed evidence, a real TCP reachability probe, a re-timed
+  statistical check for timing-based claims) before a finding is reported as
+  verified — the goal being to catch the failure mode where an LLM asserts
+  something was found that a second, non-LLM check can't reproduce.
+- **A tool that can't do the work says so.** Where a tool genuinely needs
+  something unavailable — hardware, a paid API key, a licensed dataset, an
+  actively-running target — it returns an honest `STATUS_REQUIRES_*` /
+  `STATUS_UNAVAILABLE` result instead of a plausible-looking fabricated finding.
+  This is a project-wide convention, not a one-off.
+- **The audit log is tamper-evident**, not just append-only: every entry is
+  SHA-256 hash-chained to the one before it, and `AuditGuard.verify_chain()`
+  detects any single-entry edit, deletion, or reorder.
+- **Free-tier-first LLM config.** `NEXUS_FREE_TIER_ONLY=1` restricts provider
+  fallback to zero-cost options (a local Ollama model, Groq's free tier, NVIDIA
+  NIM, a real `:free`-suffixed OpenRouter model) — no paid API key is required
+  to run the platform at all.
 
 ---
 

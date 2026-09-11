@@ -5,6 +5,7 @@ Domain: webapp
 Website crawler with header analysis, link extraction, and form discovery.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import socket
@@ -21,6 +22,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 
 def _normalize_url(target: str, original_url: str) -> str:
@@ -146,7 +148,7 @@ def _check_robots_txt(base_url: str) -> Optional[str]:
         netloc = urllib.parse.urlparse(base_url).netloc
         url = f"{scheme}://{netloc}/robots.txt"
         req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/0.2.0"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with safe_urlopen(req, timeout=5) as resp:
             if resp.status == 200:
                 return resp.read().decode("utf-8", errors="replace")[:5000]
     except Exception:
@@ -192,9 +194,7 @@ def run(
     to_visit: list[str] = [start_url]
     crawled_count = 0
 
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(target, allow_insecure=True)
 
     while to_visit and crawled_count < max_pages:
         url = to_visit.pop(0)
@@ -205,7 +205,7 @@ def run(
 
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/0.2.0"})
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            with safe_urlopen(req, timeout=timeout, context=ctx) as resp:
                 html = resp.read().decode("utf-8", errors="replace")
                 headers = dict(resp.headers)
 

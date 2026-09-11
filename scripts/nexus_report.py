@@ -31,6 +31,8 @@ if _PROJECT_ROOT not in sys.path:
 REPORTS_DIR = Path(_PROJECT_ROOT) / "reports"
 REPORTS_DIR.mkdir(exist_ok=True)
 
+from nexus.foundation.paths import safe_join, safe_slug  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Severity helpers
 # ---------------------------------------------------------------------------
@@ -1142,9 +1144,9 @@ def main():
     html = _build_html(target, findings, meta, cve_text, llm_blocks)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    target_slug = target.replace("/", "_").replace(":", "_")
-    html_path = REPORTS_DIR / f"{target_slug}_{ts}.html"
-    pdf_path = args.output or REPORTS_DIR / f"{target_slug}_{ts}.pdf"
+    target_slug = safe_slug(target)
+    html_path = safe_join(REPORTS_DIR, f"{target_slug}_{ts}.html")
+    pdf_path = args.output or safe_join(REPORTS_DIR, f"{target_slug}_{ts}.pdf")
 
     html_path.write_text(html, encoding="utf-8")
     print(f"[*] HTML written: {html_path}")

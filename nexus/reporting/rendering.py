@@ -14,7 +14,7 @@ def render_html(
     sections: Iterable[tuple[str, str]],
 ) -> str:
     body = "\n".join(
-        f"<section><h2>{escape(heading)}</h2><div>{content}</div></section>"
+        f"<section><h2>{escape(heading)}</h2><div>{escape(content).replace(chr(10), '<br>')}</div></section>"
         for heading, content in sections
     )
     brand = context.branding

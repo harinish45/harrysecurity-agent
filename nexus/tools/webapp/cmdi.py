@@ -5,6 +5,7 @@ Domain: webapp
 Command Injection detection with time-based and signature-based techniques.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import ssl
@@ -21,6 +22,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 USER_AGENT = "NEXUS-STRIKE/0.2.0 (CMDi Detector)"
 
@@ -53,11 +55,9 @@ def _http_request(url: str, timeout: int = 15) -> dict:
         url = f"http://{url}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = get_ssl_context(url, allow_insecure=True)
         t0 = time.time()
-        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        resp = safe_urlopen(req, timeout=timeout, context=ctx)
         elapsed = time.time() - t0
         body = resp.read(65536).decode("utf-8", errors="replace")
         return {"status": resp.status, "body": body, "time": elapsed}

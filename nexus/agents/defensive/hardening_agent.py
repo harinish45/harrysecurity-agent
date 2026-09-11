@@ -16,8 +16,7 @@ class HardeningAgent(BaseAgent):
 
         # Hardening
         try:
-            harden = tool_registry.get("blue_team.hardening")
-            result = harden(target=target)
+            result = tool_registry.run("blue_team.hardening", target=target)
             tools_used.append("blue_team.hardening")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class HardeningAgent(BaseAgent):
 
         # Firewall management
         try:
-            fw = tool_registry.get("blue_team.firewall_management")
-            result = fw(target=target)
+            result = tool_registry.run("blue_team.firewall_management", target=target)
             tools_used.append("blue_team.firewall_management")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class HardeningAgent(BaseAgent):
 
         # Endpoint protection
         try:
-            ep = tool_registry.get("blue_team.endpoint_protection")
-            result = ep(target=target)
+            result = tool_registry.run("blue_team.endpoint_protection", target=target)
             tools_used.append("blue_team.endpoint_protection")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class HardeningAgent(BaseAgent):
 
         # Policy reviews
         try:
-            policy = tool_registry.get("compliance.policy_reviews")
-            result = policy(target=target)
+            result = tool_registry.run("compliance.policy_reviews", target=target)
             tools_used.append("compliance.policy_reviews")
             if result.get("findings"):
                 findings.extend(result["findings"])

@@ -16,8 +16,7 @@ class OsintAnalystAgent(BaseAgent):
 
         # Subdomain enumeration
         try:
-            subdomain = tool_registry.get("reconnaissance.subdomain_enum")
-            result = subdomain(target=target)
+            result = tool_registry.run("reconnaissance.subdomain_enum", target=target)
             tools_used.append("reconnaissance.subdomain_enum")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -26,8 +25,7 @@ class OsintAnalystAgent(BaseAgent):
 
         # DNS reconnaissance
         try:
-            dns = tool_registry.get("reconnaissance.dns_recon")
-            result = dns(target=target)
+            result = tool_registry.run("reconnaissance.dns_recon", target=target)
             tools_used.append("reconnaissance.dns_recon")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -36,8 +34,7 @@ class OsintAnalystAgent(BaseAgent):
 
         # WHOIS lookup
         try:
-            whois = tool_registry.get("reconnaissance.whois_lookup")
-            result = whois(target=target)
+            result = tool_registry.run("reconnaissance.whois_lookup", target=target)
             tools_used.append("reconnaissance.whois_lookup")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -46,8 +43,7 @@ class OsintAnalystAgent(BaseAgent):
 
         # GitHub reconnaissance
         try:
-            github = tool_registry.get("reconnaissance.github_recon")
-            result = github(target=target)
+            result = tool_registry.run("reconnaissance.github_recon", target=target)
             tools_used.append("reconnaissance.github_recon")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -56,8 +52,7 @@ class OsintAnalystAgent(BaseAgent):
 
         # Social OSINT
         try:
-            social = tool_registry.get("reconnaissance.social_osint")
-            result = social(target=target)
+            result = tool_registry.run("reconnaissance.social_osint", target=target)
             tools_used.append("reconnaissance.social_osint")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -66,8 +61,7 @@ class OsintAnalystAgent(BaseAgent):
 
         # Email harvesting
         try:
-            email = tool_registry.get("reconnaissance.email_harvest")
-            result = email(target=target)
+            result = tool_registry.run("reconnaissance.email_harvest", target=target)
             tools_used.append("reconnaissance.email_harvest")
             if result.get("findings"):
                 findings.extend(result["findings"])

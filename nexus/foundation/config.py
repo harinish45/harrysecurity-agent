@@ -20,7 +20,7 @@ try:
         anthropic_model: str = "claude-3-opus-20240229"
 
         openrouter_api_key: Optional[str] = None
-        openrouter_model: str = "openai/gpt-4-turbo"
+        openrouter_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
         openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
         ollama_base_url: str = "http://localhost:11434/v1"
@@ -35,7 +35,7 @@ try:
         azure_openai_model: str = "gpt-4"
 
         groq_api_key: Optional[str] = None
-        groq_model: str = "mixtral-8x7b-32768"
+        groq_model: str = "openai/gpt-oss-20b"
         groq_base_url: str = "https://api.groq.com/openai/v1"
 
         deepseek_api_key: Optional[str] = None
@@ -60,9 +60,27 @@ try:
         nexus_mode: str = "guided"
         nexus_log_level: str = "INFO"
         nexus_sandbox_enabled: bool = True
+        # "process" (default): subprocess-spawning tools (nexus/tools/sandbox.py)
+        # run as a resource-limited host OS process — real rlimit/psutil
+        # enforcement, but still shares the host's filesystem/network/kernel.
+        # "docker": route the same tools through a disposable, network-isolated
+        # container instead (nexus/tools/docker_sandbox.py) — a second,
+        # independent isolation layer on top of, not instead of, the process
+        # limits. Fails closed (raises, never silently falls back to "process")
+        # if no Docker daemon is reachable when this is set.
+        nexus_sandbox_mode: str = "process"
         nexus_auto_approve: bool = False
         nexus_max_concurrent_tools: int = 5
         nexus_tool_timeout: int = 300
+
+        # === ENVIRONMENT / HARDENING ===
+        # "development" (default) keeps today's permissive local-dev behavior
+        # (dashboard usable with no token, insecure TLS allowed for private
+        # targets). "production" is a hard switch: web/server.py refuses to
+        # start with no dashboard token configured, etc. Every place that
+        # used to make an ad hoc "is this safe to relax" decision should key
+        # off `config.is_production` instead of inventing its own env check.
+        nexus_env: str = "development"
 
         # === GUARDRAILS ===
         nexus_allowed_targets: str = "localhost,127.0.0.1,::1"
@@ -77,6 +95,10 @@ try:
         postgres_dsn: str = "postgresql://nexus:nexus@localhost:5432/nexus"
         redis_dsn: str = "redis://localhost:6379/0"
 
+        @property
+        def is_production(self) -> bool:
+            return self.nexus_env.strip().lower() == "production"
+
 except ImportError:
     class NexusConfig:
         def __init__(self):
@@ -87,7 +109,7 @@ except ImportError:
             self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
             self.anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-3-opus-20240229")
             self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-            self.openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4-turbo")
+            self.openrouter_model = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
             self.openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
             self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
             self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:latest")
@@ -98,7 +120,7 @@ except ImportError:
             self.azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
             self.azure_openai_model = os.getenv("AZURE_OPENAI_MODEL", "gpt-4")
             self.groq_api_key = os.getenv("GROQ_API_KEY")
-            self.groq_model = os.getenv("GROQ_MODEL", "mixtral-8x7b-32768")
+            self.groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
             self.groq_base_url = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
             self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
             self.deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
@@ -116,9 +138,11 @@ except ImportError:
             self.nexus_mode = os.getenv("NEXUS_MODE", "guided")
             self.nexus_log_level = os.getenv("NEXUS_LOG_LEVEL", "INFO")
             self.nexus_sandbox_enabled = os.getenv("NEXUS_SANDBOX_ENABLED", "true").lower() in ("1","true","yes")
+            self.nexus_sandbox_mode = os.getenv("NEXUS_SANDBOX_MODE", "process")
             self.nexus_auto_approve = os.getenv("NEXUS_AUTO_APPROVE", "false").lower() in ("1","true","yes")
             self.nexus_max_concurrent_tools = int(os.getenv("NEXUS_MAX_CONCURRENT_TOOLS", "5"))
             self.nexus_tool_timeout = int(os.getenv("NEXUS_TOOL_TIMEOUT", "300"))
+            self.nexus_env = os.getenv("NEXUS_ENV", "development")
             self.nexus_allowed_targets = os.getenv("NEXUS_ALLOWED_TARGETS", "localhost,127.0.0.1,::1")
             self.nexus_legal_ack = os.getenv("NEXUS_LEGAL_ACK", "")
             self.nexus_rate_limit_calls = int(os.getenv("NEXUS_RATE_LIMIT_CALLS", "100"))
@@ -126,5 +150,9 @@ except ImportError:
             self.nexus_mcp_port = int(os.getenv("NEXUS_MCP_PORT", "8888"))
             self.postgres_dsn = os.getenv("POSTGRES_DSN", "postgresql://nexus:nexus@localhost:5432/nexus")
             self.redis_dsn = os.getenv("REDIS_DSN", "redis://localhost:6379/0")
+
+        @property
+        def is_production(self) -> bool:
+            return self.nexus_env.strip().lower() == "production"
 
 config = NexusConfig()

@@ -9,7 +9,6 @@ from __future__ import annotations
 import ipaddress
 import socket
 import struct
-import subprocess
 import time
 from typing import Any, Optional
 
@@ -22,6 +21,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.tools.sandbox import run_subprocess, SandboxError
 
 
 def _icmp_ping(host: str, timeout: float = 1.0) -> bool:
@@ -39,33 +39,30 @@ def _icmp_ping4(host: str, timeout: float) -> bool:
     try:
         import os
         if os.name == "nt":
-            result = subprocess.run(
+            result = run_subprocess(
                 ["ping", "-n", "1", "-w", str(int(timeout * 1000)), host],
-                capture_output=True,
                 timeout=timeout + 1,
             )
             return result.returncode == 0
         else:
-            result = subprocess.run(
+            result = run_subprocess(
                 ["ping", "-c", "1", "-W", str(int(timeout)), host],
-                capture_output=True,
                 timeout=timeout + 1,
             )
             return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except (SandboxError, FileNotFoundError, OSError):
         return False
 
 
 def _icmp_ping6(host: str, timeout: float) -> bool:
     """ICMP echo for IPv6 hosts."""
     try:
-        result = subprocess.run(
+        result = run_subprocess(
             ["ping", "-6", "-c", "1", "-W", str(int(timeout)), host],
-            capture_output=True,
             timeout=timeout + 1,
         )
         return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except (SandboxError, FileNotFoundError, OSError):
         return False
 
 
@@ -88,19 +85,17 @@ def _arp_ping(host: str) -> bool:
             return False
         import os
         if os.name == "nt":
-            result = subprocess.run(
+            result = run_subprocess(
                 ["arp", "-a", host],
-                capture_output=True,
                 timeout=5,
             )
-            return host in result.stdout.decode("utf-8", errors="replace")
+            return host in result.stdout
         else:
-            result = subprocess.run(
+            result = run_subprocess(
                 ["arp", "-n", host],
-                capture_output=True,
                 timeout=5,
             )
-            return host in result.stdout.decode("utf-8", errors="replace")
+            return host in result.stdout
     except Exception:
         return False
 

@@ -5,6 +5,7 @@ Domain: reconnaissance
 Real subdomain takeover detector using DNS CNAME resolution + known-vulnerable service signatures.
 """
 from __future__ import annotations
+from nexus.foundation.net import safe_urlopen
 
 import re
 import socket
@@ -18,6 +19,7 @@ from nexus.foundation.schema import (
     tool_result,
 )
 from nexus.tools.registry import tool_registry
+from nexus.foundation.ssl_config import get_ssl_context
 
 # Known-vulnerable service takeover fingerprints.
 # Each tuple: (service_name, cname_suffix_parts, signature_check)
@@ -136,15 +138,13 @@ def _check_takeover_signature(service_sig: dict, cname: str, hostname: str, time
     import urllib.request
     import ssl
 
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx = get_ssl_context(hostname, allow_insecure=True)
 
     for scheme in ("https", "http"):
         url = f"{scheme}://{hostname}/"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "NEXUS-STRIKE/1.0.0 (Subdomain Takeover Checker)"})
-            resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+            resp = safe_urlopen(req, timeout=timeout, context=ctx)
             body = resp.read(4096).decode("utf-8", errors="replace")
         except urllib.error.HTTPError as e:
             body = (e.read(4096).decode("utf-8", errors="replace") if e.fp else "") or str(e)

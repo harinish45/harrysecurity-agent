@@ -15,8 +15,7 @@ class AdAgent(BaseAgent):
         tools_used = []
 
         try:
-            tool = tool_registry.get("active_directory.domain_enum")
-            result = tool(target=target)
+            result = tool_registry.run("active_directory.domain_enum", target=target)
             tools_used.append("active_directory.domain_enum")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -24,8 +23,7 @@ class AdAgent(BaseAgent):
             findings.append({"title": f"Domain enum error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("active_directory.bloodhound")
-            result = tool(target=target)
+            result = tool_registry.run("active_directory.bloodhound", target=target)
             tools_used.append("active_directory.bloodhound")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -33,8 +31,7 @@ class AdAgent(BaseAgent):
             findings.append({"title": f"BloodHound error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("active_directory.kerberoast")
-            result = tool(target=target)
+            result = tool_registry.run("active_directory.kerberoast", target=target)
             tools_used.append("active_directory.kerberoast")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -42,8 +39,7 @@ class AdAgent(BaseAgent):
             findings.append({"title": f"Kerberoasting error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("active_directory.asrep_roast")
-            result = tool(target=target)
+            result = tool_registry.run("active_directory.asrep_roast", target=target)
             tools_used.append("active_directory.asrep_roast")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -51,8 +47,7 @@ class AdAgent(BaseAgent):
             findings.append({"title": f"AS-REP roasting error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("active_directory.pass_the_hash")
-            result = tool(target=target)
+            result = tool_registry.run("active_directory.pass_the_hash", target=target)
             tools_used.append("active_directory.pass_the_hash")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -60,8 +55,7 @@ class AdAgent(BaseAgent):
             findings.append({"title": f"Pass-the-hash error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("active_directory.golden_ticket")
-            result = tool(target=target)
+            result = tool_registry.run("active_directory.golden_ticket", target=target)
             tools_used.append("active_directory.golden_ticket")
             if result.get("findings"):
                 findings.extend(result["findings"])
@@ -69,8 +63,7 @@ class AdAgent(BaseAgent):
             findings.append({"title": f"Golden ticket error: {e}", "severity": "low", "confidence": "medium"})
 
         try:
-            tool = tool_registry.get("active_directory.pass_the_ticket")
-            result = tool(target=target)
+            result = tool_registry.run("active_directory.pass_the_ticket", target=target)
             tools_used.append("active_directory.pass_the_ticket")
             if result.get("findings"):
                 findings.extend(result["findings"])
