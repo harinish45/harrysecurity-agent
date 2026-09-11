@@ -75,6 +75,10 @@ jobs:
           docker run --rm nexus-strike:security python -m pip list | grep -i "setuptools\|wheel\|msgpack\|pip "
           echo "--- every setuptools/msgpack/wheel dist-info or egg-info dir anywhere in the image ---"
           docker run --rm --entrypoint find nexus-strike:security / -iname "*setuptools*" -o -iname "*msgpack*" 2>/dev/null | grep -v "^/proc\|^/sys"
+          echo "--- pip's OWN vendored msgpack version (pip/_vendor, not the top-level installed package) ---"
+          docker run --rm --entrypoint sh nexus-strike:security -c 'grep -i msgpack /usr/local/lib/python3.11/site-packages/pip/_vendor/vendor.txt 2>/dev/null; find /usr/local/lib/python3.11/site-packages/pip/_vendor/msgpack -iname "*.dist-info" -o -iname "*METADATA*" -o -iname "*.egg-info" 2>/dev/null; python3 -c "import sys; sys.path.insert(0, \"/usr/local/lib/python3.11/site-packages/pip/_vendor\"); import msgpack; print(\"pip-vendored msgpack version:\", getattr(msgpack, \"version\", getattr(msgpack, \"__version__\", \"unknown\")))"'
+          echo "--- ensurepip bundled wheels (dormant, never executed by this app) ---"
+          docker run --rm --entrypoint find nexus-strike:security /usr/local/lib/python3.11/ensurepip -iname "*.whl"
 
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
