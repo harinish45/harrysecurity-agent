@@ -68,11 +68,15 @@ def _build_apk(path, *, debuggable=True, dangerous_perms=True, native_lib=True, 
             '<uses-permission android:name="android.permission.INTERNET"/>'
             '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>'
         )
+    # Precomputed outside the f-string: a backslash-escaped quote inside an
+    # f-string expression requires PEP 701 (Python 3.12+) and breaks on the
+    # 3.10/3.11 CI matrix.
+    debuggable_attr = 'android:debuggable="true"' if debuggable else ""
     manifest = (
         '<?xml version="1.0" encoding="utf-8"?>'
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
         'package="com.example.test">'
-        f'<application {"android:debuggable=\"true\"" if debuggable else ""}></application>'
+        f"<application {debuggable_attr}></application>"
         f"{perms}"
         "</manifest>"
     )

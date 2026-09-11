@@ -5,6 +5,7 @@ A minimal FastAPI server that renders mission reports as beautiful HTML pages.
 Run: python scripts/serve_reports.py
 Then open: http://localhost:8000
 """
+import html
 import re
 import sys
 from pathlib import Path
