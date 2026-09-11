@@ -27,9 +27,24 @@ securityContext:
 podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
+  # Ensures the vault PVC is chgrp'd/writable for the non-root container on
+  # first mount, regardless of the storage class's default volume ownership.
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
 
 networkPolicy:
   enabled: true
+  # By default, ingress on the service port is restricted to pods within the
+  # SAME namespace as this release. Set allowedIngressNamespaceSelector to a
+  # non-empty label selector (e.g. {matchLabels: {team: trusted}}) to ALSO
+  # allow ingress from pods in namespaces matching that selector.
+  #
+  # WARNING: leave this as {} (empty) to keep the safe default. Do NOT set it
+  # to a selector you intend to mean "no namespaces" -- per the Kubernetes API,
+  # an empty label selector matches ALL objects. The chart template never
+  # renders an empty namespaceSelector for exactly this reason: if this value
+  # were passed straight through, {} here would (counter-intuitively) open
+  # ingress to every pod in every namespace in the cluster.
   allowedIngressNamespaceSelector: {}
   egress:
     enabled: true
@@ -40,6 +55,53 @@ persistence:
   enabled: true
   size: 2Gi
   mountPath: /app/.nexus
+
+# emptyDir-backed volumes for the other paths Dockerfile:72 creates and the
+# app writes to at runtime (reports, engagements, logs, plus /tmp) — required
+# because securityContext.readOnlyRootFilesystem is true above and only
+# persistence.mountPath (the vault) has a volume. Contents don't survive pod
+# restarts/rescheduling (unlike docker-compose's bind mounts); mount a PVC at
+# these paths instead if that durability matters for your deployment.
+emptyDirs:
+  tmp:
+    sizeLimit: 100Mi
+  reports:
+    sizeLimit: 1Gi
+  engagements:
+    sizeLimit: 1Gi
+  logs:
+    sizeLimit: 512Mi
+
+# Additional container env vars (list of {name, value} or {name, valueFrom}
+# entries), merged in after NEXUS_VAULT_DIR. Use this for NEXUS_MASTER_KEY
+# (ideally via valueFrom.secretKeyRef) rather than committing secrets here.
+extraEnv: []
+
+# Secret for LLM provider API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY,
+# GROQ_API_KEY, etc. -- see .env.example) and NEXUS_MASTER_KEY
+# (nexus/foundation/secrets.py). Injected into the container via envFrom
+# (see templates/secret.yaml and templates/deployment.yaml) -- this is the
+# chart's sanctioned path for these values, so operators are never pushed
+# toward baking them into the image or hand-adding plaintext env entries
+# outside the chart's tracked config.
+#
+# Preferred for real deployments: create the Secret yourself out-of-band
+# (kubectl, External Secrets Operator, Sealed Secrets, etc.) and just point
+# the chart at its name -- nothing sensitive ever needs to pass through
+# values.yaml or `helm get values`/release history:
+#   secrets:
+#     existingSecret: my-nexus-secrets
+#
+# Convenience for dev/CI: leave existingSecret unset and populate `data` at
+# install/upgrade time via --set-string or an untracked values file (never
+# commit real values here):
+#   helm upgrade --install nexus deploy/helm/nexus-strike \
+#     --set-string secrets.data.LLM_PROVIDER=openai \
+#     --set-string secrets.data.OPENAI_API_KEY=sk-... \
+#     --set-string secrets.data.NEXUS_MASTER_KEY=$(openssl rand -base64 32)
+secrets:
+  existingSecret: ""
+  data: {}
 
 probes:
   readiness:

@@ -93,3 +93,46 @@ def test_scan_start_does_not_inject_authorization_into_subprocess(monkeypatch):
     assert response.status_code == 200
     assert captured["env"].get("NEXUS_LEGAL_ACK") == "I_HAVE_WRITTEN_AUTHORIZATION"
     # The value must come from the caller's environment, not be synthesized by the endpoint.
+
+
+def test_launch_dashboard_does_not_trust_proxy_headers_by_default(monkeypatch):
+    """uvicorn's own defaults (proxy_headers=True, forwarded_allow_ips=
+    '127.0.0.1') let anything connecting from the loopback interface spoof
+    request.client via X-Forwarded-For, which RateGuard then keys its
+    per-IP rate limit off of. launch_dashboard() must override those
+    defaults to not-trusted unless the operator opts in."""
+    monkeypatch.setattr(server, "DASHBOARD_TOKEN", "secret")
+    monkeypatch.delenv("NEXUS_TRUST_PROXY_HEADERS", raising=False)
+    monkeypatch.setattr(server, "TRUST_PROXY_HEADERS", False)
+
+    captured = {}
+
+    def fake_run(app, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(server.uvicorn, "run", fake_run)
+    monkeypatch.setattr(server.threading, "Timer", lambda *a, **k: type("T", (), {"start": lambda self: None})())
+
+    server.launch_dashboard(host="127.0.0.1", port=8765, open_browser=False)
+
+    assert captured["proxy_headers"] is False
+    assert captured["forwarded_allow_ips"] == []
+
+
+def test_launch_dashboard_trusts_proxy_headers_when_opted_in(monkeypatch):
+    monkeypatch.setattr(server, "DASHBOARD_TOKEN", "secret")
+    monkeypatch.setattr(server, "TRUST_PROXY_HEADERS", True)
+    monkeypatch.setattr(server, "TRUSTED_PROXY_IPS", "10.0.0.5")
+
+    captured = {}
+
+    def fake_run(app, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(server.uvicorn, "run", fake_run)
+    monkeypatch.setattr(server.threading, "Timer", lambda *a, **k: type("T", (), {"start": lambda self: None})())
+
+    server.launch_dashboard(host="127.0.0.1", port=8765, open_browser=False)
+
+    assert captured["proxy_headers"] is True
+    assert captured["forwarded_allow_ips"] == "10.0.0.5"

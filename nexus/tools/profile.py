@@ -81,17 +81,67 @@ class ToolProfile:
         }
 
 
+class ToolProfileError(ValueError):
+    """Raised when legacy registry metadata cannot be turned into a valid
+    ToolProfile. Kept distinct from a bare ValueError so callers (e.g.
+    ToolRegistry.register) can catch it specifically without also
+    swallowing unrelated ValueErrors raised deeper in tool construction."""
+
+
 def profile_from_metadata(name: str, metadata: dict) -> ToolProfile:
-    """Build a safe profile from legacy registry metadata."""
+    """Build a safe profile from legacy registry metadata.
+
+    risk_level is deliberately NOT defensively coerced to a default on a bad
+    value: silently downgrading an unparseable risk_level to "low" would
+    under-declare risk for what may genuinely be a dangerous tool, bypassing
+    guardrail/scheduling decisions that key off it. A malformed risk_level
+    fails loud (ToolProfileError) instead. timeout_seconds/max_concurrency
+    are pure scheduling knobs with no security meaning, so a malformed value
+    there safely falls back to the field default rather than taking down
+    registration of every other tool in a 260+-tool registry.
+    """
     profile = metadata.get("profile")
     if isinstance(profile, ToolProfile):
-        profile.validate()
+        try:
+            profile.validate()
+        except ValueError as exc:
+            raise ToolProfileError(f"tool '{name}': {exc}") from exc
         return profile
-    return ToolProfile(
-        name=name,
-        domain=str(metadata.get("domain", name.split(".")[0] if "." in name else "unknown")),
-        risk_level=RiskLevel(str(metadata.get("risk_level", "low"))),
-        timeout_seconds=int(metadata.get("timeout_seconds", 300)),
-        max_concurrency=int(metadata.get("max_concurrency", 1)),
-        tags=tuple(str(tag) for tag in metadata.get("tags", ())),
-    )
+
+    try:
+        risk_level = RiskLevel(str(metadata.get("risk_level", "low")))
+    except ValueError as exc:
+        raise ToolProfileError(
+            f"tool '{name}': invalid risk_level {metadata.get('risk_level')!r}"
+        ) from exc
+
+    try:
+        timeout_seconds = int(metadata.get("timeout_seconds", 300))
+        if timeout_seconds < 1:
+            raise ValueError("timeout_seconds must be positive")
+    except (TypeError, ValueError):
+        timeout_seconds = 300
+
+    try:
+        max_concurrency = int(metadata.get("max_concurrency", 1))
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be positive")
+    except (TypeError, ValueError):
+        max_concurrency = 1
+
+    try:
+        tags = tuple(str(tag) for tag in metadata.get("tags", ()))
+    except TypeError:
+        tags = ()
+
+    try:
+        return ToolProfile(
+            name=name,
+            domain=str(metadata.get("domain", name.split(".")[0] if "." in name else "unknown")),
+            risk_level=risk_level,
+            timeout_seconds=timeout_seconds,
+            max_concurrency=max_concurrency,
+            tags=tags,
+        )
+    except ValueError as exc:
+        raise ToolProfileError(f"tool '{name}': {exc}") from exc

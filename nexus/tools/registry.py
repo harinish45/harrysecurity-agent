@@ -4,9 +4,12 @@ Central registry for all security tools across domains.
 Supports registration, lookup, domain filtering, metadata, typed execution
 profiles, and contract assurance.
 """
+import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from nexus.tools.profile import ToolProfile, profile_from_metadata
+from nexus.tools.profile import ToolProfile, ToolProfileError, profile_from_metadata
+
+logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -16,18 +19,42 @@ class ToolRegistry:
         self._tools: Dict[str, Callable] = {}
         self._metadata: Dict[str, dict] = {}
         self._profiles: Dict[str, ToolProfile] = {}
+        self._skipped: Dict[str, str] = {}
 
     def register(self, name: str, fn: Callable, metadata: Optional[dict] = None):
-        """Register a tool by domain-qualified name (e.g., 'reconnaissance.subdomain_enum')."""
-        self._tools[name] = fn
+        """Register a tool by domain-qualified name (e.g., 'reconnaissance.subdomain_enum').
+
+        Profile construction is isolated per tool: a single malformed
+        metadata dict (e.g. an unparseable risk_level from a bad plugin
+        config) raises ToolProfileError and this tool is skipped entirely
+        rather than propagating out and aborting registration of every
+        other tool in what is typically a 260+-tool bulk-registration pass.
+        The skip is recorded in `_skipped` (see `skipped_tools()`), not just
+        logged — a log line alone gives nothing at runtime that `nexus
+        verify` or a startup health check can query to notice registration
+        coverage shrank.
+        """
         effective = metadata or {
             "name": name,
             "domain": name.split(".")[0] if "." in name else "unknown",
             "status": "stub",
         }
-        profile = profile_from_metadata(name, effective)
+        try:
+            profile = profile_from_metadata(name, effective)
+        except ToolProfileError as exc:
+            logger.error("Skipping tool '%s': invalid profile metadata", name, exc_info=True)
+            self._skipped[name] = str(exc)
+            return
+        self._tools[name] = fn
         self._profiles[name] = profile
         self._metadata[name] = {**effective, "profile": profile}
+
+    def skipped_tools(self) -> Dict[str, str]:
+        """Tools whose registration was skipped due to invalid profile
+        metadata, mapping name -> reason. Queryable alternative to grepping
+        logs — `nexus verify` and dashboard health checks can surface this
+        directly instead of the failure only ever showing up as a log line."""
+        return dict(self._skipped)
 
     def has(self, name: str) -> bool:
         """True if `name` is a registered tool. Cheap existence check for

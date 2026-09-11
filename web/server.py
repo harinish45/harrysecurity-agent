@@ -15,6 +15,7 @@ from nexus.foundation.config import config
 from nexus.foundation.guardrails import InputGuard, LegalGuard, ScopeGuard
 from nexus.foundation.paths import PathTraversalError, safe_join
 from web.middleware import install_middleware, require_same_origin_signal
+from web.mission_api import router as mission_router
 
 app = FastAPI(title="NEXUS-STRIKE Dashboard")
 install_middleware(app)
@@ -23,6 +24,19 @@ STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 REPORTS_DIR = Path(__file__).parent.parent / "reports"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Mission-control API (create/list/transition missions, event replay). This
+# router was added in the mission-control merge but the include_router call
+# that exposes it was dropped somewhere in that same merge — it shipped with
+# passing unit tests (tests/unit/test_mission.py) for the underlying
+# Mission/MissionStore model, but the HTTP layer in web/mission_api.py was
+# unreachable from this app: nothing mounted it, so every endpoint below
+# /api/missions 404'd regardless of auth. Restored so the feature the tests
+# already exercise is actually reachable. mission_api.py's _require_token/
+# _require_permission delegate directly to this module's own functions (see
+# web/mission_api.py) rather than maintaining a second auth implementation,
+# so mounting it does not open any endpoint with weaker protection than the
+# rest of this file's /api/* routes.
+app.include_router(mission_router)
 
 # ── Dashboard token auth ───────────────────────────────────────────────────
 # Set NEXUS_DASHBOARD_TOKEN to require Authorization: Bearer <token> on /api/*.
@@ -31,6 +45,25 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # open to anyone who can reach the port. In development it stays optional
 # so `nexus dashboard` keeps working out of the box for local use.
 DASHBOARD_TOKEN = os.environ.get("NEXUS_DASHBOARD_TOKEN", "").strip()
+
+# ── Proxy header trust ─────────────────────────────────────────────────────
+# uvicorn.run()'s own defaults (proxy_headers=True, forwarded_allow_ips=
+# "127.0.0.1") let ANY client whose direct TCP peer address is 127.0.0.1
+# rewrite request.client via X-Forwarded-For, before FastAPI/Starlette ever
+# see the request — RateGuard.validate(target=f"login:{client_host}") above
+# then keys its per-IP rate limit off that attacker-controlled value. That's
+# correct behavior ONLY when a real, trusted reverse proxy is what's
+# actually connecting from 127.0.0.1; nexus-strike isn't documented to run
+# behind one, and this app usually binds loopback itself, so the same-host
+# co-located-process case (anything else able to open a loopback socket,
+# e.g. a sidecar) could otherwise spoof its source IP for free. Default to
+# NOT trusting forwarded headers; an operator who does front this with nginx
+# etc. can opt in explicitly.
+TRUST_PROXY_HEADERS = os.environ.get("NEXUS_TRUST_PROXY_HEADERS", "").strip().lower() in (
+    "1", "true", "yes",
+)
+TRUSTED_PROXY_IPS = os.environ.get("NEXUS_TRUSTED_PROXY_IPS", "127.0.0.1").strip()
+
 _subprocess = subprocess
 _active_scan = {"process": None, "target": None, "status": "idle"}
 _ws_clients: set[WebSocket] = set()
@@ -892,6 +925,14 @@ def launch_dashboard(host: str = "127.0.0.1", port: int = 8765, open_browser: bo
         host=host,
         port=port,
         log_level="warning",
+        # See TRUST_PROXY_HEADERS above — off by default so request.client
+        # (and therefore RateGuard's per-IP key) can't be spoofed via
+        # X-Forwarded-For by anything that can merely reach the loopback
+        # interface. Set NEXUS_TRUST_PROXY_HEADERS=1 (and optionally
+        # NEXUS_TRUSTED_PROXY_IPS) only when a real reverse proxy fronts
+        # this server.
+        proxy_headers=TRUST_PROXY_HEADERS,
+        forwarded_allow_ips=TRUSTED_PROXY_IPS if TRUST_PROXY_HEADERS else [],
         # Cap a single incoming WebSocket frame at the transport layer too
         # (defense in depth alongside the MAX_WS_MESSAGE_BYTES check in the
         # handlers themselves) — uvicorn's default is 16 MiB, which combined

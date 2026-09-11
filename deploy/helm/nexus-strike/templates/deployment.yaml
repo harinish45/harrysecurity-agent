@@ -17,6 +17,7 @@ spec:
         app.kubernetes.io/name: {{ include "nexus-strike.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -25,6 +26,27 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if or .Values.secrets.existingSecret .Values.secrets.data }}
+          envFrom:
+            # Sanctioned path for LLM provider API keys (OPENAI_API_KEY,
+            # ANTHROPIC_API_KEY, GROQ_API_KEY, etc.) and NEXUS_MASTER_KEY --
+            # see values.yaml's `secrets` block and templates/secret.yaml.
+            - secretRef:
+                name: {{ include "nexus-strike.secretName" . }}
+          {{- end }}
+          env:
+            # nexus/foundation/secrets.py encrypts its vault key/store under
+            # NEXUS_VAULT_DIR (defaults to $HOME/.nexus). The runtime user's
+            # home directory is not the PVC mount and sits on the read-only
+            # root filesystem (readOnlyRootFilesystem: true above), so an
+            # unset NEXUS_VAULT_DIR crashes the first secret access with
+            # OSError: Read-only file system. Point it at the persistent,
+            # writable volume mounted below instead.
+            - name: NEXUS_VAULT_DIR
+              value: {{ .Values.persistence.mountPath | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8765
@@ -45,7 +67,27 @@ spec:
           volumeMounts:
             - name: nexus-state
               mountPath: {{ .Values.persistence.mountPath }}
+            - name: tmp
+              mountPath: /tmp
+            - name: reports
+              mountPath: /app/reports
+            - name: engagements
+              mountPath: /app/engagements
+            - name: logs
+              mountPath: /app/logs
       volumes:
         - name: nexus-state
           persistentVolumeClaim:
             claimName: {{ include "nexus-strike.fullname" . }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.emptyDirs.tmp.sizeLimit }}
+        - name: reports
+          emptyDir:
+            sizeLimit: {{ .Values.emptyDirs.reports.sizeLimit }}
+        - name: engagements
+          emptyDir:
+            sizeLimit: {{ .Values.emptyDirs.engagements.sizeLimit }}
+        - name: logs
+          emptyDir:
+            sizeLimit: {{ .Values.emptyDirs.logs.sizeLimit }}

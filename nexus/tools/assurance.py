@@ -6,11 +6,28 @@ policy. Those controls remain explicit control-plane decisions.
 """
 from __future__ import annotations
 
+import concurrent.futures
 from dataclasses import dataclass, field
 from statistics import median
 from typing import Iterable, Mapping, Sequence
 
 from nexus.tools.profile import ToolProfile
+
+# A tool that unconditionally raises (a stub, a broken import, a signature
+# that can't accept the framework's calling convention) must not be reported
+# "healthy" just because it's a Python callable — see audit() below. The
+# probe target is an inert, local-only value; it does not authorize or imply
+# a live engagement against any external host. Kept module-level (not a
+# fresh pool per audit() call, and never explicitly shut down) for the same
+# reason nexus.tools.executor keeps a shared pool: `future.result(timeout=…)`
+# lets audit() give up on a hung tool without blocking forever, but Python
+# has no safe way to kill a wedged thread — a tool that never returns leaks
+# one worker thread rather than stalling the whole audit.
+_PROBE_TARGET = "127.0.0.1"
+_PROBE_TIMEOUT_SECONDS = 5.0
+_PROBE_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="nexus-tool-assurance-probe"
+)
 
 
 @dataclass(frozen=True)
@@ -52,7 +69,7 @@ class ImprovementRecommendation:
     requires_approval: bool = True
 
 
-@dataclass
+@dataclass(frozen=True)
 class ToolAssurance:
     protected_fields: frozenset[str] = field(
         default_factory=lambda: frozenset(
@@ -70,6 +87,18 @@ class ToolAssurance:
             schema_ok = False
             if not callable_ok:
                 issues.append("registered object is not callable")
+            else:
+                # `callable(fn)` only proves `fn` is a Python callable — it says
+                # nothing about whether calling it actually works. Without this,
+                # a tool that unconditionally raises on every real call (a stub,
+                # a broken import, a signature that can't accept the framework's
+                # `target=`/`**kwargs` convention) is reported healthy purely
+                # because it exists, which is exactly the false-assurance signal
+                # this audit exists to catch. Probe it with a real, bounded call.
+                probe_issue = self._probe_invocation(fn)
+                if probe_issue is not None:
+                    callable_ok = False
+                    issues.append(probe_issue)
             if not profile_ok:
                 issues.append("missing execution profile")
             else:
@@ -80,6 +109,30 @@ class ToolAssurance:
                     issues.append(f"profile serialization failed: {type(exc).__name__}")
             checks.append(ToolCheck(name, callable_ok, profile_ok, schema_ok, tuple(issues)))
         return tuple(checks)
+
+    @staticmethod
+    def _probe_invocation(fn: object) -> str | None:
+        """Actually call `fn` with the framework's calling convention
+        (`target=<inert local probe>`) and report what went wrong, or None
+        if the call behaved like a registered NEXUS-STRIKE tool must:
+        returning (not raising) a dict-shaped result within a bounded time.
+
+        This deliberately does not inspect *what* the tool reported — a
+        tool returning `status: failed` for a bogus/unreachable target is
+        working correctly (see nexus.tools.executor's "truthful statuses"
+        contract). What it must never do is raise, hang, or hand back
+        something that isn't the agreed result shape.
+        """
+        future = _PROBE_POOL.submit(fn, target=_PROBE_TARGET)
+        try:
+            result = future.result(timeout=_PROBE_TIMEOUT_SECONDS)
+        except concurrent.futures.TimeoutError:
+            return f"tool invocation did not return within {_PROBE_TIMEOUT_SECONDS}s"
+        except Exception as exc:
+            return f"tool invocation raised {type(exc).__name__}: {exc}"
+        if not isinstance(result, dict):
+            return f"tool invocation returned {type(result).__name__}, not a dict"
+        return None
 
     def recommend(self, observations: Sequence[ToolObservation]) -> tuple[ImprovementRecommendation, ...]:
         grouped: dict[str, list[ToolObservation]] = {}

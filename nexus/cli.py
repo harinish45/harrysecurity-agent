@@ -726,7 +726,9 @@ def verify():
                 qual_name = f"{module_name.rsplit('.', 1)[0].split('.')[-1]}.{short_name}"
                 current_registered = set(tool_registry.list_tools().keys())
                 if qual_name not in current_registered:
-                    failures.append(f"{module_name}: not registered in tool_registry")
+                    skip_reason = tool_registry.skipped_tools().get(qual_name)
+                    detail = f": {skip_reason}" if skip_reason else " (reason unknown -- not in skipped_tools())"
+                    failures.append(f"{module_name}: not registered in tool_registry{detail}")
         except Exception as exc:
             failures.append(f"{module_name}: {type(exc).__name__}: {exc}")
 

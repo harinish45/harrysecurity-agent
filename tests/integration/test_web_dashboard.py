@@ -1081,3 +1081,93 @@ def test_viewer_role_cannot_run_an_agent(client, isolated_auth_vault):
         headers={"Authorization": f"Bearer {token}", "X-Requested-With": "NEXUS-Dashboard"},
     )
     assert response.status_code == 403
+
+
+# ── Mission-control API mounting ──────────────────────────────────────────
+# Regression coverage for the mission-control router actually being wired
+# into this app. web/mission_api.py defines a full APIRouter
+# (create/list/get/transition/replay missions under /api/missions) with its
+# own passing unit tests for the underlying Mission model
+# (tests/unit/test_mission.py), but web/server.py never called
+# `app.include_router(mission_router)` — every /api/missions/* request
+# 404'd from *this* app regardless of payload or auth, since FastAPI had no
+# route registered for that path at all. These tests exercise the mounted
+# router end-to-end through the real `client` fixture (i.e. through
+# `web.server.app`) so a future regression that drops the include_router
+# call again fails here with a 404, not just in mission_api's own
+# in-isolation unit tests.
+
+
+@pytest.fixture
+def isolated_mission_service(tmp_path, monkeypatch):
+    """Point the mission-control API at an isolated mission store so these
+    tests never read/write the real engagements/missions directory."""
+    import web.mission_api as mission_api
+    from nexus.mission import MissionService, MissionStore
+
+    service = MissionService(MissionStore(tmp_path))
+    monkeypatch.setattr(mission_api, "_service", service)
+    return service
+
+
+@pytest.fixture
+def mission_scope(monkeypatch):
+    """Satisfy ScopeGuard/LegalGuard for a 127.0.0.1 target the same way
+    test_dashboard_security.py's scan_start tests do."""
+    from nexus.foundation.config import config
+
+    monkeypatch.setattr(config, "nexus_allowed_targets", "127.0.0.1,localhost")
+    monkeypatch.setenv("NEXUS_LEGAL_ACK", "I_HAVE_WRITTEN_AUTHORIZATION")
+
+
+def test_mission_router_is_mounted_and_reachable(client, isolated_mission_service, mission_scope):
+    """POST/GET /api/missions must resolve to mission_api's handlers, not a
+    404 from an unmounted router."""
+    create_response = client.post(
+        "/api/missions",
+        json={"target": "127.0.0.1"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["target"] == "127.0.0.1"
+    assert created["status"] == "created"
+    mission_id = created["mission_id"]
+
+    list_response = client.get("/api/missions")
+    assert list_response.status_code == 200
+    listing = list_response.json()
+    assert listing["total"] == 1
+    assert listing["missions"][0]["mission_id"] == mission_id
+
+    get_response = client.get(f"/api/missions/{mission_id}")
+    assert get_response.status_code == 200
+    assert get_response.json()["mission"]["mission_id"] == mission_id
+
+
+def test_mission_router_requires_dashboard_token_when_configured(client, isolated_mission_service, mission_scope, monkeypatch):
+    """mission_api delegates its auth check to web.server's own
+    _require_token/_require_permission (same DASHBOARD_TOKEN constant and
+    per-user RBAC as every other /api/* route) instead of maintaining a
+    second, independent implementation — mounting the router must not
+    implicitly expose it to unauthenticated callers once an operator has
+    configured a dashboard token. DASHBOARD_TOKEN is a module constant read
+    once at import time, so it's set via monkeypatch.setattr on the module
+    (matching test_dashboard_security.py's pattern), not via setenv."""
+    import web.server as server
+
+    monkeypatch.setattr(server, "DASHBOARD_TOKEN", "secret-token")
+
+    unauthenticated = client.post(
+        "/api/missions",
+        json={"target": "127.0.0.1"},
+        headers={"X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert unauthenticated.status_code == 401
+
+    authenticated = client.post(
+        "/api/missions",
+        json={"target": "127.0.0.1"},
+        headers={"Authorization": "Bearer secret-token", "X-Requested-With": "NEXUS-Dashboard"},
+    )
+    assert authenticated.status_code == 200
