@@ -43,6 +43,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/usr/local/bin:$PATH"
 
+# The python:3.11-slim base image ships its own bootstrap pip/setuptools/
+# wheel (and pip's vendored jaraco.context) at whatever version was current
+# when that base image was built -- these stay present in the final image
+# (nexus.agents' InstallerAgent shells out to `pip install` at runtime to
+# fetch missing packages on demand, so pip can't simply be stripped out
+# entirely). Trivy's image scan caught two real HIGH-severity CVEs in the
+# base image's stock versions: wheel 0.45.1 (CVE-2026-24049, arbitrary
+# code execution via a malicious wheel file) and jaraco.context 5.3.0
+# (CVE-2026-23949, path traversal via a malicious tar archive) -- both
+# fixed by upgrading pip itself. Neither of these came from
+# requirements.lock.txt or pyproject.toml; they predate any dependency
+# this project declares.
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
