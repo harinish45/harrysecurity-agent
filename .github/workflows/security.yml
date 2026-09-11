@@ -60,6 +60,22 @@ jobs:
       - name: Build image
         run: docker build --tag nexus-strike:security .
 
+      # TEMPORARY debug step: Trivy keeps reporting msgpack==1.1.2 /
+      # setuptools==70.3.0 as installed even after the runtime stage's
+      # explicit `pip install --upgrade` (confirmed via this job's own
+      # build log to actually install msgpack-1.2.2/setuptools-84.0.0),
+      # and neither old version string appears anywhere else in this
+      # job's logs. Enumerating the real, running container's filesystem
+      # directly to get ground truth on whether a second, stale
+      # dist-info/egg-info actually exists on disk, or whether this is a
+      # Trivy-side detection quirk. Remove once resolved.
+      - name: DEBUG - inspect installed setuptools/msgpack in the built image
+        run: |
+          echo "--- pip list (authoritative installed versions) ---"
+          docker run --rm nexus-strike:security python -m pip list | grep -i "setuptools\|wheel\|msgpack\|pip "
+          echo "--- every setuptools/msgpack/wheel dist-info or egg-info dir anywhere in the image ---"
+          docker run --rm --entrypoint find nexus-strike:security / -iname "*setuptools*" -o -iname "*msgpack*" 2>/dev/null | grep -v "^/proc\|^/sys"
+
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
