@@ -630,6 +630,9 @@ def providers():
         "nvidia": "🟢 Free tier (NIM free credits)",
         "azure": "🔴 Paid only",
         "groq": "🟢 Free tier (30 req/min, no card needed)",
+        "gemini": "🟢 Free tier (Google AI Studio)",
+        "antigravity": "🟢 Free (Google Antigravity / local reasoning platform)",
+        "lmstudio": "🟢 Free (LM Studio local inference, unlimited)",
         "deepseek": "🟡 Very low cost (not free)",
         "omniroute": "🟢 Free tier (per dashboard quota)",
         "custom": "❓ Depends on your endpoint",
@@ -640,6 +643,9 @@ def providers():
         ("anthropic", "Anthropic Claude", config.anthropic_api_key is not None),
         ("openrouter", "OpenRouter", config.openrouter_api_key is not None),
         ("ollama", "Ollama (Local)", True),  # Always available
+        ("lmstudio", "LM Studio (Local)", True),  # Local available
+        ("antigravity", "Google Antigravity", getattr(config, "antigravity_api_key", None) is not None or getattr(config, "antigravity_base_url", None) is not None),
+        ("gemini", "Google Gemini", config.gemini_api_key is not None),
         ("nvidia", "NVIDIA NIM", config.nvidia_api_key is not None),
         ("azure", "Azure OpenAI", config.azure_openai_api_key is not None),
         ("groq", "Groq", config.groq_api_key is not None),

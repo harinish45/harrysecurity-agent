@@ -12,9 +12,12 @@ found, attempts a real canary-based injection probe using this codebase's
 own nexus.foundation.guardrails.injection_guard.InjectionGuard primitive.
 The local-model-file check is kept as a secondary/fallback path.
 """
+import functools
 import json
 import os
+import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from nexus.foundation.net import safe_urlopen
@@ -32,7 +35,31 @@ _CHAT_ENDPOINT_PATHS = [
 ]
 
 
+@functools.lru_cache(maxsize=128)
+def _is_host_reachable(target: str, default_port: int = 80, timeout: float = 0.5) -> bool:
+    host = target
+    port = default_port
+    if "://" in target:
+        parsed = urllib.parse.urlparse(target)
+        host = parsed.hostname or host
+        port = parsed.port or (443 if parsed.scheme == "https" else default_port)
+    elif ":" in target:
+        parts = target.split(":")
+        host = parts[0]
+        try:
+            port = int(parts[1])
+        except ValueError:
+            port = default_port
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def _probe_endpoint(target: str, path: str, timeout: int = 5) -> dict | None:
+    if not _is_host_reachable(target):
+        return None
     url = f"http://{target}{path}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT}, method="GET")

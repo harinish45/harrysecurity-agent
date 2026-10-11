@@ -76,6 +76,12 @@ class SubtaskExecutor:
         for attempt in range(1, self.max_attempts + 1):
             try:
                 agent = agent_cls()
+                if getattr(agent, "context", None) is None:
+                    from nexus.agents.base_agent import AgentContext
+                    agent_ctx = AgentContext(mission_id=task_def.get("mission_id", "mission"), target=target)
+                    if context:
+                        agent_ctx.shared_data = dict(context)
+                    agent.context = agent_ctx
                 kwargs: dict[str, Any] = {"target": target}
                 if context:
                     kwargs["context"] = context

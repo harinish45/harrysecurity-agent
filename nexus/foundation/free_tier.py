@@ -43,7 +43,7 @@ import os
 # Priority order: local-first, then the providers with the most generous
 # real free tiers, ending with the ones that are free-by-configuration but
 # unverified in this environment.
-FREE_TIER_PROVIDERS: list[str] = ["ollama", "groq", "nvidia", "openrouter", "omniroute"]
+FREE_TIER_PROVIDERS: list[str] = ["ollama", "antigravity", "lmstudio", "groq", "gemini", "nvidia", "openrouter", "omniroute"]
 
 PAID_PROVIDERS: list[str] = ["openai", "anthropic", "azure", "deepseek"]
 

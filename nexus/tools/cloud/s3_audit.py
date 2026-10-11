@@ -8,10 +8,9 @@ from __future__ import annotations
 from nexus.foundation.net import safe_urlopen
 
 import re
-import ssl
-import urllib.request
-import urllib.parse
 import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any
 
 from nexus.foundation.schema import (
@@ -114,10 +113,20 @@ def run(
     if bucket_names:
         buckets = [b.strip().lower() for b in bucket_names.split(",") if b.strip()]
     else:
-        base = target.lower().strip(".")
-        # Strip scheme and path if a URL was passed
-        base = re.sub(r"^https?://", "", base)
-        base = base.split("/")[0].split(":")[0]
+        raw_host = re.sub(r"^https?://", "", target.lower().strip(".")).split("/")[0].split(":")[0]
+        try:
+            import ipaddress
+            ipaddress.ip_address(raw_host)
+            return tool_result(
+                "cloud.s3_audit",
+                target,
+                status=STATUS_NO_FINDINGS,
+                summary=f"Target '{target}' is an IP address. AWS S3 bucket names cannot be formatted as IP addresses per AWS rules. Specify explicit 'bucket_names' to audit.",
+            )
+        except ValueError:
+            pass
+
+        base = raw_host
         # Extract the registrable part (e.g. example.com → example)
         if "." in base:
             parts = base.split(".")

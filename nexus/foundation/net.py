@@ -28,7 +28,10 @@ outside it, same as it would block that host as an initial target).
 """
 from __future__ import annotations
 
+import socket
 import ssl
+import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -86,6 +89,18 @@ def safe_urlopen(
 ):
     url = url_or_request.full_url if isinstance(url_or_request, urllib.request.Request) else url_or_request
     _check_scheme(url)
+
+    # For loopback destinations, fail-fast if no local service is listening on the port
+    # instead of blocking for the full OS TCP handshake timeout on dead loopback ports.
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname or ""
+    if host in ("127.0.0.1", "localhost", "::1"):
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            with socket.create_connection((host, port), timeout=0.25):
+                pass
+        except OSError as exc:
+            raise urllib.error.URLError(f"Connection refused to loopback {host}:{port}: {exc}") from exc
 
     handlers: list[urllib.request.BaseHandler] = [_ScopeCheckedRedirectHandler()]
     if context is not None:

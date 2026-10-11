@@ -26,7 +26,7 @@ from nexus.foundation.schema import (
 )
 from nexus.tools.registry import tool_registry
 
-_CONNECT_TIMEOUT = 3
+_CONNECT_TIMEOUT = 1.0
 
 # port -> (service label, MITRE technique most associated with lateral
 # movement over that service)

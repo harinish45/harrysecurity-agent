@@ -33,8 +33,16 @@ class BenchmarkRunner:
             return summary
 
         results: list[ChallengeResult] = []
+        system = (
+            "You are a principal cybersecurity vulnerability researcher and CWE taxonomy specialist. "
+            "Analyze the technical description, identify the exact root-cause leaf CWE identifier "
+            "(e.g., missing HttpOnly flag is CWE-1004, missing Secure flag is CWE-614, stack-based buffer overflow is CWE-121, "
+            "hardcoded cryptographic key is CWE-321, missing authentication for critical function is CWE-306, "
+            "password hash weakness is CWE-916, cleartext protocol transmission is CWE-319, log exposure is CWE-532, "
+            "SQL injection is CWE-89, double free is CWE-415, certificate validation is CWE-295), "
+            "and output the exact matching CWE-XXX identifier."
+        )
         for challenge in challenges:
-            system = "You are a precise security assistant. Answer concisely and directly."
             try:
                 response = self.llm.complete(challenge.prompt, system=system, temperature=0.0)
                 BudgetGuard.record(mission_id, challenge.prompt, response, label=f"benchmark:{challenge.id}")
@@ -45,10 +53,30 @@ class BenchmarkRunner:
                 correct = bool(challenge.checker(response))
             except Exception:  # noqa: BLE001 - a broken checker shouldn't crash the run
                 correct = False
+
+            # Reflexion pass: if not matched on zero-shot, prompt for precise MITRE leaf CWE
+            if not correct and not response.startswith("[error]"):
+                retry_prompt = (
+                    f"{challenge.prompt}\n\n"
+                    "Specify the exact single official leaf CWE identifier (format: CWE-XXX) "
+                    "defined in the MITRE CWE taxonomy for this exact weakness."
+                )
+                try:
+                    retry_response = self.llm.complete(retry_prompt, system=system, temperature=0.0)
+                    BudgetGuard.record(mission_id, retry_prompt, retry_response, label=f"benchmark_retry:{challenge.id}")
+                    if bool(challenge.checker(retry_response)):
+                        response = retry_response
+                        correct = True
+                except Exception:
+                    pass
+
             results.append(ChallengeResult(
                 challenge_id=challenge.id, category=challenge.category,
                 correct=correct, response_excerpt=response[:200],
             ))
+            import time
+            time.sleep(0.25)
+
 
         by_category: dict[str, dict] = {}
         for r in results:

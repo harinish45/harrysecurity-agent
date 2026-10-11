@@ -46,6 +46,18 @@ try:
         omniroute_model: str = "gpt-4"
         omniroute_base_url: Optional[str] = None
 
+        gemini_api_key: Optional[str] = None
+        gemini_model: str = "gemini-2.5-flash"
+        gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+        antigravity_api_key: Optional[str] = None
+        antigravity_model: str = "gemini-2.5-pro"
+        antigravity_base_url: str = "http://127.0.0.1:20128/v1"
+
+        lmstudio_api_key: Optional[str] = None
+        lmstudio_model: str = "qwen2.5-coder"
+        lmstudio_base_url: str = "http://localhost:1234/v1"
+
         custom_api_key: Optional[str] = None
         custom_model: str = "custom-model"
         custom_base_url: Optional[str] = None
@@ -128,6 +140,15 @@ except ImportError:
             self.omniroute_api_key = os.getenv("OMNIROUTE_API_KEY")
             self.omniroute_model = os.getenv("OMNIROUTE_MODEL", "gpt-4")
             self.omniroute_base_url = os.getenv("OMNIROUTE_BASE_URL")
+            self.gemini_api_key = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY"))
+            self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            self.gemini_base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+            self.antigravity_api_key = os.getenv("ANTIGRAVITY_API_KEY", "antigravity")
+            self.antigravity_model = os.getenv("ANTIGRAVITY_MODEL", "gemini-2.5-pro")
+            self.antigravity_base_url = os.getenv("ANTIGRAVITY_BASE_URL", "http://127.0.0.1:20128/v1")
+            self.lmstudio_api_key = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
+            self.lmstudio_model = os.getenv("LMSTUDIO_MODEL", "qwen2.5-coder")
+            self.lmstudio_base_url = os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
             self.custom_api_key = os.getenv("CUSTOM_API_KEY")
             self.custom_model = os.getenv("CUSTOM_MODEL", "custom-model")
             self.custom_base_url = os.getenv("CUSTOM_BASE_URL")

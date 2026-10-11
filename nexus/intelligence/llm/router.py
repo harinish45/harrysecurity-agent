@@ -76,6 +76,24 @@ class LLMRouter:
             "base_url_key": "omniroute_base_url",
             "api_type": "openai",
         },
+        "gemini": {
+            "env_key": "gemini_api_key",
+            "default_model": "gemini-2.5-flash",
+            "base_url_key": "gemini_base_url",
+            "api_type": "openai",
+        },
+        "antigravity": {
+            "env_key": "antigravity_api_key",
+            "default_model": "gemini-2.5-pro",
+            "base_url_key": "antigravity_base_url",
+            "api_type": "openai",
+        },
+        "lmstudio": {
+            "env_key": "lmstudio_api_key",
+            "default_model": "qwen2.5-coder",
+            "base_url_key": "lmstudio_base_url",
+            "api_type": "openai",
+        },
         "custom": {
             "env_key": "custom_api_key",
             "default_model": "custom-model",
@@ -171,12 +189,22 @@ class LLMRouter:
                 model=getattr(config, f"{self.provider}_model", cfg["default_model"]),
             )
         else:
-            # OpenAI-compatible (OpenAI, OpenRouter, Ollama, Groq, DeepSeek, Omniroute, Custom)
-            base_url = getattr(config, cfg["base_url_key"]) if cfg["base_url_key"] else None
+            # OpenAI-compatible (OpenAI, OpenRouter, Ollama, Groq, DeepSeek, Omniroute, Gemini, Antigravity, LMStudio, Custom)
+            base_url = getattr(config, cfg["base_url_key"]) if cfg.get("base_url_key") else None
+            api_key = getattr(config, cfg["env_key"]) if cfg.get("env_key") else None
+            if not api_key:
+                if self.provider == "antigravity":
+                    api_key = "antigravity"
+                elif self.provider == "lmstudio":
+                    api_key = "lm-studio"
+                elif self.provider == "ollama":
+                    api_key = "ollama"
+                else:
+                    api_key = "nexus"
             self._client = OpenAICompatibleProvider(
-                api_key=getattr(config, cfg["env_key"]) if cfg["env_key"] else "ollama",
+                api_key=api_key,
                 base_url=base_url,
-                model=getattr(config, f"{self.provider}_model", cfg["default_model"]),
+                model=getattr(config, f"{self.provider}_model", cfg.get("default_model", "gpt-4")),
             )
         return self._client
 
@@ -246,6 +274,12 @@ class OpenAICompatibleProvider:
             kwargs = {"api_key": self.api_key}
             if self.base_url:
                 kwargs["base_url"] = self.base_url
+            timeout_env = os.getenv("LLM_TIMEOUT")
+            if timeout_env:
+                try:
+                    kwargs["timeout"] = float(timeout_env)
+                except ValueError:
+                    pass
             self._client = OpenAI(**kwargs)
         except ImportError:
             self._client = None
@@ -261,17 +295,48 @@ class OpenAICompatibleProvider:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        try:
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=kwargs.get("temperature", config.llm_temperature),
-                max_tokens=kwargs.get("max_tokens", config.llm_max_tokens),
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"OpenAI-compatible API error: {e}")
-            return f"[ERROR] {e}"
+        import time
+        import re
+
+        retries = 4
+        for attempt in range(retries):
+            try:
+                response = client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=kwargs.get("temperature", config.llm_temperature),
+                    max_tokens=kwargs.get("max_tokens", config.llm_max_tokens),
+                )
+                msg = response.choices[0].message
+                content = msg.content or ""
+                # Some reasoning models put final answer or thinking tokens in reasoning if content is empty
+                if not content.strip() and hasattr(msg, "reasoning") and msg.reasoning:
+                    content = msg.reasoning
+                return content
+            except Exception as e:
+                err_str = str(e)
+                if (
+                    "429" in err_str
+                    or "rate limit" in err_str.lower()
+                    or "503" in err_str
+                    or "overloaded" in err_str.lower()
+                    or "busy" in err_str.lower()
+                ) and attempt < retries - 1:
+                    wait_sec = 2.0 * (attempt + 1)
+                    match = re.search(r"try again in (\d+(?:\.\d+)?)s", err_str, re.IGNORECASE)
+                    if match:
+                        try:
+                            wait_sec = min(float(match.group(1)) + 0.5, 30.0)
+                        except (ValueError, TypeError):
+                            pass
+                    logger.warning(
+                        f"Rate limited or server busy by {self.model}; backing off for {wait_sec:.1f}s (attempt {attempt + 1}/{retries})"
+                    )
+                    time.sleep(wait_sec)
+                    continue
+                logger.error(f"OpenAI-compatible API error: {e}")
+                return f"[ERROR] {e}"
+        return "[ERROR] Rate limit exceeded after retries"
 
     def stream(self, prompt: str, system: str = None, **kwargs):
         client = self._get_client()

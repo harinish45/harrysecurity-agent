@@ -38,8 +38,19 @@ def run(target: str, **kwargs: Any) -> dict:
             params = {"url": "http://example.com", "redirect": "http://example.com", "path": "/"}
             
         ctx = get_ssl_context(target, allow_insecure=True)
-        
-        for param in list(params.keys())[:3]:
+
+        # Pre-flight check: verify host is reachable before testing SSRF payloads
+        try:
+            init_req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "NEXUS-STRIKE/0.2.0 (SSRF Detector)"},
+                method="GET"
+            )
+            safe_urlopen(init_req, timeout=3, context=ctx)
+        except urllib.error.HTTPError:
+            pass  # HTTP error (e.g. 403, 404, 500) means server is alive
+        except Exception as e:
+            return tool_result("webapp.ssrf", target, status=STATUS_FAILED, findings=[], error=f"Target unreachable: {e}")
             for payload in SSRF_PAYLOADS:
                 test_url = _inject_url(url, param, payload)
                 try:

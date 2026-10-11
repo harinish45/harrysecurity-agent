@@ -122,6 +122,21 @@ def run(
     vuln_indicators: list[dict] = []
 
     url = target if "://" in target else f"http://{target}"
+
+    # Pre-flight check: verify host is reachable before sending injection payloads
+    init_resp = _http_request(url, timeout=min(timeout, 3))
+    if init_resp["status"] == 0:
+        findings.append(Finding(
+            title="Target unreachable",
+            severity="info",
+            confidence="certain",
+            affected_asset=url,
+            evidence=f"Failed to connect: {init_resp.get('error', 'unknown error')}",
+            remediation="Verify target is up and accessible.",
+            tool="webapp.sqli",
+        ))
+        return tool_result("webapp.sqli", target, status=STATUS_FAILED, findings=findings, error=init_resp.get("error"))
+
     parsed = urllib.parse.urlparse(url)
     params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
     params = {k: v[0] if v else "" for k, v in params.items()}

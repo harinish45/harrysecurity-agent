@@ -9,10 +9,9 @@ from nexus.foundation.net import safe_urlopen
 
 import re
 import socket
-import ssl
-import urllib.request
 import urllib.parse
-from typing import Any, Optional
+import urllib.request
+from typing import Any
 
 from nexus.foundation.schema import (
     Finding,
@@ -162,6 +161,25 @@ def run(
     findings: list[Finding] = []
     tested_points: list[str] = []
     vulns: list[dict] = []
+
+    # Pre-flight TCP reachability check to fail fast on dead/unreachable targets
+    _p = urllib.parse.urlparse(url)
+    _host = _p.hostname or target
+    _port = _p.port or (443 if _p.scheme == "https" else 80)
+    try:
+        with socket.create_connection((_host, _port), timeout=1.0):
+            pass
+    except OSError as e:
+        findings.append(Finding(
+            title="Target unreachable",
+            severity="low",
+            confidence="certain",
+            affected_asset=url,
+            evidence=str(e),
+            remediation="Verify target URL is accessible.",
+            tool="webapp.xss",
+        ))
+        return tool_result("webapp.xss", target, status=STATUS_FAILED, findings=findings, error=str(e))
 
     # Get initial response
     resp = _http_request(url, timeout)
