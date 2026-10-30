@@ -71,7 +71,7 @@ cssselect2==0.10.1
     # via
     #   svglib
     #   weasyprint
-dnspython==2.9.1
+dnspython==2.9.1 ; python_version >= '3.11'
     # via nexus-strike (pyproject.toml)
 docker==7.2.0
     # via nexus-strike (pyproject.toml)
@@ -186,7 +186,7 @@ packaging==26.3
     #   svglib
     #   weasyprint
     #   xhtml2pdf
-pillow==13.0.0
+pillow==13.0.0 ; python_version >= '3.11'
     # via
     #   reportlab
     #   svglib
