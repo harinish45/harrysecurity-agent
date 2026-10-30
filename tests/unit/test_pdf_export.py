@@ -14,14 +14,14 @@ from nexus.reporting.exporters.pdf_export import PdfExport
 
 def _has_pdf_backend() -> bool:
     try:
-        import weasyprint  # noqa
+        from weasyprint import HTML  # noqa
         return True
-    except ImportError:
+    except (ImportError, OSError, Exception):
         pass
     try:
-        import xhtml2pdf  # noqa
+        from xhtml2pdf import pisa  # noqa
         return True
-    except ImportError:
+    except (ImportError, OSError, Exception):
         pass
     return False
 
