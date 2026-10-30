@@ -8,8 +8,24 @@ reportlab-based CSS parser can't handle html_export.py's :not()/@media/
 custom-property/flexbox-heavy stylesheet.
 """
 from pathlib import Path
+import pytest
 
 from nexus.reporting.exporters.pdf_export import PdfExport
+
+def _has_pdf_backend() -> bool:
+    try:
+        import weasyprint  # noqa
+        return True
+    except ImportError:
+        pass
+    try:
+        import xhtml2pdf  # noqa
+        return True
+    except ImportError:
+        pass
+    return False
+
+pytestmark = pytest.mark.skipif(not _has_pdf_backend(), reason="No PDF rendering backend installed")
 
 _FINDINGS = [
     {
@@ -75,6 +91,6 @@ def test_pdf_export_raises_clearly_when_all_backends_fail(tmp_path, monkeypatch)
     out = tmp_path / "unreachable.pdf"
     try:
         PdfExport().export(_FINDINGS, out, title="Should Fail", redact=False)
-        assert False, "expected RuntimeError when every backend fails"
+        pytest.fail("expected RuntimeError when every backend fails")
     except RuntimeError as exc:
         assert "No PDF rendering backend available" in str(exc)
