@@ -432,7 +432,7 @@ websockets==17.1 ; python_full_version >= '3.11'
     #   uvicorn
 xhtml2pdf==0.2.18
     # via nexus-strike (pyproject.toml)
-yarl==1.24.5
+yarl==1.25.1
     # via aiohttp
 zopfli==0.4.3
     # via fonttools
