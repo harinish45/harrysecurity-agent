@@ -4,6 +4,7 @@ from nexus.tools.registry import tool_registry
 def run(target: str, **kwargs) -> dict:
     return {
         "tool": "container.k8s_audit",
+        "target": target,
         "status": "completed",
         "findings": [{
             "title": "Kubernetes Cluster Audit Completed",

@@ -4,6 +4,7 @@ from nexus.tools.registry import tool_registry
 def run(target: str, **kwargs) -> dict:
     return {
         "tool": "blockchain.wallet_scrape",
+        "target": target,
         "status": "completed",
         "findings": [{
             "title": "Blockchain Wallet Security Audit",

@@ -4,6 +4,7 @@ from nexus.tools.registry import tool_registry
 def run(target: str, **kwargs) -> dict:
     return {
         "tool": "ai_ml.prompt_injection",
+        "target": target,
         "status": "completed",
         "findings": [{
             "title": "LLM Prompt Injection Audit",

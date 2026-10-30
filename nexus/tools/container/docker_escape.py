@@ -4,6 +4,7 @@ from nexus.tools.registry import tool_registry
 def run(target: str, **kwargs) -> dict:
     return {
         "tool": "container.docker_escape",
+        "target": target,
         "status": "completed",
         "findings": [{
             "title": "Docker Container Environment Audited",

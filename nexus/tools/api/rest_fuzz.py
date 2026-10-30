@@ -4,6 +4,7 @@ from nexus.tools.registry import tool_registry
 def run(target: str, **kwargs) -> dict:
     return {
         "tool": "api.rest_fuzz",
+        "target": target,
         "status": "completed",
         "findings": [{
             "title": "REST API Fuzzing Completed",

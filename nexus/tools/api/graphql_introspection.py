@@ -4,6 +4,7 @@ from nexus.tools.registry import tool_registry
 def run(target: str, **kwargs) -> dict:
     return {
         "tool": "api.graphql_introspection",
+        "target": target,
         "status": "completed",
         "findings": [{
             "title": "GraphQL Introspection Audit",

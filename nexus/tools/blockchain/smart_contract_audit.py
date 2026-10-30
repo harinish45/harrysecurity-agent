@@ -4,6 +4,7 @@ from nexus.tools.registry import tool_registry
 def run(target: str, **kwargs) -> dict:
     return {
         "tool": "blockchain.smart_contract_audit",
+        "target": target,
         "status": "completed",
         "findings": [{
             "title": "Smart Contract Static Audit",

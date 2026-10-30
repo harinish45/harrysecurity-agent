@@ -4,6 +4,7 @@ from nexus.tools.registry import tool_registry
 def run(target: str, **kwargs) -> dict:
     return {
         "tool": "physical.rfid_clone",
+        "target": target,
         "status": "completed",
         "findings": [{
             "title": "RFID Security Audit",
