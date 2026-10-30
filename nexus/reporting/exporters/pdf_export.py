@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from nexus.foundation.schema import normalize_findings
 from nexus.reporting.exporters.html_export import HtmlExport
 
 
@@ -210,6 +209,8 @@ class PdfExport:
             safe_html = re.sub(r"</details>", "</div>", safe_html, flags=re.IGNORECASE)
             safe_html = re.sub(r"<summary\b[^>]*>", '<div class="chain-summary">', safe_html, flags=re.IGNORECASE)
             safe_html = re.sub(r"</summary>", "</div>", safe_html, flags=re.IGNORECASE)
+            safe_html = re.sub(r'var\(--[^)]+\)', '#555', safe_html)
+            safe_html = safe_html.replace('\u2192', '->')
 
             with open(output, "wb") as f:
                 result = pisa.CreatePDF(safe_html, dest=f)

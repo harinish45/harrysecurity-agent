@@ -87,7 +87,7 @@ COPY requirements.txt ./
 # latest" version of any of these again. nexus.agents' InstallerAgent
 # shells out to `pip install` at runtime to fetch missing packages on
 # demand, so pip itself can't simply be stripped out of the image either.
-RUN pip install --no-cache-dir --upgrade "pip" "setuptools>=78.1.1" "wheel>=0.46.2" "msgpack>=1.2.1"
+RUN pip install --no-cache-dir --upgrade "pip" "setuptools>=78.1.1" "wheel>=0.46.2" "msgpack>=1.2.1" "urllib3>=2.8.0"
 
 # ensurepip ships bundled .whl archives (pip-24.0, setuptools-79.0.1 as of
 # this base image) purely for bootstrapping a NEW venv offline -- this

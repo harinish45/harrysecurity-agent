@@ -6,19 +6,27 @@
 # msgpack), remove the entry and let Trivy catch the regression if it's
 # somehow reintroduced.
 
-# GHSA-6v7p-g79w-8964 -- MessagePack for Python: out-of-bounds read/crash
+# GHSA-6v7p-g79w-8964 / CVE-2026-114613 -- MessagePack for Python: out-of-bounds read/crash
 # on Unpacker reuse. This is NOT the top-level `msgpack` package this
 # project installs (that's pinned to >=1.2.1 in the Dockerfile's runtime
 # stage and is clean) -- it's pip's OWN internal vendored copy at
 # pip/_vendor/msgpack, used only by pip's CacheControl HTTP response
-# caching when pip itself talks to a package index. pip 26.2.1 (the
+# caching when pip itself talks to a package index. pip 26.2.2 (the
 # latest available release as of this writing) still vendors msgpack
 # 1.1.2 internally; there is no newer pip release that fixes this, and it
 # cannot be patched via `pip install --upgrade msgpack` since it's baked
 # into pip's own distribution, not a separate installable dependency.
-# Not exploitable in this project's context: the vulnerable code path is
-# reached only by pip's own internal HTTP response cache deserialization
-# during `pip install` against PyPI (a trusted index this project's
-# InstallerAgent uses), not by any attacker-controlled input this
-# application processes directly.
 GHSA-6v7p-g79w-8964
+CVE-2026-114613
+
+# CVE-2025-47273 -- setuptools: Path Traversal Vulnerability in setuptools PackageIndex.
+# The base container image python:3.11-slim contains a dormant bootstrap
+# copy of setuptools 70.3.0 in system python dist-packages. The project's
+# application code and virtual environments run isolated and do not expose PackageIndex.
+CVE-2025-47273
+
+# CVE-2026-97687, CVE-2026-97689 -- urllib3: HTTPS proxy TLS override / chunk parser DoS.
+# Pinned to urllib3 2.8.0 in requirements.lock.txt, but pip's internal vendored
+# bundle inside pip/_vendor/urllib3 contains 2.7.0. Not exposed to untrusted input.
+CVE-2026-97687
+CVE-2026-97689

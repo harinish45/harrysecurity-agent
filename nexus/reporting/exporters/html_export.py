@@ -220,7 +220,7 @@ class HtmlExport:
 
     def _build_rows(self, findings: list[dict]) -> str:
         if not findings:
-            return '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-dim)">No findings recorded.</td></tr>'
+            return '<tr><td colspan="6" class="subtitle" style="text-align:center;padding:2rem">No findings recorded.</td></tr>'
         rows = []
         for f in findings:
             sev = f.get("severity", "info")
@@ -241,7 +241,7 @@ class HtmlExport:
                 f'<td><strong>{escape(f.get("id", ""))}</strong></td>'
                 f'<td class="sev-{sev}"><span class="tag tag-{sev}">{sev.upper()}</span></td>'
                 f'<td>{verification_badge}{escape(f.get("title", ""))}<br>'
-                f'<small style="color:var(--text-dim)">{escape(f.get("tool", ""))}</small>'
+                f'<small class="subtitle">{escape(f.get("tool", ""))}</small>'
                 f'{" " + mitre_chips if mitre_chips else ""}{impact_html}</td>'
                 f'<td>{escape(f.get("affected_asset", ""))}</td>'
                 f'<td><div class="evidence">{escape(f.get("evidence", ""))}</div></td>'
