@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NEXUS-STRIKE — webapp.ssrf
+NEXUS-STRIKE - webapp.ssrf
 Domain: webapp
 Real Server-Side Request Forgery (SSRF) detector.
 """
@@ -51,6 +51,8 @@ def run(target: str, **kwargs: Any) -> dict:
             pass  # HTTP error (e.g. 403, 404, 500) means server is alive
         except Exception as e:
             return tool_result("webapp.ssrf", target, status=STATUS_FAILED, findings=[], error=f"Target unreachable: {e}")
+
+        for param in params:
             for payload in SSRF_PAYLOADS:
                 test_url = _inject_url(url, param, payload)
                 try:
