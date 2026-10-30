@@ -265,7 +265,7 @@ pyjwt==2.13.0
     # via mcp
 pyotp==2.10.0
     # via nexus-strike (pyproject.toml)
-pypdf==6.18.1
+pypdf==6.21.2
     # via
     #   nexus-strike (pyproject.toml)
     #   xhtml2pdf
